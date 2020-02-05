@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2008-2018, Hazelcast, Inc. All Rights Reserved.
+ * Copyright (c) 2008-2020, Hazelcast, Inc. All Rights Reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -16,13 +16,20 @@
 
 package com.hazelcast.internal.metrics.metricsets;
 
-import com.hazelcast.internal.metrics.LongProbeFunction;
+import com.hazelcast.internal.metrics.MetricDescriptor;
 import com.hazelcast.internal.metrics.MetricsRegistry;
 
 import java.io.File;
 
+import static com.hazelcast.internal.metrics.MetricDescriptorConstants.FILE_DISCRIMINATOR_DIR;
+import static com.hazelcast.internal.metrics.MetricDescriptorConstants.FILE_DISCRIMINATOR_VALUE_DIR;
+import static com.hazelcast.internal.metrics.MetricDescriptorConstants.FILE_METRIC_FREESPACE;
+import static com.hazelcast.internal.metrics.MetricDescriptorConstants.FILE_METRIC_TOTALSPACE;
+import static com.hazelcast.internal.metrics.MetricDescriptorConstants.FILE_METRIC_USABLESPACE;
+import static com.hazelcast.internal.metrics.MetricDescriptorConstants.FILE_PREFIX;
 import static com.hazelcast.internal.metrics.ProbeLevel.MANDATORY;
-import static com.hazelcast.util.Preconditions.checkNotNull;
+import static com.hazelcast.internal.metrics.ProbeUnit.BYTES;
+import static com.hazelcast.internal.util.Preconditions.checkNotNull;
 
 /**
  * A MetricSet for files. Currently only displays space statistics for the partition of the user.home
@@ -41,32 +48,12 @@ public final class FileMetricSet {
         checkNotNull(metricsRegistry, "metricsRegistry");
 
         File file = new File(System.getProperty("user.home"));
-
-        metricsRegistry.register(file, "file.partition[user.home].freeSpace", MANDATORY,
-                new LongProbeFunction<File>() {
-                    @Override
-                    public long get(File file) {
-                        return file.getFreeSpace();
-                    }
-                }
-        );
-
-        metricsRegistry.register(file, "file.partition[user.home].totalSpace", MANDATORY,
-                new LongProbeFunction<File>() {
-                    @Override
-                    public long get(File file) {
-                        return file.getTotalSpace();
-                    }
-                }
-        );
-
-        metricsRegistry.register(file, "file.partition[user.home].usableSpace", MANDATORY,
-                new LongProbeFunction<File>() {
-                    @Override
-                    public long get(File file) {
-                        return file.getUsableSpace();
-                    }
-                }
-        );
+        MetricDescriptor descriptor = metricsRegistry
+                .newMetricDescriptor()
+                .withPrefix(FILE_PREFIX)
+                .withDiscriminator(FILE_DISCRIMINATOR_DIR, FILE_DISCRIMINATOR_VALUE_DIR);
+        metricsRegistry.registerStaticProbe(file, descriptor, FILE_METRIC_FREESPACE, MANDATORY, BYTES, File::getFreeSpace);
+        metricsRegistry.registerStaticProbe(file, descriptor, FILE_METRIC_TOTALSPACE, MANDATORY, BYTES, File::getTotalSpace);
+        metricsRegistry.registerStaticProbe(file, descriptor, FILE_METRIC_USABLESPACE, MANDATORY, BYTES, File::getUsableSpace);
     }
 }

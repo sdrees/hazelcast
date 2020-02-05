@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2008-2018, Hazelcast, Inc. All Rights Reserved.
+ * Copyright (c) 2008-2020, Hazelcast, Inc. All Rights Reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -16,23 +16,23 @@
 
 package com.hazelcast.map.impl.tx;
 
-import com.hazelcast.core.TransactionalMap;
+import com.hazelcast.transaction.TransactionalMap;
 import com.hazelcast.map.impl.MapService;
-import com.hazelcast.map.impl.query.MapQueryEngine;
 import com.hazelcast.map.impl.query.Query;
+import com.hazelcast.map.impl.query.QueryEngine;
 import com.hazelcast.map.impl.query.QueryResult;
 import com.hazelcast.map.impl.query.QueryResultUtils;
 import com.hazelcast.map.impl.query.Target;
 import com.hazelcast.map.impl.tx.TxnValueWrapper.Type;
-import com.hazelcast.nio.serialization.Data;
+import com.hazelcast.internal.serialization.Data;
 import com.hazelcast.query.PagingPredicate;
 import com.hazelcast.query.Predicate;
-import com.hazelcast.query.TruePredicate;
+import com.hazelcast.query.Predicates;
 import com.hazelcast.query.impl.CachedQueryEntry;
 import com.hazelcast.query.impl.getters.Extractors;
-import com.hazelcast.spi.NodeEngine;
+import com.hazelcast.spi.impl.NodeEngine;
 import com.hazelcast.transaction.impl.Transaction;
-import com.hazelcast.util.IterationType;
+import com.hazelcast.internal.util.IterationType;
 
 import java.util.ArrayList;
 import java.util.Collection;
@@ -43,16 +43,16 @@ import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.TimeUnit;
 
-import static com.hazelcast.util.Preconditions.checkNotInstanceOf;
-import static com.hazelcast.util.Preconditions.checkNotNull;
+import static com.hazelcast.internal.util.Preconditions.checkNotInstanceOf;
+import static com.hazelcast.internal.util.Preconditions.checkNotNull;
 import static java.util.concurrent.TimeUnit.MILLISECONDS;
 
 /**
- * Proxy implementation of {@link com.hazelcast.core.TransactionalMap} interface.
+ * Proxy implementation of {@link TransactionalMap} interface.
  */
 public class TransactionalMapProxy extends TransactionalMapProxySupport implements TransactionalMap {
 
-    private final Map<Data, TxnValueWrapper> txMap = new HashMap<Data, TxnValueWrapper>();
+    private final Map<Data, TxnValueWrapper> txMap = new HashMap<>();
 
     public TransactionalMapProxy(String name, MapService mapService, NodeEngine nodeEngine, Transaction transaction) {
         super(name, mapService, nodeEngine, transaction);
@@ -60,6 +60,10 @@ public class TransactionalMapProxy extends TransactionalMapProxySupport implemen
 
     @Override
     public boolean containsKey(Object key) {
+        return containsKey(key, false);
+    }
+
+    public boolean containsKey(Object key, boolean skipNearCacheLookup) {
         checkTransactionState();
         checkNotNull(key, "key can't be null");
 
@@ -68,7 +72,7 @@ public class TransactionalMapProxy extends TransactionalMapProxySupport implemen
         if (valueWrapper != null) {
             return (valueWrapper.type != Type.REMOVED);
         }
-        return containsKeyInternal(keyData, key);
+        return containsKeyInternal(keyData, key, skipNearCacheLookup);
     }
 
     @Override
@@ -97,17 +101,20 @@ public class TransactionalMapProxy extends TransactionalMapProxySupport implemen
 
     @Override
     public Object get(Object key) {
+        return get(key, false);
+    }
+
+    public Object get(Object key, boolean skipNearCacheLookup) {
         checkTransactionState();
         checkNotNull(key, "key can't be null");
 
         Object nearCacheKey = toNearCacheKeyWithStrategy(key);
         Data keyData = mapServiceContext.toData(nearCacheKey, partitionStrategy);
-
         TxnValueWrapper currentValue = txMap.get(keyData);
         if (currentValue != null) {
             return checkIfRemoved(currentValue);
         }
-        return toObjectIfNeeded(getInternal(nearCacheKey, keyData));
+        return toObjectIfNeeded(getInternal(nearCacheKey, keyData, skipNearCacheLookup));
     }
 
     @Override
@@ -340,7 +347,7 @@ public class TransactionalMapProxy extends TransactionalMapProxySupport implemen
     @Override
     @SuppressWarnings("unchecked")
     public Set<Object> keySet() {
-        return keySet(TruePredicate.INSTANCE);
+        return keySet(Predicates.alwaysTrue());
     }
 
     @Override
@@ -350,7 +357,7 @@ public class TransactionalMapProxy extends TransactionalMapProxySupport implemen
         checkNotNull(predicate, "Predicate should not be null!");
         checkNotInstanceOf(PagingPredicate.class, predicate, "Paging is not supported for Transactional queries!");
 
-        MapQueryEngine queryEngine = mapServiceContext.getMapQueryEngine(name);
+        QueryEngine queryEngine = mapServiceContext.getQueryEngine(name);
 
         Query query = Query.of().mapName(name).predicate(predicate).iterationType(IterationType.KEY).build();
         QueryResult queryResult = queryEngine.execute(query, Target.ALL_NODES);
@@ -367,7 +374,7 @@ public class TransactionalMapProxy extends TransactionalMapProxySupport implemen
             } else {
                 Data keyData = entry.getKey();
 
-                if (predicate == TruePredicate.INSTANCE) {
+                if (predicate == Predicates.alwaysTrue()) {
                     returningKeySet.add(toObjectIfNeeded(keyData));
                 } else {
                     cachedQueryEntry.init(ss, keyData, entry.getValue().value, extractors);
@@ -384,7 +391,7 @@ public class TransactionalMapProxy extends TransactionalMapProxySupport implemen
     @Override
     @SuppressWarnings("unchecked")
     public Collection<Object> values() {
-        return values(TruePredicate.INSTANCE);
+        return values(Predicates.alwaysTrue());
     }
 
     @Override
@@ -394,7 +401,7 @@ public class TransactionalMapProxy extends TransactionalMapProxySupport implemen
         checkNotNull(predicate, "Predicate can not be null!");
         checkNotInstanceOf(PagingPredicate.class, predicate, "Paging is not supported for Transactional queries");
 
-        MapQueryEngine queryEngine = mapServiceContext.getMapQueryEngine(name);
+        QueryEngine queryEngine = mapServiceContext.getQueryEngine(name);
 
         Query query = Query.of().mapName(name).predicate(predicate).iterationType(IterationType.ENTRY).build();
         QueryResult queryResult = queryEngine.execute(query, Target.ALL_NODES);
@@ -402,8 +409,8 @@ public class TransactionalMapProxy extends TransactionalMapProxySupport implemen
                 predicate, IterationType.ENTRY, true, true);
 
         // TODO: can't we just use the original set?
-        List<Object> valueSet = new ArrayList<Object>();
-        Set<Data> keyWontBeIncluded = new HashSet<Data>();
+        List<Object> valueSet = new ArrayList<>();
+        Set<Data> keyWontBeIncluded = new HashSet<>();
 
         Extractors extractors = mapServiceContext.getExtractors(name);
         CachedQueryEntry cachedQueryEntry = new CachedQueryEntry();
@@ -442,7 +449,7 @@ public class TransactionalMapProxy extends TransactionalMapProxySupport implemen
     private void removeFromResultSet(Set<Map.Entry> queryResultSet, List<Object> valueSet,
                                      Set<Data> keyWontBeIncluded) {
         for (Map.Entry entry : queryResultSet) {
-            if (keyWontBeIncluded.contains((Data) entry.getKey())) {
+            if (keyWontBeIncluded.contains(entry.getKey())) {
                 continue;
             }
             valueSet.add(toObjectIfNeeded(entry.getValue()));

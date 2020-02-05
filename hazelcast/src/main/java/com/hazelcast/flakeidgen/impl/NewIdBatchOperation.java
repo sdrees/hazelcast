@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2008-2018, Hazelcast, Inc. All Rights Reserved.
+ * Copyright (c) 2008-2020, Hazelcast, Inc. All Rights Reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -20,7 +20,7 @@ import com.hazelcast.flakeidgen.impl.FlakeIdGeneratorProxy.IdBatchAndWaitTime;
 import com.hazelcast.nio.ObjectDataInput;
 import com.hazelcast.nio.ObjectDataOutput;
 import com.hazelcast.nio.serialization.IdentifiedDataSerializable;
-import com.hazelcast.spi.Operation;
+import com.hazelcast.spi.impl.operationservice.Operation;
 
 import java.io.IOException;
 import java.util.concurrent.TimeUnit;
@@ -42,7 +42,7 @@ class NewIdBatchOperation extends Operation implements IdentifiedDataSerializabl
     @Override
     public void run() throws Exception {
         FlakeIdGeneratorProxy proxy = (FlakeIdGeneratorProxy) getNodeEngine().getProxyService()
-                .getDistributedObject(getServiceName(), flakeIdGenName);
+                .getDistributedObject(getServiceName(), flakeIdGenName, getCallerUuid());
         final IdBatchAndWaitTime result = proxy.newIdBaseLocal(batchSize);
         if (result.waitTimeMillis == 0) {
             sendResponse(result.idBatch.base());
@@ -72,7 +72,7 @@ class NewIdBatchOperation extends Operation implements IdentifiedDataSerializabl
     }
 
     @Override
-    public int getId() {
+    public int getClassId() {
         return FlakeIdGeneratorDataSerializerHook.NEW_ID_BATCH_OPERATION;
     }
 

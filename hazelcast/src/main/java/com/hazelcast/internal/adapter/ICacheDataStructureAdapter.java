@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2008-2018, Hazelcast, Inc. All Rights Reserved.
+ * Copyright (c) 2008-2020, Hazelcast, Inc. All Rights Reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -17,8 +17,7 @@
 package com.hazelcast.internal.adapter;
 
 import com.hazelcast.cache.ICache;
-import com.hazelcast.core.ICompletableFuture;
-import com.hazelcast.monitor.LocalMapStats;
+import com.hazelcast.map.LocalMapStats;
 import com.hazelcast.query.Predicate;
 
 import javax.cache.expiry.ExpiryPolicy;
@@ -28,6 +27,7 @@ import javax.cache.processor.EntryProcessorException;
 import javax.cache.processor.EntryProcessorResult;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.CompletionStage;
 import java.util.concurrent.TimeUnit;
 
 @SuppressWarnings("checkstyle:methodcount")
@@ -50,7 +50,7 @@ public class ICacheDataStructureAdapter<K, V> implements DataStructureAdapter<K,
     }
 
     @Override
-    public ICompletableFuture<V> getAsync(K key) {
+    public CompletionStage<V> getAsync(K key) {
         return cache.getAsync(key);
     }
 
@@ -60,18 +60,18 @@ public class ICacheDataStructureAdapter<K, V> implements DataStructureAdapter<K,
     }
 
     @Override
-    public ICompletableFuture<Void> setAsync(K key, V value) {
+    public CompletionStage<Void> setAsync(K key, V value) {
         return cache.putAsync(key, value);
     }
 
     @Override
     @MethodNotAvailable
-    public ICompletableFuture<Void> setAsync(K key, V value, long ttl, TimeUnit timeunit) {
+    public CompletionStage<Void> setAsync(K key, V value, long ttl, TimeUnit timeunit) {
         throw new MethodNotAvailableException();
     }
 
     @Override
-    public ICompletableFuture<Void> setAsync(K key, V value, ExpiryPolicy expiryPolicy) {
+    public CompletionStage<Void> setAsync(K key, V value, ExpiryPolicy expiryPolicy) {
         return cache.putAsync(key, value, expiryPolicy);
     }
 
@@ -81,18 +81,18 @@ public class ICacheDataStructureAdapter<K, V> implements DataStructureAdapter<K,
     }
 
     @Override
-    public ICompletableFuture<V> putAsync(K key, V value) {
+    public CompletionStage<V> putAsync(K key, V value) {
         return cache.getAndPutAsync(key, value);
     }
 
     @Override
     @MethodNotAvailable
-    public ICompletableFuture<V> putAsync(K key, V value, long time, TimeUnit unit) {
+    public CompletionStage<V> putAsync(K key, V value, long time, TimeUnit unit) {
         throw new MethodNotAvailableException();
     }
 
     @Override
-    public ICompletableFuture<V> putAsync(K key, V value, ExpiryPolicy expiryPolicy) {
+    public CompletionStage<V> putAsync(K key, V value, ExpiryPolicy expiryPolicy) {
         return cache.getAndPutAsync(key, value, expiryPolicy);
     }
 
@@ -108,13 +108,13 @@ public class ICacheDataStructureAdapter<K, V> implements DataStructureAdapter<K,
     }
 
     @Override
-    public ICompletableFuture<Boolean> putIfAbsentAsync(K key, V value) {
+    public CompletionStage<Boolean> putIfAbsentAsync(K key, V value) {
         return cache.putIfAbsentAsync(key, value);
     }
 
     @Override
     @MethodNotAvailable
-    public void setTTL(K key, long duration, TimeUnit timeUnit) {
+    public void setTtl(K key, long duration, TimeUnit timeUnit) {
         throw new MethodNotAvailableException();
     }
 
@@ -129,6 +129,16 @@ public class ICacheDataStructureAdapter<K, V> implements DataStructureAdapter<K,
     }
 
     @Override
+    public V getAndReplace(K key, V value) {
+        return cache.getAndReplace(key, value);
+    }
+
+    @Override
+    public CompletionStage<V> getAndReplaceAsync(K key, V value) {
+        return cache.getAndReplaceAsync(key, value);
+    }
+
+    @Override
     public V remove(K key) {
         return cache.getAndRemove(key);
     }
@@ -139,7 +149,17 @@ public class ICacheDataStructureAdapter<K, V> implements DataStructureAdapter<K,
     }
 
     @Override
-    public ICompletableFuture<V> removeAsync(K key) {
+    public CompletionStage<V> removeAsync(K key) {
+        return cache.getAndRemoveAsync(key);
+    }
+
+    @Override
+    public V getAndRemove(K key) {
+        return cache.getAndRemove(key);
+    }
+
+    @Override
+    public CompletionStage<V> getAndRemoveAsync(K key) {
         return cache.getAndRemoveAsync(key);
     }
 
@@ -149,7 +169,7 @@ public class ICacheDataStructureAdapter<K, V> implements DataStructureAdapter<K,
     }
 
     @Override
-    public ICompletableFuture<Boolean> deleteAsync(K key) {
+    public CompletionStage<Boolean> deleteAsync(K key) {
         return cache.removeAsync(key);
     }
 
@@ -260,6 +280,11 @@ public class ICacheDataStructureAdapter<K, V> implements DataStructureAdapter<K,
     @Override
     public void setExpiryPolicy(Set<K> keys, ExpiryPolicy expiryPolicy) {
         cache.setExpiryPolicy(keys, expiryPolicy);
+    }
+
+    @Override
+    public boolean setExpiryPolicy(K key, ExpiryPolicy expiryPolicy) {
+        return cache.setExpiryPolicy(key, expiryPolicy);
     }
 
     @Override

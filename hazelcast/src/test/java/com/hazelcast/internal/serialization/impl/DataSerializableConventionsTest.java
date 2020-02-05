@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2008-2018, Hazelcast, Inc. All Rights Reserved.
+ * Copyright (c) 2008-2020, Hazelcast, Inc. All Rights Reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -18,14 +18,20 @@ package com.hazelcast.internal.serialization.impl;
 
 import com.google.common.collect.HashMultimap;
 import com.google.common.collect.Multimap;
+import com.hazelcast.internal.serialization.BinaryInterface;
 import com.hazelcast.internal.serialization.DataSerializerHook;
-import com.hazelcast.nio.serialization.BinaryInterface;
+import com.hazelcast.internal.serialization.SerializableByConvention;
+import com.hazelcast.map.impl.wan.WanMapEntryView;
 import com.hazelcast.nio.serialization.DataSerializable;
 import com.hazelcast.nio.serialization.DataSerializableFactory;
 import com.hazelcast.nio.serialization.IdentifiedDataSerializable;
-import com.hazelcast.nio.serialization.SerializableByConvention;
-import com.hazelcast.spi.AbstractLocalOperation;
+import com.hazelcast.query.impl.predicates.BoundedRangePredicate;
+import com.hazelcast.query.impl.predicates.CompositeEqualPredicate;
+import com.hazelcast.query.impl.predicates.CompositeRangePredicate;
+import com.hazelcast.query.impl.predicates.EvaluatePredicate;
+import com.hazelcast.query.impl.predicates.SkipIndexPredicate;
 import com.hazelcast.spi.annotation.PrivateApi;
+import com.hazelcast.spi.impl.operationservice.AbstractLocalOperation;
 import com.hazelcast.test.HazelcastParallelClassRunner;
 import com.hazelcast.test.annotation.QuickTest;
 import org.junit.Test;
@@ -52,30 +58,30 @@ import static org.junit.Assert.assertTrue;
 import static org.junit.Assert.fail;
 
 /**
- * Tests to verify serializable classes conventions are observed. Each conventions test scans the classpath (excluding
- * test classes) and tests <b>concrete</b> classes which implement (directly or transitively) {@code Serializable} or
- * {@code DataSerializable} interface, then verifies that it's either annotated with {@link BinaryInterface},
- * is excluded from conventions tests by being annotated with {@link SerializableByConvention} or
- * they also implement {@code IdentifiedDataSerializable}.
- * Additionally, tests whether IDS instanced obtained from DS factories
- * have the same ID as the one reported by their `getId` method and that F_ID/ID combinations are unique.
+ * Tests to verify serializable classes conventions are observed.
+ * Each conventions test scans the classpath (excluding test classes)
+ * and tests <b>concrete</b> classes which implement (directly or
+ * transitively) {@code Serializable} or {@code DataSerializable}
+ * interface, then verifies that it's either annotated with {@link
+ * BinaryInterface}, is excluded from conventions tests by being annotated
+ * with {@link SerializableByConvention} or they also implement {@code
+ * IdentifiedDataSerializable}. Additionally, tests whether IDS instanced
+ * obtained from DS factories have the same ID as the one reported by
+ * their `getClassId` method and that F_ID/ID combinations are unique.
  */
 @RunWith(HazelcastParallelClassRunner.class)
 @Category({QuickTest.class})
 public class DataSerializableConventionsTest {
 
-    // subclasses of classes in the white list are not taken into account for conventions tests, as they
-    // inherit Serializable from a parent class and cannot implement IdentifiedDataSerializable due to
-    // unavailability of default constructor.
-    private static final Set<Class> SERIALIZABLE_WHITE_LIST;
+    // subclasses of classes in the white list are not taken into account for
+    // conventions tests. Reasons:
+    // - they inherit Serializable from a parent class and cannot implement
+    // IdentifiedDataSerializable due to unavailability of default constructor.
+    // - they purposefully break conventions to fix a known issue
+    private final Set<Class> classWhiteList;
 
-    static {
-        Set<Class> whiteList = new HashSet<Class>();
-        whiteList.add(EventObject.class);
-        whiteList.add(Throwable.class);
-        whiteList.add(Permission.class);
-        whiteList.add(PermissionCollection.class);
-        SERIALIZABLE_WHITE_LIST = Collections.unmodifiableSet(whiteList);
+    public DataSerializableConventionsTest() {
+        classWhiteList = Collections.unmodifiableSet(getWhitelistedClasses());
     }
 
     /**
@@ -165,8 +171,8 @@ public class DataSerializableConventionsTest {
      */
     @Test
     public void test_identifiedDataSerializables_haveUniqueFactoryAndTypeId() throws Exception {
-        Set<String> classesWithInstantiationProblems = new TreeSet<String>();
-        Set<String> classesThrowingUnsupportedOperationException = new TreeSet<String>();
+        Set<String> classesWithInstantiationProblems = new TreeSet<>();
+        Set<String> classesThrowingUnsupportedOperationException = new TreeSet<>();
 
         Multimap<Integer, Integer> factoryToTypeId = HashMultimap.create();
 
@@ -180,7 +186,7 @@ public class DataSerializableConventionsTest {
                     ctor.setAccessible(true);
                     IdentifiedDataSerializable instance = ctor.newInstance();
                     int factoryId = instance.getFactoryId();
-                    int typeId = instance.getId();
+                    int typeId = instance.getClassId();
                     if (factoryToTypeId.containsEntry(factoryId, typeId)) {
                         fail("Factory-Type ID pair {" + factoryId + ", " + typeId + "} from " + klass.toString() + " is already"
                                 + " registered in another type.");
@@ -201,7 +207,7 @@ public class DataSerializableConventionsTest {
 
         if (!classesThrowingUnsupportedOperationException.isEmpty()) {
             System.out.println("INFO: " + classesThrowingUnsupportedOperationException.size() + " classes threw"
-                    + " UnsupportedOperationException in getFactoryId/getId invocation:");
+                    + " UnsupportedOperationException in getFactoryId/getClassId invocation:");
             for (String className : classesThrowingUnsupportedOperationException) {
                 System.out.println(className);
             }
@@ -248,7 +254,7 @@ public class DataSerializableConventionsTest {
                 ctor.setAccessible(true);
                 IdentifiedDataSerializable instance = ctor.newInstance();
                 int factoryId = instance.getFactoryId();
-                int typeId = instance.getId();
+                int typeId = instance.getClassId();
 
                 if (!factories.containsKey(factoryId)) {
                     fail("Factory with ID " + factoryId + " declared in " + klass + " not found."
@@ -268,7 +274,8 @@ public class DataSerializableConventionsTest {
 
     private boolean isReadOnlyConfig(Class<? extends IdentifiedDataSerializable> klass) {
         String className = klass.getName();
-        return className.endsWith("ReadOnly") && className.contains("Config");
+        return className.endsWith("ReadOnly")
+                && (className.contains("Config") || className.contains("WanReplicationRef"));
     }
 
     /**
@@ -281,6 +288,7 @@ public class DataSerializableConventionsTest {
         Set<Class<? extends IdentifiedDataSerializable>> identifiedDataSerializables
                 = REFLECTIONS.getSubTypesOf(IdentifiedDataSerializable.class);
         filterNonConcreteClasses(identifiedDataSerializables);
+        identifiedDataSerializables.removeAll(classWhiteList);
         return identifiedDataSerializables;
     }
 
@@ -320,12 +328,37 @@ public class DataSerializableConventionsTest {
                 && klass.getAnnotation(PrivateApi.class) == null;
     }
 
-    private static boolean inheritsFromWhiteListedClass(Class klass) {
-        for (Class superclass : SERIALIZABLE_WHITE_LIST) {
+    private boolean inheritsFromWhiteListedClass(Class klass) {
+        for (Class superclass : classWhiteList) {
             if (superclass.isAssignableFrom(klass)) {
                 return true;
             }
         }
         return false;
+    }
+
+    /**
+     * Returns the set of classes excluded from the conventions tests.
+     */
+    protected Set<Class> getWhitelistedClasses() {
+        Set<Class> whiteList = new HashSet<Class>();
+        whiteList.add(EventObject.class);
+        whiteList.add(Throwable.class);
+        whiteList.add(Permission.class);
+        whiteList.add(PermissionCollection.class);
+        whiteList.add(WanMapEntryView.class);
+        whiteList.add(SkipIndexPredicate.class);
+        whiteList.add(BoundedRangePredicate.class);
+        whiteList.add(CompositeRangePredicate.class);
+        whiteList.add(CompositeEqualPredicate.class);
+        whiteList.add(EvaluatePredicate.class);
+        try {
+            // these can't be accessed through the meta class since they are private
+            whiteList.add(Class.forName("com.hazelcast.query.impl.predicates.CompositeIndexVisitor$Output"));
+            whiteList.add(Class.forName("com.hazelcast.query.impl.predicates.RangeVisitor$Ranges"));
+        } catch (ClassNotFoundException e) {
+            throw new RuntimeException(e);
+        }
+        return whiteList;
     }
 }

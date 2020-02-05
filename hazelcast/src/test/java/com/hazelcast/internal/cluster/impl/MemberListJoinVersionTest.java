@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2008-2018, Hazelcast, Inc. All Rights Reserved.
+ * Copyright (c) 2008-2020, Hazelcast, Inc. All Rights Reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -20,15 +20,14 @@ import com.hazelcast.config.Config;
 import com.hazelcast.core.HazelcastInstance;
 import com.hazelcast.core.LifecycleEvent;
 import com.hazelcast.core.LifecycleListener;
-import com.hazelcast.instance.MemberImpl;
+import com.hazelcast.cluster.impl.MemberImpl;
 import com.hazelcast.test.AssertTask;
 import com.hazelcast.test.HazelcastParallelClassRunner;
 import com.hazelcast.test.HazelcastTestSupport;
 import com.hazelcast.test.TestHazelcastInstanceFactory;
-import com.hazelcast.test.annotation.ParallelTest;
+import com.hazelcast.test.annotation.ParallelJVMTest;
 import com.hazelcast.test.annotation.QuickTest;
 import com.hazelcast.test.annotation.SerializationSamplesExcluded;
-
 import org.junit.Before;
 import org.junit.Test;
 import org.junit.experimental.categories.Category;
@@ -37,20 +36,18 @@ import org.junit.runner.RunWith;
 import java.util.concurrent.CountDownLatch;
 
 import static com.hazelcast.core.LifecycleEvent.LifecycleState.MERGED;
-import static com.hazelcast.instance.BuildInfoProvider.HAZELCAST_INTERNAL_OVERRIDE_VERSION;
-import static com.hazelcast.instance.MemberImpl.NA_MEMBER_LIST_JOIN_VERSION;
-import static com.hazelcast.internal.cluster.Versions.V3_9;
+import static com.hazelcast.cluster.impl.MemberImpl.NA_MEMBER_LIST_JOIN_VERSION;
 import static com.hazelcast.internal.cluster.impl.ClusterDataSerializerHook.F_ID;
 import static com.hazelcast.internal.cluster.impl.ClusterDataSerializerHook.HEARTBEAT;
 import static com.hazelcast.internal.cluster.impl.ClusterDataSerializerHook.SPLIT_BRAIN_MERGE_VALIDATION;
 import static com.hazelcast.internal.cluster.impl.MemberMap.SINGLETON_MEMBER_LIST_VERSION;
 import static com.hazelcast.internal.cluster.impl.MembershipUpdateTest.assertMemberViewsAreSame;
 import static com.hazelcast.internal.cluster.impl.MembershipUpdateTest.getMemberMap;
-import static com.hazelcast.spi.properties.GroupProperty.HEARTBEAT_INTERVAL_SECONDS;
-import static com.hazelcast.spi.properties.GroupProperty.MAX_NO_HEARTBEAT_SECONDS;
-import static com.hazelcast.spi.properties.GroupProperty.MEMBER_LIST_PUBLISH_INTERVAL_SECONDS;
-import static com.hazelcast.spi.properties.GroupProperty.MERGE_FIRST_RUN_DELAY_SECONDS;
-import static com.hazelcast.spi.properties.GroupProperty.MERGE_NEXT_RUN_DELAY_SECONDS;
+import static com.hazelcast.spi.properties.ClusterProperty.HEARTBEAT_INTERVAL_SECONDS;
+import static com.hazelcast.spi.properties.ClusterProperty.MAX_NO_HEARTBEAT_SECONDS;
+import static com.hazelcast.spi.properties.ClusterProperty.MEMBER_LIST_PUBLISH_INTERVAL_SECONDS;
+import static com.hazelcast.spi.properties.ClusterProperty.MERGE_FIRST_RUN_DELAY_SECONDS;
+import static com.hazelcast.spi.properties.ClusterProperty.MERGE_NEXT_RUN_DELAY_SECONDS;
 import static com.hazelcast.test.PacketFiltersUtil.rejectOperationsFrom;
 import static com.hazelcast.test.PacketFiltersUtil.resetPacketFiltersFrom;
 import static java.util.Arrays.asList;
@@ -59,7 +56,7 @@ import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertNotEquals;
 
 @RunWith(HazelcastParallelClassRunner.class)
-@Category({QuickTest.class, ParallelTest.class, SerializationSamplesExcluded.class})
+@Category({QuickTest.class, ParallelJVMTest.class, SerializationSamplesExcluded.class})
 public class MemberListJoinVersionTest extends HazelcastTestSupport {
 
     private TestHazelcastInstanceFactory factory;
@@ -146,69 +143,6 @@ public class MemberListJoinVersionTest extends HazelcastTestSupport {
             }
         });
         assertJoinMemberListVersions(member1, member2, member3);
-    }
-
-    @Test(expected = UnsupportedOperationException.class)
-    public void when_310MemberJoinsWith39Mode_memberListJoinVersionCannotBeQueried() {
-        System.setProperty(HAZELCAST_INTERNAL_OVERRIDE_VERSION, V3_9.toString());
-
-        HazelcastInstance member1 = factory.newHazelcastInstance();
-
-        getClusterService(member1).getMemberListJoinVersion();
-    }
-
-    @Test
-    public void when_310MemberJoinsWith39Mode_itDoesNotPublishJoinVersions() {
-        System.setProperty(HAZELCAST_INTERNAL_OVERRIDE_VERSION, V3_9.toString());
-
-        HazelcastInstance member1 = factory.newHazelcastInstance();
-        HazelcastInstance member2 = factory.newHazelcastInstance();
-        HazelcastInstance member3 = factory.newHazelcastInstance();
-
-        assertClusterSizeEventually(3, member2);
-
-        assertNotEquals(NA_MEMBER_LIST_JOIN_VERSION, getNode(member1).getLocalMember().getMemberListJoinVersion());
-        assertEquals(NA_MEMBER_LIST_JOIN_VERSION, getNode(member2).getLocalMember().getMemberListJoinVersion());
-        assertEquals(NA_MEMBER_LIST_JOIN_VERSION, getNode(member3).getLocalMember().getMemberListJoinVersion());
-
-        for (MemberImpl member : getClusterService(member1).getMemberImpls()) {
-            assertNotEquals(NA_MEMBER_LIST_JOIN_VERSION, member.getMemberListJoinVersion());
-        }
-
-        for (HazelcastInstance instance : asList(member2, member3)) {
-            for (MemberImpl member : getClusterService(instance).getMemberImpls()) {
-                assertEquals(NA_MEMBER_LIST_JOIN_VERSION, member.getMemberListJoinVersion());
-            }
-        }
-    }
-
-    @Test
-    public void when_310MemberClaimsMastershipWith39Mode_itGeneratesJoinVersions() {
-        System.setProperty(HAZELCAST_INTERNAL_OVERRIDE_VERSION, V3_9.toString());
-
-        HazelcastInstance member1 = factory.newHazelcastInstance();
-        HazelcastInstance member2 = factory.newHazelcastInstance();
-        HazelcastInstance member3 = factory.newHazelcastInstance();
-
-        assertClusterSizeEventually(3, member2);
-
-        member1.getLifecycleService().terminate();
-
-        assertClusterSizeEventually(2, member2, member3);
-
-        // new master has created its local member list join version but it is not exposed
-        assertNotEquals(NA_MEMBER_LIST_JOIN_VERSION, getNode(member2).getLocalMember().getMemberListJoinVersion());
-
-        // others has not learnt their member list join versions
-        assertEquals(NA_MEMBER_LIST_JOIN_VERSION, getNode(member3).getLocalMember().getMemberListJoinVersion());
-
-        for (MemberImpl member : getClusterService(member2).getMemberImpls()) {
-            assertNotEquals(NA_MEMBER_LIST_JOIN_VERSION, member.getMemberListJoinVersion());
-        }
-
-        for (MemberImpl member : getClusterService(member3).getMemberImpls()) {
-            assertEquals(NA_MEMBER_LIST_JOIN_VERSION, member.getMemberListJoinVersion());
-        }
     }
 
     public static void assertJoinMemberListVersions(HazelcastInstance... instances) {

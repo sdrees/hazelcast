@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2008-2018, Hazelcast, Inc. All Rights Reserved.
+ * Copyright (c) 2008-2020, Hazelcast, Inc. All Rights Reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -16,24 +16,27 @@
 
 package com.hazelcast.config;
 
-import com.hazelcast.internal.cluster.Versions;
+import com.hazelcast.cluster.Member;
+import com.hazelcast.internal.config.ConfigDataSerializerHook;
 import com.hazelcast.nio.ObjectDataInput;
 import com.hazelcast.nio.ObjectDataOutput;
 import com.hazelcast.nio.serialization.IdentifiedDataSerializable;
-import com.hazelcast.nio.serialization.impl.Versioned;
-import com.hazelcast.spi.merge.SplitBrainMergeTypeProvider;
-import com.hazelcast.spi.merge.SplitBrainMergeTypes;
+import com.hazelcast.scheduledexecutor.IScheduledExecutorService;
 
+import javax.annotation.Nonnull;
 import java.io.IOException;
+import java.util.concurrent.TimeUnit;
 
-import static com.hazelcast.util.Preconditions.checkNotNegative;
-import static com.hazelcast.util.Preconditions.checkNotNull;
-import static com.hazelcast.util.Preconditions.checkPositive;
+import static com.hazelcast.config.ScheduledExecutorConfig.CapacityPolicy.PER_NODE;
+import static com.hazelcast.config.ScheduledExecutorConfig.CapacityPolicy.getById;
+import static com.hazelcast.internal.util.Preconditions.checkNotNegative;
+import static com.hazelcast.internal.util.Preconditions.checkNotNull;
+import static com.hazelcast.internal.util.Preconditions.checkPositive;
 
 /**
- * Configuration options for the {@link com.hazelcast.scheduledexecutor.IScheduledExecutorService}.
+ * Configuration options for the {@link IScheduledExecutorService}.
  */
-public class ScheduledExecutorConfig implements SplitBrainMergeTypeProvider, IdentifiedDataSerializable, Versioned {
+public class ScheduledExecutorConfig implements IdentifiedDataSerializable, NamedConfig {
 
     /**
      * The number of executor threads per Member for the Executor based on this configuration.
@@ -41,9 +44,14 @@ public class ScheduledExecutorConfig implements SplitBrainMergeTypeProvider, Ide
     private static final int DEFAULT_POOL_SIZE = 16;
 
     /**
-     * The number of tasks that can co-exist per scheduler per partition.
+     * The number of tasks that can co-exist per scheduler according to the capacity policy.
      */
     private static final int DEFAULT_CAPACITY = 100;
+
+    /**
+     * The number of tasks that can co-exist per scheduler per partition.
+     */
+    private static final CapacityPolicy DEFAULT_CAPACITY_POLICY = PER_NODE;
 
     /**
      * The number of replicas per task scheduled in each ScheduledExecutor.
@@ -56,11 +64,11 @@ public class ScheduledExecutorConfig implements SplitBrainMergeTypeProvider, Ide
 
     private int capacity = DEFAULT_CAPACITY;
 
+    private CapacityPolicy capacityPolicy = DEFAULT_CAPACITY_POLICY;
+
     private int poolSize = DEFAULT_POOL_SIZE;
 
-    private String quorumName;
-
-    private transient ScheduledExecutorConfig.ScheduledExecutorConfigReadOnly readOnly;
+    private String splitBrainProtectionName;
 
     private MergePolicyConfig mergePolicyConfig = new MergePolicyConfig();
 
@@ -72,22 +80,23 @@ public class ScheduledExecutorConfig implements SplitBrainMergeTypeProvider, Ide
     }
 
     public ScheduledExecutorConfig(String name, int durability, int capacity, int poolSize) {
-        this(name, durability, capacity, poolSize, null, new MergePolicyConfig());
+        this(name, durability, capacity, poolSize, null, new MergePolicyConfig(), DEFAULT_CAPACITY_POLICY);
     }
 
-    public ScheduledExecutorConfig(String name, int durability, int capacity, int poolSize, String quorumName,
-                                   MergePolicyConfig mergePolicyConfig) {
+    public ScheduledExecutorConfig(String name, int durability, int capacity, int poolSize, String splitBrainProtectionName,
+                                   MergePolicyConfig mergePolicyConfig, CapacityPolicy capacityPolicy) {
         this.name = name;
         this.durability = durability;
         this.poolSize = poolSize;
         this.capacity = capacity;
-        this.quorumName = quorumName;
+        this.capacityPolicy = capacityPolicy;
+        this.splitBrainProtectionName = splitBrainProtectionName;
         this.mergePolicyConfig = mergePolicyConfig;
     }
 
     public ScheduledExecutorConfig(ScheduledExecutorConfig config) {
-        this(config.getName(), config.getDurability(), config.getCapacity(), config.getPoolSize(), config.getQuorumName(),
-                config.getMergePolicyConfig());
+        this(config.getName(), config.getDurability(), config.getCapacity(), config.getPoolSize(),
+                config.getSplitBrainProtectionName(), config.getMergePolicyConfig(), config.getCapacityPolicy());
     }
 
     /**
@@ -167,6 +176,9 @@ public class ScheduledExecutorConfig implements SplitBrainMergeTypeProvider, Ide
      * The capacity represents the maximum number of tasks that a scheduler can have at any given point in time per partition.
      * If this is set to 0 then there is no limit
      *
+     * To prevent any undesirable data-loss, capacity is ignored during partition migrations,
+     * the count is updated accordingly, however the rejection is not enforced.
+     *
      * @param capacity the capacity of the executor
      * @return this executor config instance
      */
@@ -176,48 +188,63 @@ public class ScheduledExecutorConfig implements SplitBrainMergeTypeProvider, Ide
     }
 
     /**
-     * Returns the quorum name for operations.
-     *
-     * @return the quorum name
+     * @return the policy of the capacity setting
      */
-    public String getQuorumName() {
-        return quorumName;
+    public CapacityPolicy getCapacityPolicy() {
+        return capacityPolicy;
     }
 
     /**
-     * Sets the quorum name for operations.
+     * Set the capacity policy for the configured capacity value
      *
-     * @param quorumName the quorum name
+     * To prevent any undesirable data-loss, capacity is ignored during partition migrations,
+     * the count is updated accordingly, however the rejection is not enforced.
+     *
+     * @param capacityPolicy
+     */
+    public ScheduledExecutorConfig setCapacityPolicy(@Nonnull CapacityPolicy capacityPolicy) {
+        checkNotNull(capacityPolicy);
+        this.capacityPolicy = capacityPolicy;
+        return this;
+    }
+    /**
+     * Returns the split brain protection name for operations.
+     *
+     * @return the split brain protection name
+     */
+    public String getSplitBrainProtectionName() {
+        return splitBrainProtectionName;
+    }
+
+    /**
+     * Sets the split brain protection name for operations.
+     *
+     * @param splitBrainProtectionName the split brain protection name
      * @return the updated configuration
      */
-    public ScheduledExecutorConfig setQuorumName(String quorumName) {
-        this.quorumName = quorumName;
+    public ScheduledExecutorConfig setSplitBrainProtectionName(String splitBrainProtectionName) {
+        this.splitBrainProtectionName = splitBrainProtectionName;
         return this;
     }
 
 
     /**
-    * Gets the {@link MergePolicyConfig} for the scheduler.
-    *
-    * @return the {@link MergePolicyConfig} for the scheduler
-    */
+     * Gets the {@link MergePolicyConfig} for the scheduler.
+     *
+     * @return the {@link MergePolicyConfig} for the scheduler
+     */
     public MergePolicyConfig getMergePolicyConfig() {
         return mergePolicyConfig;
     }
 
     /**
-    * Sets the {@link MergePolicyConfig} for the scheduler.
-    *
-    * @return this executor config instance
-    */
+     * Sets the {@link MergePolicyConfig} for the scheduler.
+     *
+     * @return this executor config instance
+     */
     public ScheduledExecutorConfig setMergePolicyConfig(MergePolicyConfig mergePolicyConfig) {
         this.mergePolicyConfig = checkNotNull(mergePolicyConfig, "mergePolicyConfig cannot be null");
         return this;
-    }
-
-    @Override
-    public Class getProvidedMergeTypes() {
-        return SplitBrainMergeTypes.ScheduledExecutorMergeTypes.class;
     }
 
     @Override
@@ -227,16 +254,10 @@ public class ScheduledExecutorConfig implements SplitBrainMergeTypeProvider, Ide
                 + ", durability=" + durability
                 + ", poolSize=" + poolSize
                 + ", capacity=" + capacity
-                + ", quorumName=" + quorumName
+                + ", capacityPolicy=" + capacityPolicy
+                + ", splitBrainProtectionName=" + splitBrainProtectionName
                 + ", mergePolicyConfig=" + mergePolicyConfig
                 + '}';
-    }
-
-    ScheduledExecutorConfig getAsReadOnly() {
-        if (readOnly == null) {
-            readOnly = new ScheduledExecutorConfig.ScheduledExecutorConfigReadOnly(this);
-        }
-        return readOnly;
     }
 
     @Override
@@ -245,7 +266,7 @@ public class ScheduledExecutorConfig implements SplitBrainMergeTypeProvider, Ide
     }
 
     @Override
-    public int getId() {
+    public int getClassId() {
         return ConfigDataSerializerHook.SCHEDULED_EXECUTOR_CONFIG;
     }
 
@@ -255,11 +276,9 @@ public class ScheduledExecutorConfig implements SplitBrainMergeTypeProvider, Ide
         out.writeInt(durability);
         out.writeInt(capacity);
         out.writeInt(poolSize);
-        // RU_COMPAT_3_9
-        if (out.getVersion().isGreaterOrEqual(Versions.V3_10)) {
-            out.writeUTF(quorumName);
-            out.writeObject(mergePolicyConfig);
-        }
+        out.writeUTF(splitBrainProtectionName);
+        out.writeObject(mergePolicyConfig);
+        out.writeByte(capacityPolicy.getId());
     }
 
     @Override
@@ -268,11 +287,9 @@ public class ScheduledExecutorConfig implements SplitBrainMergeTypeProvider, Ide
         durability = in.readInt();
         capacity = in.readInt();
         poolSize = in.readInt();
-        // RU_COMPAT_3_9
-        if (in.getVersion().isGreaterOrEqual(Versions.V3_10)) {
-            quorumName = in.readUTF();
-            mergePolicyConfig = in.readObject();
-        }
+        splitBrainProtectionName = in.readUTF();
+        mergePolicyConfig = in.readObject();
+        capacityPolicy = getById(in.readByte());
     }
 
     @SuppressWarnings({"checkstyle:npathcomplexity"})
@@ -293,10 +310,14 @@ public class ScheduledExecutorConfig implements SplitBrainMergeTypeProvider, Ide
         if (capacity != that.capacity) {
             return false;
         }
+        if (capacityPolicy != that.capacityPolicy) {
+            return false;
+        }
         if (poolSize != that.poolSize) {
             return false;
         }
-        if (quorumName != null ? !quorumName.equals(that.quorumName) : that.quorumName != null) {
+        if (splitBrainProtectionName != null ? !splitBrainProtectionName.equals(that.splitBrainProtectionName)
+                : that.splitBrainProtectionName != null) {
             return false;
         }
         if (mergePolicyConfig != null ? !mergePolicyConfig.equals(that.mergePolicyConfig) : that.mergePolicyConfig != null) {
@@ -310,46 +331,57 @@ public class ScheduledExecutorConfig implements SplitBrainMergeTypeProvider, Ide
         int result = name.hashCode();
         result = 31 * result + durability;
         result = 31 * result + capacity;
+        result = 31 * result + capacityPolicy.hashCode();
         result = 31 * result + poolSize;
-        result = 31 * result + (quorumName != null ? quorumName.hashCode() : 0);
+        result = 31 * result + (splitBrainProtectionName != null ? splitBrainProtectionName.hashCode() : 0);
         result = 31 * result + (mergePolicyConfig != null ? mergePolicyConfig.hashCode() : 0);
         return result;
     }
 
-    // non-private for testing
-    static class ScheduledExecutorConfigReadOnly extends ScheduledExecutorConfig {
+    /**
+     * Capacity policy options
+     */
+    public enum CapacityPolicy {
 
-        ScheduledExecutorConfigReadOnly(ScheduledExecutorConfig config) {
-            super(config);
+        /**
+         * Capacity policy that counts tasks per Hazelcast instance node/member,
+         * and rejects new ones when {@link #capacity} value is reached
+         */
+        PER_NODE((byte) 0),
+
+        /**
+         * Capacity policy that counts tasks per partition, and rejects new ones when {@link #capacity} value is reached.
+         * Storage size depends on the partition count in a Hazelcast instance.
+         * This policy should not be used often.
+         * Avoid using this policy with a small cluster: if the cluster is small it will
+         * be hosting more partitions, and therefore tasks, than that of a larger cluster.
+         *
+         * This policy has no effect when scheduling is done using the OnMember APIs
+         * eg. {@link IScheduledExecutorService#scheduleOnMember(Runnable, Member, long, TimeUnit)}
+         */
+        PER_PARTITION((byte) 1);
+
+        /**
+         * Unique identifier for a policy, can be used for de/serialization purposes
+         */
+        private final byte id;
+
+        CapacityPolicy(byte id) {
+            this.id = id;
         }
 
-        @Override
-        public ScheduledExecutorConfig setName(String name) {
-            throw new UnsupportedOperationException("This config is read-only scheduled executor: " + getName());
+        public byte getId() {
+            return id;
         }
 
-        @Override
-        public ScheduledExecutorConfig setDurability(int durability) {
-            throw new UnsupportedOperationException("This config is read-only scheduled executor: " + getName());
-        }
+        public static CapacityPolicy getById(final byte id) {
+            for (CapacityPolicy policy : values()) {
+                if (policy.id == id) {
+                    return policy;
+                }
+            }
 
-        @Override
-        public ScheduledExecutorConfig setPoolSize(int poolSize) {
-            throw new UnsupportedOperationException("This config is read-only scheduled executor: " + getName());
-        }
-
-        @Override
-        public ScheduledExecutorConfig setCapacity(int capacity) {
-            throw new UnsupportedOperationException("This config is read-only scheduled executor: " + getName());
-        }
-
-        @Override
-        public ScheduledExecutorConfig setQuorumName(String quorumName) {
-            throw new UnsupportedOperationException("This config is read-only scheduled executor: " + getName());
-        }
-
-        public ScheduledExecutorConfig setMergePolicyConfig(MergePolicyConfig mergePolicyConfig) {
-            throw new UnsupportedOperationException("This config is read-only scheduled executor: " + getName());
+            return null;
         }
     }
 }

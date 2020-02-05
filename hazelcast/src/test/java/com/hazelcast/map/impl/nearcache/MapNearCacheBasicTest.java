@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2008-2018, Hazelcast, Inc. All Rights Reserved.
+ * Copyright (c) 2008-2020, Hazelcast, Inc. All Rights Reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -17,24 +17,23 @@
 package com.hazelcast.map.impl.nearcache;
 
 import com.hazelcast.config.Config;
-import com.hazelcast.config.InMemoryFormat;
 import com.hazelcast.config.MapConfig;
 import com.hazelcast.config.MapStoreConfig;
 import com.hazelcast.core.HazelcastInstance;
-import com.hazelcast.core.IMap;
 import com.hazelcast.internal.adapter.DataStructureAdapterMethod;
 import com.hazelcast.internal.adapter.IMapDataStructureAdapter;
 import com.hazelcast.internal.adapter.IMapMapStore;
-import com.hazelcast.internal.nearcache.AbstractNearCacheBasicTest;
 import com.hazelcast.internal.nearcache.NearCache;
 import com.hazelcast.internal.nearcache.NearCacheManager;
-import com.hazelcast.internal.nearcache.NearCacheTestContext;
-import com.hazelcast.internal.nearcache.NearCacheTestContextBuilder;
-import com.hazelcast.internal.nearcache.NearCacheTestUtils;
-import com.hazelcast.nio.serialization.Data;
-import com.hazelcast.test.HazelcastParametersRunnerFactory;
+import com.hazelcast.internal.nearcache.impl.AbstractNearCacheBasicTest;
+import com.hazelcast.internal.nearcache.impl.NearCacheTestContext;
+import com.hazelcast.internal.nearcache.impl.NearCacheTestContextBuilder;
+import com.hazelcast.internal.nearcache.impl.NearCacheTestUtils;
+import com.hazelcast.internal.serialization.Data;
+import com.hazelcast.map.IMap;
+import com.hazelcast.test.HazelcastParallelClassRunner;
 import com.hazelcast.test.TestHazelcastInstanceFactory;
-import com.hazelcast.test.annotation.ParallelTest;
+import com.hazelcast.test.annotation.ParallelJVMTest;
 import com.hazelcast.test.annotation.QuickTest;
 import org.junit.After;
 import org.junit.Before;
@@ -42,47 +41,26 @@ import org.junit.Ignore;
 import org.junit.Test;
 import org.junit.experimental.categories.Category;
 import org.junit.runner.RunWith;
-import org.junit.runners.Parameterized;
-import org.junit.runners.Parameterized.Parameter;
-import org.junit.runners.Parameterized.Parameters;
-import org.junit.runners.Parameterized.UseParametersRunnerFactory;
 
-import java.util.Collection;
-
-import static com.hazelcast.internal.nearcache.NearCacheTestUtils.createNearCacheConfig;
-import static com.hazelcast.internal.nearcache.NearCacheTestUtils.getBaseConfig;
-import static com.hazelcast.internal.nearcache.NearCacheTestUtils.getMapNearCacheManager;
-import static java.util.Arrays.asList;
+import static com.hazelcast.config.NearCacheConfig.DEFAULT_MEMORY_FORMAT;
+import static com.hazelcast.config.NearCacheConfig.DEFAULT_SERIALIZE_KEYS;
+import static com.hazelcast.internal.nearcache.impl.NearCacheTestUtils.createNearCacheConfig;
+import static com.hazelcast.internal.nearcache.impl.NearCacheTestUtils.getBaseConfig;
+import static com.hazelcast.internal.nearcache.impl.NearCacheTestUtils.getMapNearCacheManager;
 
 /**
  * Basic Near Cache tests for {@link IMap} on Hazelcast members.
  */
-@RunWith(Parameterized.class)
-@UseParametersRunnerFactory(HazelcastParametersRunnerFactory.class)
-@Category({ParallelTest.class, QuickTest.class})
+@RunWith(HazelcastParallelClassRunner.class)
+@Category({ParallelJVMTest.class, QuickTest.class})
 public class MapNearCacheBasicTest extends AbstractNearCacheBasicTest<Data, String> {
-
-    @Parameter
-    public InMemoryFormat inMemoryFormat;
-
-    @Parameter(value = 1)
-    public boolean serializeKeys;
 
     private final TestHazelcastInstanceFactory hazelcastFactory = createHazelcastInstanceFactory(2);
 
-    @Parameters(name = "format:{0} serializeKeys:{1}")
-    public static Collection<Object[]> parameters() {
-        return asList(new Object[][]{
-                {InMemoryFormat.BINARY, true},
-                {InMemoryFormat.BINARY, false},
-                {InMemoryFormat.OBJECT, true},
-                {InMemoryFormat.OBJECT, false},
-        });
-    }
-
     @Before
     public void setUp() {
-        nearCacheConfig = createNearCacheConfig(inMemoryFormat, serializeKeys)
+        nearCacheConfig
+                = createNearCacheConfig(DEFAULT_MEMORY_FORMAT, DEFAULT_SERIALIZE_KEYS)
                 .setCacheLocalEntries(true);
     }
 
@@ -164,7 +142,6 @@ public class MapNearCacheBasicTest extends AbstractNearCacheBasicTest<Data, Stri
         MapStoreConfig mapStoreConfig = new MapStoreConfig()
                 .setEnabled(true)
                 .setInitialLoadMode(MapStoreConfig.InitialLoadMode.EAGER)
-                .setClassName(null)
                 .setImplementation(mapStore);
 
         mapConfig.setMapStoreConfig(mapStoreConfig);

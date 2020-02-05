@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2008-2018, Hazelcast, Inc. All Rights Reserved.
+ * Copyright (c) 2008-2020, Hazelcast, Inc. All Rights Reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -19,29 +19,25 @@ package com.hazelcast.replicatedmap.impl;
 import com.hazelcast.config.InMemoryFormat;
 import com.hazelcast.config.MergePolicyConfig;
 import com.hazelcast.config.ReplicatedMapConfig;
-import com.hazelcast.replicatedmap.impl.operation.LegacyMergeOperation;
 import com.hazelcast.replicatedmap.impl.operation.MergeOperationFactory;
-import com.hazelcast.replicatedmap.impl.record.ReplicatedMapEntryView;
 import com.hazelcast.replicatedmap.impl.record.ReplicatedRecord;
 import com.hazelcast.replicatedmap.impl.record.ReplicatedRecordStore;
-import com.hazelcast.replicatedmap.merge.ReplicatedMapMergePolicy;
-import com.hazelcast.spi.NodeEngine;
-import com.hazelcast.spi.Operation;
-import com.hazelcast.spi.OperationFactory;
+import com.hazelcast.spi.impl.NodeEngine;
 import com.hazelcast.spi.impl.merge.AbstractMergeRunnable;
+import com.hazelcast.spi.impl.operationservice.OperationFactory;
 import com.hazelcast.spi.merge.SplitBrainMergePolicy;
 import com.hazelcast.spi.merge.SplitBrainMergeTypes.ReplicatedMapMergeTypes;
-import com.hazelcast.util.function.BiConsumer;
 
 import java.util.Collection;
 import java.util.Iterator;
 import java.util.List;
+import java.util.function.BiConsumer;
 
 import static com.hazelcast.replicatedmap.impl.ReplicatedMapService.SERVICE_NAME;
 import static com.hazelcast.spi.impl.merge.MergingValueFactory.createMergingEntry;
 
 class ReplicatedMapMergeRunnable
-        extends AbstractMergeRunnable<Object, Object, ReplicatedRecordStore, ReplicatedMapMergeTypes> {
+        extends AbstractMergeRunnable<Object, Object, ReplicatedRecordStore, ReplicatedMapMergeTypes<Object, Object>> {
 
     private final ReplicatedMapService service;
 
@@ -54,44 +50,17 @@ class ReplicatedMapMergeRunnable
     }
 
     @Override
-    protected void mergeStore(ReplicatedRecordStore store, BiConsumer<Integer, ReplicatedMapMergeTypes> consumer) {
+    protected void mergeStore(ReplicatedRecordStore store,
+                              BiConsumer<Integer, ReplicatedMapMergeTypes<Object, Object>> consumer) {
         int partitionId = store.getPartitionId();
 
         Iterator<ReplicatedRecord> iterator = store.recordIterator();
         while (iterator.hasNext()) {
             ReplicatedRecord record = iterator.next();
 
-            ReplicatedMapMergeTypes mergingEntry = createMergingEntry(getSerializationService(), record);
+            ReplicatedMapMergeTypes<Object, Object> mergingEntry = createMergingEntry(getSerializationService(), record);
             consumer.accept(partitionId, mergingEntry);
         }
-    }
-
-    @Override
-    protected void mergeStoreLegacy(ReplicatedRecordStore store, BiConsumer<Integer, Operation> consumer) {
-        int partitionId = store.getPartitionId();
-        String name = store.getName();
-        ReplicatedMapMergePolicy mergePolicy = ((ReplicatedMapMergePolicy) getMergePolicy(name));
-
-        Iterator<ReplicatedRecord> iterator = store.recordIterator();
-        while (iterator.hasNext()) {
-            ReplicatedRecord record = iterator.next();
-
-            ReplicatedMapEntryView entryView = createEntryView(record);
-            LegacyMergeOperation operation = new LegacyMergeOperation(name, record.getKeyInternal(), entryView, mergePolicy);
-
-            consumer.accept(partitionId, operation);
-        }
-    }
-
-    private ReplicatedMapEntryView createEntryView(ReplicatedRecord record) {
-        return new ReplicatedMapEntryView<Object, Object>()
-                .setKey(getSerializationService().toObject(record.getKeyInternal()))
-                .setValue(getSerializationService().toObject(record.getValueInternal()))
-                .setHits(record.getHits())
-                .setTtl(record.getTtlMillis())
-                .setLastAccessTime(record.getLastAccessTime())
-                .setCreationTime(record.getCreationTime())
-                .setLastUpdateTime(record.getUpdateTime());
     }
 
     @Override
@@ -108,8 +77,9 @@ class ReplicatedMapMergeRunnable
     }
 
     @Override
-    protected Object getMergePolicy(String dataStructureName) {
-        return service.getMergePolicy(dataStructureName);
+    protected SplitBrainMergePolicy getMergePolicy(String dataStructureName) {
+        ReplicatedMapConfig replicatedMapConfig = getReplicatedMapConfig(dataStructureName);
+        return mergePolicyProvider.getMergePolicy(replicatedMapConfig.getMergePolicyConfig().getPolicy());
     }
 
     @Override
@@ -124,8 +94,10 @@ class ReplicatedMapMergeRunnable
 
     @Override
     protected OperationFactory createMergeOperationFactory(String dataStructureName,
-                                                           SplitBrainMergePolicy<Object, ReplicatedMapMergeTypes> mergePolicy,
-                                                           int[] partitions, List<ReplicatedMapMergeTypes>[] entries) {
+                                                           SplitBrainMergePolicy<Object, ReplicatedMapMergeTypes<Object, Object>,
+                                                                   Object> mergePolicy,
+                                                           int[] partitions,
+                                                           List<ReplicatedMapMergeTypes<Object, Object>>[] entries) {
         return new MergeOperationFactory(dataStructureName, partitions, entries, mergePolicy);
     }
 

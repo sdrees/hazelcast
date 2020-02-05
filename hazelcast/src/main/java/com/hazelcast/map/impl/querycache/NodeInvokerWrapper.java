@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2008-2018, Hazelcast, Inc. All Rights Reserved.
+ * Copyright (c) 2008-2020, Hazelcast, Inc. All Rights Reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -16,18 +16,18 @@
 
 package com.hazelcast.map.impl.querycache;
 
+import com.hazelcast.cluster.Member;
 import com.hazelcast.map.impl.MapService;
-import com.hazelcast.nio.Address;
-import com.hazelcast.spi.Operation;
-import com.hazelcast.spi.OperationFactory;
-import com.hazelcast.spi.OperationService;
+import com.hazelcast.spi.impl.operationservice.Operation;
+import com.hazelcast.spi.impl.operationservice.OperationFactory;
+import com.hazelcast.spi.impl.operationservice.OperationService;
 
 import java.util.Map;
 import java.util.concurrent.Future;
 
-import static com.hazelcast.util.Preconditions.checkInstanceOf;
-import static com.hazelcast.util.Preconditions.checkNotNegative;
-import static com.hazelcast.util.Preconditions.checkNotNull;
+import static com.hazelcast.internal.util.Preconditions.checkInstanceOf;
+import static com.hazelcast.internal.util.Preconditions.checkNotNegative;
+import static com.hazelcast.internal.util.Preconditions.checkNotNull;
 
 /**
  * Invocation functionality for node-side {@link QueryCacheContext}.
@@ -52,7 +52,7 @@ public class NodeInvokerWrapper implements InvokerWrapper {
     }
 
     @Override
-    public Map<Integer, Object> invokeOnAllPartitions(Object request) throws Exception {
+    public Map<Integer, Object> invokeOnAllPartitions(Object request, boolean urgent) throws Exception {
         checkInstanceOf(OperationFactory.class, request, "request");
 
         OperationFactory factory = (OperationFactory) request;
@@ -60,16 +60,16 @@ public class NodeInvokerWrapper implements InvokerWrapper {
     }
 
     @Override
-    public Future invokeOnTarget(Object operation, Address address) {
+    public Future invokeOnTarget(Object operation, Member member) {
         checkNotNull(operation, "operation cannot be null");
-        checkNotNull(address, "address cannot be null");
+        checkNotNull(member, "address cannot be null");
 
         Operation op = (Operation) operation;
-        return operationService.invokeOnTarget(MapService.SERVICE_NAME, op, address);
+        return operationService.invokeOnTarget(MapService.SERVICE_NAME, op, member.getAddress());
     }
 
     @Override
-    public Object invoke(Object operation) {
+    public Object invoke(Object operation, boolean urgent) {
         throw new UnsupportedOperationException();
     }
 

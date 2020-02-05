@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2008-2018, Hazelcast, Inc. All Rights Reserved.
+ * Copyright (c) 2008-2020, Hazelcast, Inc. All Rights Reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -16,15 +16,19 @@
 
 package com.hazelcast.config;
 
-import com.hazelcast.internal.cluster.Versions;
+import com.hazelcast.internal.config.ConfigDataSerializerHook;
 import com.hazelcast.nio.ObjectDataInput;
 import com.hazelcast.nio.ObjectDataOutput;
 import com.hazelcast.nio.serialization.IdentifiedDataSerializable;
-import com.hazelcast.nio.serialization.impl.Versioned;
+import com.hazelcast.wan.WanConsumer;
 
+import javax.annotation.Nonnull;
 import java.io.IOException;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.Objects;
+
+import static com.hazelcast.internal.util.Preconditions.checkNotNull;
 
 /**
  * Config for processing WAN events received from a target cluster.
@@ -37,10 +41,10 @@ import java.util.Map;
  * <p>
  * NOTE: EE only
  *
- * @see WanReplicationConfig#setWanConsumerConfig(WanConsumerConfig)
- * @see WanPublisherConfig#setClassName(String)
+ * @see WanReplicationConfig#setConsumerConfig(WanConsumerConfig)
+ * @see WanCustomPublisherConfig#setClassName(String)
  */
-public class WanConsumerConfig implements IdentifiedDataSerializable, Versioned {
+public class WanConsumerConfig implements IdentifiedDataSerializable {
 
     /**
      * @see #isPersistWanReplicatedData
@@ -49,8 +53,8 @@ public class WanConsumerConfig implements IdentifiedDataSerializable, Versioned 
 
     private boolean persistWanReplicatedData = DEFAULT_PERSIST_WAN_REPLICATED_DATA;
     private String className;
-    private Object implementation;
-    private Map<String, Comparable> properties = new HashMap<String, Comparable>();
+    private WanConsumer implementation;
+    private Map<String, Comparable> properties = new HashMap<>();
 
     /**
      * Returns the properties for the custom WAN consumer.
@@ -73,7 +77,7 @@ public class WanConsumerConfig implements IdentifiedDataSerializable, Versioned 
 
     /**
      * Returns the fully qualified class name of the class implementing
-     * WanReplicationConsumer.
+     * {@link WanConsumer}.
      *
      * @return fully qualified class name
      */
@@ -83,40 +87,43 @@ public class WanConsumerConfig implements IdentifiedDataSerializable, Versioned 
 
     /**
      * Sets the fully qualified class name of the class implementing
-     * WanReplicationConsumer.
+     * {@link WanConsumer}.
      * The class name may be {@code null} in which case the implementation or
      * the default processing logic for incoming WAN events will be used.
      *
      * @param className fully qualified class name
      * @return this config
-     * @see #setImplementation(Object)
+     * @see #setImplementation(WanConsumer)
      */
-    public WanConsumerConfig setClassName(String className) {
-        this.className = className;
+    public WanConsumerConfig setClassName(@Nonnull String className) {
+        this.className = checkNotNull(className, "Wan consumer class name must contain text");
+        this.implementation = null;
         return this;
     }
 
     /**
-     * Returns the implementation implementing WanReplicationConsumer.
+     * Returns the implementation implementing
+     * {@link WanConsumer}.
      *
      * @return the implementation for this WAN consumer
      */
-    public Object getImplementation() {
+    public WanConsumer getImplementation() {
         return implementation;
     }
 
     /**
      * Sets the implementation for this WAN consumer. The object must implement
-     * WanReplicationConsumer.
+     * {@link WanConsumer}.
      * The implementation may be {@code null} in which case the class name or
      * the default processing logic for incoming WAN events will be used.
      *
-     * @param implementation the object implementing WanReplicationConsumer
+     * @param implementation the object implementing {@link WanConsumer}
      * @return this config
      * @see #setClassName(String)
      */
-    public WanConsumerConfig setImplementation(Object implementation) {
-        this.implementation = implementation;
+    public WanConsumerConfig setImplementation(@Nonnull WanConsumer implementation) {
+        this.implementation = checkNotNull(implementation, "Wan consumer cannot be null!");
+        this.className = null;
         return this;
     }
 
@@ -157,7 +164,7 @@ public class WanConsumerConfig implements IdentifiedDataSerializable, Versioned 
     }
 
     @Override
-    public int getId() {
+    public int getClassId() {
         return ConfigDataSerializerHook.WAN_CONSUMER_CONFIG;
     }
 
@@ -171,25 +178,40 @@ public class WanConsumerConfig implements IdentifiedDataSerializable, Versioned 
         }
         out.writeUTF(className);
         out.writeObject(implementation);
-
-        // RU_COMPAT_3_10
-        if (out.getVersion().isGreaterOrEqual(Versions.V3_11)) {
-            out.writeBoolean(persistWanReplicatedData);
-        }
+        out.writeBoolean(persistWanReplicatedData);
     }
 
     @Override
     public void readData(ObjectDataInput in) throws IOException {
         int size = in.readInt();
         for (int i = 0; i < size; i++) {
-            properties.put(in.readUTF(), (Comparable) in.readObject());
+            properties.put(in.readUTF(), in.readObject());
         }
         className = in.readUTF();
         implementation = in.readObject();
+        persistWanReplicatedData = in.readBoolean();
+    }
 
-        // RU_COMPAT_3_10
-        if (in.getVersion().isGreaterOrEqual(Versions.V3_11)) {
-            persistWanReplicatedData = in.readBoolean();
+    @Override
+    @SuppressWarnings("checkstyle:npathcomplexity")
+    public boolean equals(Object o) {
+        if (this == o) {
+            return true;
         }
+        if (o == null || getClass() != o.getClass()) {
+            return false;
+        }
+
+        WanConsumerConfig that = (WanConsumerConfig) o;
+
+        return persistWanReplicatedData == that.persistWanReplicatedData
+            && Objects.equals(className, that.className)
+            && Objects.equals(implementation, that.implementation)
+            && Objects.equals(properties, that.properties);
+    }
+
+    @Override
+    public int hashCode() {
+        return Objects.hash(persistWanReplicatedData, className, implementation, properties);
     }
 }

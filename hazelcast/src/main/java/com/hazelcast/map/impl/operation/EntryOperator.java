@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2008-2018, Hazelcast, Inc. All Rights Reserved.
+ * Copyright (c) 2008-2020, Hazelcast, Inc. All Rights Reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -16,11 +16,14 @@
 
 package com.hazelcast.map.impl.operation;
 
+import com.hazelcast.cluster.Address;
 import com.hazelcast.config.InMemoryFormat;
 import com.hazelcast.core.EntryEventType;
 import com.hazelcast.core.ReadOnly;
+import com.hazelcast.internal.monitor.impl.LocalMapStatsImpl;
+import com.hazelcast.internal.partition.IPartitionService;
 import com.hazelcast.internal.serialization.InternalSerializationService;
-import com.hazelcast.map.EntryBackupProcessor;
+import com.hazelcast.internal.util.Clock;
 import com.hazelcast.map.EntryProcessor;
 import com.hazelcast.map.impl.LazyMapEntry;
 import com.hazelcast.map.impl.LocalMapStatsProvider;
@@ -30,19 +33,15 @@ import com.hazelcast.map.impl.MapServiceContext;
 import com.hazelcast.map.impl.event.MapEventPublisher;
 import com.hazelcast.map.impl.record.Record;
 import com.hazelcast.map.impl.recordstore.RecordStore;
-import com.hazelcast.monitor.impl.LocalMapStatsImpl;
-import com.hazelcast.nio.Address;
-import com.hazelcast.nio.serialization.Data;
+import com.hazelcast.internal.serialization.Data;
 import com.hazelcast.query.Predicate;
-import com.hazelcast.query.TruePredicate;
-import com.hazelcast.query.impl.FalsePredicate;
+import com.hazelcast.query.Predicates;
 import com.hazelcast.query.impl.QueryableEntry;
-import com.hazelcast.spi.BackupOperation;
-import com.hazelcast.spi.EventService;
-import com.hazelcast.spi.NodeEngine;
-import com.hazelcast.spi.partition.IPartitionService;
+import com.hazelcast.spi.impl.NodeEngine;
+import com.hazelcast.spi.impl.eventservice.EventService;
+import com.hazelcast.spi.impl.operationservice.BackupOperation;
 
-import java.util.Map;
+import java.util.Map.Entry;
 
 import static com.hazelcast.config.InMemoryFormat.OBJECT;
 import static com.hazelcast.core.EntryEventType.ADDED;
@@ -50,12 +49,12 @@ import static com.hazelcast.core.EntryEventType.REMOVED;
 import static com.hazelcast.core.EntryEventType.UPDATED;
 import static com.hazelcast.internal.util.ToHeapDataConverter.toHeapData;
 import static com.hazelcast.map.impl.MapService.SERVICE_NAME;
+import static com.hazelcast.map.impl.record.Record.UNSET;
 import static com.hazelcast.wan.impl.CallerProvenance.NOT_WAN;
-import static com.hazelcast.map.impl.recordstore.RecordStore.DEFAULT_MAX_IDLE;
-import static com.hazelcast.map.impl.recordstore.RecordStore.DEFAULT_TTL;
 
 /**
- * Operator for single key processing logic of {@link EntryProcessor}/{@link EntryBackupProcessor} related operations.
+ * Operator for single key processing logic of {@link
+ * EntryProcessor} and backup entry processor related operations.
  */
 public final class EntryOperator {
 
@@ -80,14 +79,15 @@ public final class EntryOperator {
     private final InMemoryFormat inMemoryFormat;
 
     private EntryProcessor entryProcessor;
-    private EntryBackupProcessor backupProcessor;
+    private EntryProcessor backupProcessor;
 
     // these fields can be used to reset this operator
+    private boolean didMatchPredicate;
     private Data dataKey;
     private Object oldValue;
-    private Object newValue;
     private EntryEventType eventType;
     private Data result;
+    private LockAwareLazyMapEntry entry;
 
     @SuppressWarnings("checkstyle:executablestatementcount")
     private EntryOperator(MapOperation mapOperation, Object processor, Predicate predicate, boolean collectWanEvents) {
@@ -113,11 +113,12 @@ public final class EntryOperator {
         this.mapEventPublisher = mapServiceContext.getMapEventPublisher();
         this.partitionId = recordStore.getPartitionId();
         this.callerAddress = mapOperation.getCallerAddress();
+        this.entry = new LockAwareLazyMapEntry();
     }
 
     private void setProcessor(Object processor) {
         if (backup) {
-            backupProcessor = ((EntryBackupProcessor) processor);
+            backupProcessor = ((EntryProcessor) processor);
             entryProcessor = null;
         } else {
             entryProcessor = ((EntryProcessor) processor);
@@ -137,23 +138,26 @@ public final class EntryOperator {
         return new EntryOperator(mapOperation, processor, predicate, false);
     }
 
-    public EntryOperator init(Data dataKey, Object oldValue, Object newValue, Data result, EntryEventType eventType) {
+    public EntryOperator init(Data dataKey, Object oldValue, Object newValue, Data result,
+                              EntryEventType eventType, Boolean locked) {
         this.dataKey = dataKey;
         this.oldValue = oldValue;
-        this.newValue = newValue;
         this.eventType = eventType;
         this.result = result;
+        this.didMatchPredicate = true;
+        this.entry.init(ss, dataKey, newValue != null ? newValue : oldValue,
+                mapContainer.getExtractors(), locked);
         return this;
     }
 
     public EntryOperator operateOnKey(Data dataKey) {
-        init(dataKey, null, null, null, null);
+        init(dataKey, null, null, null, null, null);
 
         if (belongsAnotherPartition(dataKey)) {
             return this;
         }
 
-        oldValue = recordStore.get(dataKey, backup, callerAddress);
+        oldValue = recordStore.get(dataKey, backup, callerAddress, false);
         // predicated entry processors can only be applied to existing entries
         // so if we have a predicate and somehow(due to expiration or split-brain healing)
         // we found value null, we should skip that entry.
@@ -171,16 +175,15 @@ public final class EntryOperator {
     }
 
     private EntryOperator operateOnKeyValueInternal(Data dataKey, Object oldValue, Boolean locked) {
-        init(dataKey, oldValue, null, null, null);
+        init(dataKey, oldValue, null, null, null, locked);
 
-        Map.Entry entry = createMapEntry(dataKey, oldValue, locked);
         if (outOfPredicateScope(entry)) {
+            this.didMatchPredicate = false;
             return this;
         }
 
         process(entry);
         findModificationType(entry);
-        newValue = entry.getValue();
 
         if (readOnly && entryWasModified()) {
             throwModificationInReadOnlyException();
@@ -196,8 +199,8 @@ public final class EntryOperator {
         return eventType;
     }
 
-    public Object getNewValue() {
-        return newValue;
+    public Object getByPreferringDataNewValue() {
+        return entry.getByPrioritizingDataValue();
     }
 
     public Object getOldValue() {
@@ -209,13 +212,21 @@ public final class EntryOperator {
     }
 
     public EntryOperator doPostOperateOps() {
+        if (!didMatchPredicate) {
+            return this;
+        }
         if (eventType == null) {
-            // when event type is null, it means this is a read-only entry processor and not modified entry.
+            // when event type is null, it means this is a
+            // read-only entry processor and not modified entry.
+            onTouched();
             return this;
         }
         switch (eventType) {
-            case ADDED:
             case UPDATED:
+                onTouched();
+                onAddedOrUpdated();
+                break;
+            case ADDED:
                 onAddedOrUpdated();
                 break;
             case REMOVED:
@@ -240,57 +251,19 @@ public final class EntryOperator {
         return this;
     }
 
-    private Object clonedOrRawOldValue() {
-        return shouldClone ? ss.toObject(ss.toData(oldValue)) : oldValue;
-    }
-
-    // Needed for MultipleEntryOperation.
-    private boolean belongsAnotherPartition(Data key) {
-        return partitionService.getPartitionId(key) != partitionId;
-    }
-
-    private boolean outOfPredicateScope(Map.Entry entry) {
-        assert entry instanceof QueryableEntry;
-
-        if (predicate == null || predicate == TruePredicate.INSTANCE) {
-            return false;
-        }
-
-        return predicate == FalsePredicate.INSTANCE || !predicate.apply(entry);
-    }
-
-    private Map.Entry createMapEntry(Data key, Object value, Boolean locked) {
-        return new LockAwareLazyMapEntry(key, value, ss, mapContainer.getExtractors(), locked);
-    }
-
-    private void findModificationType(Map.Entry entry) {
-        LazyMapEntry lazyMapEntry = (LazyMapEntry) entry;
-
-        if (!lazyMapEntry.isModified()
-                || (oldValue == null && lazyMapEntry.hasNullValue())) {
-            // read only
-            eventType = null;
-            return;
-        }
-
-        if (lazyMapEntry.hasNullValue()) {
-            eventType = REMOVED;
-            return;
-        }
-
-        eventType = oldValue == null ? ADDED : UPDATED;
-    }
-
     private void onAddedOrUpdated() {
+        Object newValue = inMemoryFormat == OBJECT
+                ? entry.getValue() : entry.getByPrioritizingDataValue();
         if (backup) {
             recordStore.putBackup(dataKey, newValue, NOT_WAN);
         } else {
-            recordStore.setWithUncountedAccess(dataKey, newValue, DEFAULT_TTL, DEFAULT_MAX_IDLE);
+            recordStore.setWithUncountedAccess(dataKey, newValue, UNSET, UNSET);
             if (mapOperation.isPostProcessing(recordStore)) {
                 Record record = recordStore.getRecord(dataKey);
                 newValue = record == null ? null : record.getValue();
+                entry.setValueByInMemoryFormat(inMemoryFormat, newValue);
             }
-            mapServiceContext.interceptAfterPut(mapName, newValue);
+            mapServiceContext.interceptAfterPut(mapContainer.getInterceptorRegistry(), newValue);
             stats.incrementPutLatencyNanos(getLatencyNanos(startTimeNanos));
         }
     }
@@ -300,8 +273,51 @@ public final class EntryOperator {
             recordStore.removeBackup(dataKey, NOT_WAN);
         } else {
             recordStore.delete(dataKey, NOT_WAN);
-            mapServiceContext.interceptAfterRemove(mapName, oldValue);
+            mapServiceContext.interceptAfterRemove(mapContainer.getInterceptorRegistry(), oldValue);
             stats.incrementRemoveLatencyNanos(getLatencyNanos(startTimeNanos));
+        }
+    }
+
+    private Object clonedOrRawOldValue() {
+        return shouldClone ? ss.toObject(ss.toData(oldValue)) : oldValue;
+    }
+
+    // Needed for MultipleEntryOperation.
+    private boolean belongsAnotherPartition(Data key) {
+        return partitionService.getPartitionId(key) != partitionId;
+    }
+
+    private boolean outOfPredicateScope(Entry entry) {
+        assert entry instanceof QueryableEntry;
+
+        if (predicate == null || predicate == Predicates.alwaysTrue()) {
+            return false;
+        }
+
+        return predicate == Predicates.alwaysFalse() || !predicate.apply(entry);
+    }
+
+    private void findModificationType(LazyMapEntry mapEntry) {
+        if (!mapEntry.isModified()
+                || (oldValue == null && mapEntry.hasNullValue())) {
+            // read only
+            eventType = null;
+            return;
+        }
+
+        if (mapEntry.hasNullValue()) {
+            eventType = REMOVED;
+            return;
+        }
+
+        eventType = oldValue == null ? ADDED : UPDATED;
+    }
+
+    private void onTouched() {
+        // updates access time if record exists
+        Record record = recordStore.getRecord(dataKey);
+        if (record != null) {
+            recordStore.accessRecord(record, Clock.currentTimeMillis());
         }
     }
 
@@ -309,9 +325,9 @@ public final class EntryOperator {
         return System.nanoTime() - beginTimeNanos;
     }
 
-    private void process(Map.Entry entry) {
+    private void process(Entry entry) {
         if (backup) {
-            backupProcessor.processBackup(entry);
+            backupProcessor.process(entry);
             return;
         }
 
@@ -331,13 +347,14 @@ public final class EntryOperator {
         if (eventType == REMOVED) {
             mapOperation.publishWanRemove(dataKey);
         } else {
-            mapOperation.publishWanUpdate(dataKey, newValue);
+            mapOperation.publishWanUpdate(dataKey, entry.getByPrioritizingDataValue());
         }
     }
 
     private void publishEntryEvent() {
         Object oldValue = getOrNullOldValue();
-        mapEventPublisher.publishEvent(callerAddress, mapName, eventType, toHeapData(dataKey), oldValue, newValue);
+        mapEventPublisher.publishEvent(callerAddress, mapName, eventType,
+                toHeapData(dataKey), oldValue, entry.getByPrioritizingDataValue());
     }
 
     /**

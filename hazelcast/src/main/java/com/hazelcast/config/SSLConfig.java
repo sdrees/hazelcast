@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2008-2018, Hazelcast, Inc. All Rights Reserved.
+ * Copyright (c) 2008-2020, Hazelcast, Inc. All Rights Reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -16,7 +16,12 @@
 
 package com.hazelcast.config;
 
+import javax.annotation.Nonnull;
+import java.util.Objects;
 import java.util.Properties;
+
+import static com.hazelcast.internal.util.Preconditions.checkHasText;
+import static com.hazelcast.internal.util.Preconditions.checkNotNull;
 
 /**
  * SSL configuration.
@@ -28,10 +33,22 @@ public final class SSLConfig {
     private Object factoryImplementation;
     private Properties properties = new Properties();
 
+    public SSLConfig() {
+    }
+
+    public SSLConfig(SSLConfig sslConfig) {
+        enabled = sslConfig.enabled;
+        factoryClassName = sslConfig.factoryClassName;
+        factoryImplementation = sslConfig.factoryImplementation;
+        properties = new Properties();
+        properties.putAll(sslConfig.properties);
+    }
+
     /**
      * Returns the name of the implementation class.
      * <p>
-     * Class can either be an  {@link com.hazelcast.nio.ssl.SSLContextFactory} or {@link com.hazelcast.nio.ssl.SSLEngineFactory}.
+     * Class can either be an {@link com.hazelcast.nio.ssl.SSLContextFactory} or {@code com.hazelcast.nio.ssl.SSLEngineFactory}
+     * (Enterprise edition).
      *
      * @return the name implementation class
      */
@@ -42,12 +59,14 @@ public final class SSLConfig {
     /**
      * Sets the name for the implementation class.
      * <p>
-     * Class can either be an  {@link com.hazelcast.nio.ssl.SSLContextFactory} or {@link com.hazelcast.nio.ssl.SSLEngineFactory}.
+     * Class can either be an {@link com.hazelcast.nio.ssl.SSLContextFactory} or {@code com.hazelcast.nio.ssl.SSLEngineFactory}
+     * (Enterprise edition).
      *
      * @param factoryClassName the name implementation class
      */
-    public SSLConfig setFactoryClassName(String factoryClassName) {
-        this.factoryClassName = factoryClassName;
+    public SSLConfig setFactoryClassName(@Nonnull String factoryClassName) {
+        this.factoryClassName = checkHasText(factoryClassName, "SSL context factory class name cannot be null!");
+        this.factoryImplementation = null;
         return this;
     }
 
@@ -74,20 +93,22 @@ public final class SSLConfig {
      * Sets the implementation object.
      * <p>
      * Object must be instance of an {@link com.hazelcast.nio.ssl.SSLContextFactory} or
-     * {@link com.hazelcast.nio.ssl.SSLEngineFactory}.
+     * {@code com.hazelcast.nio.ssl.SSLEngineFactory} (Enterprise edition).
      *
      * @param factoryImplementation the implementation object
      * @return this SSLConfig instance
      */
-    public SSLConfig setFactoryImplementation(Object factoryImplementation) {
-        this.factoryImplementation = factoryImplementation;
+    public SSLConfig setFactoryImplementation(@Nonnull Object factoryImplementation) {
+        this.factoryImplementation = checkNotNull(factoryImplementation, "SSL context factory cannot be null!");
+        this.factoryClassName = null;
         return this;
     }
 
     /**
      * Returns the factory implementation object.
      * <p>
-     * Object is instance of an {@link com.hazelcast.nio.ssl.SSLContextFactory} or {@link com.hazelcast.nio.ssl.SSLEngineFactory}.
+     * Object is instance of an {@link com.hazelcast.nio.ssl.SSLContextFactory} or {@code com.hazelcast.nio.ssl.SSLEngineFactory}
+     * (Enterprise edition).
      *
      * @return the factory implementation object
      */
@@ -151,5 +172,27 @@ public final class SSLConfig {
                 + ", implementation=" + factoryImplementation
                 + ", properties=" + properties
                 + '}';
+    }
+
+    @Override
+    public boolean equals(Object o) {
+        if (this == o) {
+            return true;
+        }
+        if (o == null || getClass() != o.getClass()) {
+            return false;
+        }
+
+        SSLConfig sslConfig = (SSLConfig) o;
+
+        return Objects.equals(enabled, sslConfig.enabled)
+            && Objects.equals(properties, sslConfig.properties)
+            && Objects.equals(factoryImplementation, sslConfig.factoryImplementation)
+            && Objects.equals(factoryClassName, sslConfig.factoryClassName);
+    }
+
+    @Override
+    public int hashCode() {
+        return Objects.hash(enabled, factoryImplementation, factoryClassName, properties);
     }
 }

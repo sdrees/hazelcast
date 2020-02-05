@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2008-2018, Hazelcast, Inc. All Rights Reserved.
+ * Copyright (c) 2008-2020, Hazelcast, Inc. All Rights Reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -16,6 +16,7 @@
 
 package com.hazelcast.config;
 
+import com.hazelcast.internal.config.ConfigDataSerializerHook;
 import com.hazelcast.nio.ObjectDataInput;
 import com.hazelcast.nio.ObjectDataOutput;
 import com.hazelcast.nio.serialization.IdentifiedDataSerializable;
@@ -25,7 +26,7 @@ import java.io.IOException;
 /**
  * Configuration object for the WAN sync mechanism.
  *
- * @see WanPublisherConfig
+ * @see WanBatchPublisherConfig
  * @since 3.11
  */
 public class WanSyncConfig implements IdentifiedDataSerializable {
@@ -69,7 +70,7 @@ public class WanSyncConfig implements IdentifiedDataSerializable {
     }
 
     @Override
-    public int getId() {
+    public int getClassId() {
         return ConfigDataSerializerHook.WAN_SYNC_CONFIG;
     }
 
@@ -88,5 +89,24 @@ public class WanSyncConfig implements IdentifiedDataSerializable {
         return "WanSyncConfig{"
                 + "consistencyCheckStrategy=" + consistencyCheckStrategy
                 + '}';
+    }
+
+    @Override
+    public boolean equals(Object o) {
+        if (this == o) {
+            return true;
+        }
+        if (o == null || getClass() != o.getClass()) {
+            return false;
+        }
+
+        WanSyncConfig that = (WanSyncConfig) o;
+
+        return consistencyCheckStrategy == that.consistencyCheckStrategy;
+    }
+
+    @Override
+    public int hashCode() {
+        return consistencyCheckStrategy != null ? consistencyCheckStrategy.hashCode() : 0;
     }
 }

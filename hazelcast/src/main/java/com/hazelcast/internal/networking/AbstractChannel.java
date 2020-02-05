@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2008-2018, Hazelcast, Inc. All Rights Reserved.
+ * Copyright (c) 2008-2020, Hazelcast, Inc. All Rights Reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -18,6 +18,7 @@ package com.hazelcast.internal.networking;
 
 import com.hazelcast.logging.ILogger;
 import com.hazelcast.logging.Logger;
+import com.hazelcast.internal.nio.IOUtil;
 
 import java.io.IOException;
 import java.net.InetSocketAddress;
@@ -31,8 +32,8 @@ import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.atomic.AtomicIntegerFieldUpdater;
 import java.util.concurrent.atomic.AtomicReferenceFieldUpdater;
 
-import static com.hazelcast.util.Preconditions.checkNotNegative;
-import static com.hazelcast.util.Preconditions.checkNotNull;
+import static com.hazelcast.internal.util.Preconditions.checkNotNegative;
+import static com.hazelcast.internal.util.Preconditions.checkNotNull;
 import static java.lang.String.format;
 import static java.util.Collections.newSetFromMap;
 
@@ -93,7 +94,10 @@ public abstract class AbstractChannel implements Channel {
     @Override
     public SocketAddress remoteSocketAddress() {
         if (remoteAddress == null) {
-            REMOTE_ADDRESS.compareAndSet(this, null, socket().getRemoteSocketAddress());
+            Socket socket = socket();
+            if (socket != null) {
+                REMOTE_ADDRESS.compareAndSet(this, null, socket.getRemoteSocketAddress());
+            }
         }
         return remoteAddress;
     }
@@ -101,34 +105,49 @@ public abstract class AbstractChannel implements Channel {
     @Override
     public SocketAddress localSocketAddress() {
         if (localAddress == null) {
-            LOCAL_ADDRESS.compareAndSet(this, null, socket().getLocalSocketAddress());
+            Socket socket = socket();
+            if (socket != null) {
+                LOCAL_ADDRESS.compareAndSet(this, null, socket().getLocalSocketAddress());
+            }
         }
         return localAddress;
     }
 
     @Override
     public void connect(InetSocketAddress address, int timeoutMillis) throws IOException {
-        checkNotNull(address, "address");
-        checkNotNegative(timeoutMillis, "timeoutMillis can't be negative");
-
-        // since the connect method is blocking, we need to configure blocking.
-        socketChannel.configureBlocking(true);
-
         try {
-            if (timeoutMillis > 0) {
-                socketChannel.socket().connect(address, timeoutMillis);
-            } else {
-                socketChannel.connect(address);
+            if (!clientMode) {
+                throw new IllegalStateException("Can't call connect on a Channel that isn't in clientMode");
             }
-        } catch (SocketException ex) {
-            //we want to include the address in the exception.
-            SocketException newEx = new SocketException(ex.getMessage() + " to address " + address);
-            newEx.setStackTrace(ex.getStackTrace());
-            throw newEx;
-        }
 
-        if (logger.isFinestEnabled()) {
-            logger.finest("Successfully connected to: " + address + " using socket " + socketChannel.socket());
+            checkNotNull(address, "address");
+            checkNotNegative(timeoutMillis, "timeoutMillis can't be negative");
+
+            // since the connect method is blocking, we need to configure blocking.
+            socketChannel.configureBlocking(true);
+
+            try {
+                if (timeoutMillis > 0) {
+                    socketChannel.socket().connect(address, timeoutMillis);
+                } else {
+                    socketChannel.connect(address);
+                }
+            } catch (SocketException ex) {
+                //we want to include the address in the exception.
+                SocketException newEx = new SocketException(ex.getMessage() + " to address " + address);
+                newEx.setStackTrace(ex.getStackTrace());
+                throw newEx;
+            }
+
+            if (logger.isFinestEnabled()) {
+                logger.finest("Successfully connected to: " + address + " using socket " + socketChannel.socket());
+            }
+        } catch (RuntimeException e) {
+            IOUtil.closeResource(this);
+            throw e;
+        } catch (IOException e) {
+            IOUtil.closeResource(this);
+            throw e;
         }
     }
 
@@ -147,8 +166,7 @@ public abstract class AbstractChannel implements Channel {
     }
 
     /**
-     * Template method that is called when the socket channel closed. It is
-     * called before the {@code socketChannel} is closed.
+     * Template method that is called when the Channel is closed.
      *
      * It will be called only once.
      */

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2008-2018, Hazelcast, Inc. All Rights Reserved.
+ * Copyright (c) 2008-2020, Hazelcast, Inc. All Rights Reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -52,6 +52,6 @@ public interface EventJournalEventAdapter<K, V, EJ_TYPE> extends Serializable {
      * events may have separate enums for event types.
      */
     enum EventType {
-        ADDED, REMOVED, UPDATED, EVICTED;
+        ADDED, REMOVED, UPDATED, EVICTED, LOADED;
     }
 }

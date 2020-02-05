@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2008-2018, Hazelcast, Inc. All Rights Reserved.
+ * Copyright (c) 2008-2020, Hazelcast, Inc. All Rights Reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -21,7 +21,7 @@ import com.hazelcast.nio.ObjectDataOutput;
 import com.hazelcast.nio.serialization.IdentifiedDataSerializable;
 import com.hazelcast.spi.merge.MergingValue;
 import com.hazelcast.spi.merge.SplitBrainMergePolicy;
-import com.hazelcast.spi.serialization.SerializationService;
+import com.hazelcast.internal.serialization.SerializationService;
 
 /**
  * Abstract implementation of {@link SplitBrainMergePolicy} for the out-of-the-box merge policies.
@@ -33,8 +33,8 @@ import com.hazelcast.spi.serialization.SerializationService;
  *            or a composition like {@code MergingEntry<String, V> & MergingHits}
  * @since 3.10
  */
-public abstract class AbstractSplitBrainMergePolicy<V, T extends MergingValue<V>>
-        implements SplitBrainMergePolicy<V, T>, IdentifiedDataSerializable {
+public abstract class AbstractSplitBrainMergePolicy<V, T extends MergingValue<V>, R>
+        implements SplitBrainMergePolicy<V, T, R>, IdentifiedDataSerializable {
 
     @Override
     public int getFactoryId() {

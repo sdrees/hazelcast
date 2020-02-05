@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2008-2018, Hazelcast, Inc. All Rights Reserved.
+ * Copyright (c) 2008-2020, Hazelcast, Inc. All Rights Reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -21,13 +21,13 @@ import com.hazelcast.nio.ObjectDataOutput;
 import com.hazelcast.nio.serialization.IdentifiedDataSerializable;
 import com.hazelcast.spi.merge.RingbufferMergeData;
 import com.hazelcast.spi.merge.SplitBrainMergeTypes.RingbufferMergeTypes;
-import com.hazelcast.spi.serialization.SerializationService;
-import com.hazelcast.spi.serialization.SerializationServiceAware;
+import com.hazelcast.internal.serialization.SerializationService;
+import com.hazelcast.internal.serialization.SerializationServiceAware;
 
 import java.io.IOException;
 
-import static com.hazelcast.nio.IOUtil.readObject;
-import static com.hazelcast.nio.IOUtil.writeObject;
+import static com.hazelcast.internal.nio.IOUtil.readObject;
+import static com.hazelcast.internal.nio.IOUtil.writeObject;
 
 /**
  * Implementation of {@link RingbufferMergeTypes}.
@@ -51,12 +51,12 @@ public class RingbufferMergingValueImpl
     }
 
     @Override
-    public RingbufferMergeData getValue() {
+    public RingbufferMergeData getRawValue() {
         return value;
     }
 
     @Override
-    public <DV> DV getDeserializedValue() {
+    public RingbufferMergeData getValue() {
         final RingbufferMergeData deserializedValues = new RingbufferMergeData(value.getItems().length);
         deserializedValues.setHeadSequence(value.getHeadSequence());
         deserializedValues.setTailSequence(value.getTailSequence());
@@ -65,7 +65,7 @@ public class RingbufferMergingValueImpl
             deserializedValues.set(seq, serializationService.toObject(value.read(seq)));
         }
 
-        return (DV) deserializedValues;
+        return deserializedValues;
     }
 
     public RingbufferMergingValueImpl setValues(RingbufferMergeData values) {
@@ -109,7 +109,7 @@ public class RingbufferMergingValueImpl
     }
 
     @Override
-    public int getId() {
+    public int getClassId() {
         return SplitBrainDataSerializerHook.RINGBUFFER_MERGING_ENTRY;
     }
 

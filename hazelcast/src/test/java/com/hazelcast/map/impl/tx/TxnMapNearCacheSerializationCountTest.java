@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2008-2018, Hazelcast, Inc. All Rights Reserved.
+ * Copyright (c) 2008-2020, Hazelcast, Inc. All Rights Reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -23,18 +23,19 @@ import com.hazelcast.core.HazelcastInstance;
 import com.hazelcast.internal.adapter.DataStructureAdapter.DataStructureMethods;
 import com.hazelcast.internal.adapter.DataStructureAdapterMethod;
 import com.hazelcast.internal.adapter.TransactionalMapDataStructureAdapter;
-import com.hazelcast.internal.nearcache.AbstractNearCacheSerializationCountTest;
 import com.hazelcast.internal.nearcache.NearCache;
 import com.hazelcast.internal.nearcache.NearCacheManager;
-import com.hazelcast.internal.nearcache.NearCacheSerializationCountConfigBuilder;
-import com.hazelcast.internal.nearcache.NearCacheTestContext;
-import com.hazelcast.internal.nearcache.NearCacheTestContextBuilder;
-import com.hazelcast.internal.nearcache.NearCacheTestUtils;
-import com.hazelcast.nio.serialization.Data;
-import com.hazelcast.test.HazelcastParametersRunnerFactory;
+import com.hazelcast.internal.nearcache.impl.AbstractNearCacheSerializationCountTest;
+import com.hazelcast.internal.nearcache.impl.NearCacheSerializationCountConfigBuilder;
+import com.hazelcast.internal.nearcache.impl.NearCacheTestContext;
+import com.hazelcast.internal.nearcache.impl.NearCacheTestContextBuilder;
+import com.hazelcast.internal.nearcache.impl.NearCacheTestUtils;
+import com.hazelcast.internal.serialization.Data;
+import com.hazelcast.test.HazelcastParallelParametersRunnerFactory;
 import com.hazelcast.test.TestHazelcastInstanceFactory;
-import com.hazelcast.test.annotation.ParallelTest;
+import com.hazelcast.test.annotation.ParallelJVMTest;
 import com.hazelcast.test.annotation.QuickTest;
+import com.hazelcast.transaction.TransactionalMap;
 import org.junit.After;
 import org.junit.Before;
 import org.junit.experimental.categories.Category;
@@ -49,20 +50,20 @@ import java.util.Collection;
 import static com.hazelcast.config.InMemoryFormat.BINARY;
 import static com.hazelcast.config.InMemoryFormat.OBJECT;
 import static com.hazelcast.internal.adapter.DataStructureAdapter.DataStructureMethods.GET;
-import static com.hazelcast.internal.nearcache.NearCacheTestUtils.createNearCacheConfig;
-import static com.hazelcast.internal.nearcache.NearCacheTestUtils.getMapNearCacheManager;
-import static com.hazelcast.spi.properties.GroupProperty.MAP_INVALIDATION_MESSAGE_BATCH_FREQUENCY_SECONDS;
-import static com.hazelcast.spi.properties.GroupProperty.MAP_INVALIDATION_MESSAGE_BATCH_SIZE;
-import static com.hazelcast.spi.properties.GroupProperty.PARTITION_COUNT;
-import static com.hazelcast.spi.properties.GroupProperty.PARTITION_OPERATION_THREAD_COUNT;
+import static com.hazelcast.internal.nearcache.impl.NearCacheTestUtils.createNearCacheConfig;
+import static com.hazelcast.internal.nearcache.impl.NearCacheTestUtils.getMapNearCacheManager;
+import static com.hazelcast.spi.properties.ClusterProperty.MAP_INVALIDATION_MESSAGE_BATCH_FREQUENCY_SECONDS;
+import static com.hazelcast.spi.properties.ClusterProperty.MAP_INVALIDATION_MESSAGE_BATCH_SIZE;
+import static com.hazelcast.spi.properties.ClusterProperty.PARTITION_COUNT;
+import static com.hazelcast.spi.properties.ClusterProperty.PARTITION_OPERATION_THREAD_COUNT;
 import static java.util.Arrays.asList;
 
 /**
- * Near Cache serialization count tests for {@link com.hazelcast.core.TransactionalMap} on Hazelcast members.
+ * Near Cache serialization count tests for {@link TransactionalMap} on Hazelcast members.
  */
 @RunWith(Parameterized.class)
-@UseParametersRunnerFactory(HazelcastParametersRunnerFactory.class)
-@Category({QuickTest.class, ParallelTest.class})
+@UseParametersRunnerFactory(HazelcastParallelParametersRunnerFactory.class)
+@Category({QuickTest.class, ParallelJVMTest.class})
 public class TxnMapNearCacheSerializationCountTest extends AbstractNearCacheSerializationCountTest<Data, String> {
 
     @Parameter

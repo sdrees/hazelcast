@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2008-2018, Hazelcast, Inc. All Rights Reserved.
+ * Copyright (c) 2008-2020, Hazelcast, Inc. All Rights Reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -81,12 +81,25 @@ public final class ThreadLeakTestUtils {
 
     public static Thread[] getAndLogThreads(String message, Set<Thread> oldThreads) {
         Map<Thread, StackTraceElement[]> stackTraces = Thread.getAllStackTraces();
-        Thread[] joinableThreads = getJoinableThreads(oldThreads, stackTraces.keySet());
+        Set<Thread> nonSystemNonCommonPoolThreads = getNonSystemAndNonCommonPoolThreads(stackTraces);
+        Thread[] joinableThreads = getJoinableThreads(oldThreads, nonSystemNonCommonPoolThreads);
         if (joinableThreads.length == 0) {
             return null;
         }
         logThreads(stackTraces, joinableThreads, message);
         return joinableThreads;
+    }
+
+    private static Set<Thread> getNonSystemAndNonCommonPoolThreads(Map<Thread, StackTraceElement[]> stackTraces) {
+        Set<Thread> nonSystemThreads = new HashSet<>();
+        for (Thread thread : stackTraces.keySet()) {
+            ThreadGroup threadGroup = thread.getThreadGroup();
+            if (threadGroup != null && threadGroup.getParent() != null && !thread.getName().contains("ForkJoinPool.commonPool")) {
+                // non-system alive thread
+                nonSystemThreads.add(thread);
+            }
+        }
+        return nonSystemThreads;
     }
 
     private static Thread[] getJoinableThreads(Set<Thread> oldThreads, Set<Thread> newThreads) {

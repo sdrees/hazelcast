@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2008-2018, Hazelcast, Inc. All Rights Reserved.
+ * Copyright (c) 2008-2020, Hazelcast, Inc. All Rights Reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -19,15 +19,17 @@ package com.hazelcast.map.impl;
 import com.hazelcast.config.Config;
 import com.hazelcast.config.MapConfig;
 import com.hazelcast.core.DistributedObject;
+import com.hazelcast.internal.services.RemoteService;
 import com.hazelcast.map.impl.proxy.MapProxyImpl;
 import com.hazelcast.map.impl.proxy.NearCachedMapProxyImpl;
-import com.hazelcast.map.merge.MergePolicyProvider;
-import com.hazelcast.spi.NodeEngine;
-import com.hazelcast.spi.RemoteService;
+import com.hazelcast.spi.impl.NodeEngine;
+import com.hazelcast.spi.merge.SplitBrainMergePolicyProvider;
 
+import java.util.UUID;
+
+import static com.hazelcast.config.NearCacheConfigAccessor.initDefaultMaxSizeForOnHeapMaps;
 import static com.hazelcast.internal.config.ConfigValidator.checkMapConfig;
 import static com.hazelcast.internal.config.ConfigValidator.checkNearCacheConfig;
-import static com.hazelcast.internal.config.MergePolicyValidator.checkMergePolicySupportsInMemoryFormat;
 
 /**
  * Defines remote service behavior of map service.
@@ -45,17 +47,16 @@ class MapRemoteService implements RemoteService {
     }
 
     @Override
-    public DistributedObject createDistributedObject(String name) {
+    public DistributedObject createDistributedObject(String name, UUID source, boolean local) {
         Config config = nodeEngine.getConfig();
         MapConfig mapConfig = config.findMapConfig(name);
-        MergePolicyProvider mergePolicyProvider = mapServiceContext.getMergePolicyProvider();
-        checkMapConfig(mapConfig, mergePolicyProvider);
+        SplitBrainMergePolicyProvider mergePolicyProvider = nodeEngine.getSplitBrainMergePolicyProvider();
 
-        Object mergePolicy = mergePolicyProvider.getMergePolicy(mapConfig.getMergePolicyConfig().getPolicy());
-        checkMergePolicySupportsInMemoryFormat(name, mergePolicy, mapConfig.getInMemoryFormat(),
-                nodeEngine.getClusterService().getClusterVersion(), true, nodeEngine.getLogger(getClass()));
+        checkMapConfig(mapConfig, config.getNativeMemoryConfig(), mergePolicyProvider,
+                mapServiceContext.getNodeEngine().getProperties());
 
         if (mapConfig.isNearCacheEnabled()) {
+            initDefaultMaxSizeForOnHeapMaps(mapConfig.getNearCacheConfig());
             checkNearCacheConfig(name, mapConfig.getNearCacheConfig(), config.getNativeMemoryConfig(), false);
             return new NearCachedMapProxyImpl(name, mapServiceContext.getService(), nodeEngine, mapConfig);
         } else {
@@ -64,7 +65,7 @@ class MapRemoteService implements RemoteService {
     }
 
     @Override
-    public void destroyDistributedObject(String name) {
+    public void destroyDistributedObject(String name, boolean local) {
         mapServiceContext.destroyMap(name);
     }
 }

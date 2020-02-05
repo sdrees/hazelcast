@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2008-2018, Hazelcast, Inc. All Rights Reserved.
+ * Copyright (c) 2008-2020, Hazelcast, Inc. All Rights Reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -18,13 +18,15 @@ package com.hazelcast.internal.nearcache;
 
 import com.hazelcast.internal.adapter.DataStructureAdapter;
 import com.hazelcast.internal.nearcache.impl.invalidation.StaleReadDetector;
-import com.hazelcast.monitor.NearCacheStats;
-import com.hazelcast.nio.serialization.Data;
-import com.hazelcast.spi.InitializingObject;
+import com.hazelcast.internal.serialization.Data;
+import com.hazelcast.nearcache.NearCacheStats;
+import com.hazelcast.spi.impl.InitializingObject;
+
+import javax.annotation.Nullable;
 
 /**
- * {@link NearCacheRecordStore} is the contract point to store keys and values as
- * {@link NearCacheRecord} internally and to serve them.
+ * {@link NearCacheRecordStore} is the contract point to store keys
+ * and values as {@link NearCacheRecord} internally and to serve them.
  *
  * @param <K> the type of the key
  * @param <V> the type of the value
@@ -40,29 +42,20 @@ public interface NearCacheRecordStore<K, V> extends InitializingObject {
     V get(K key);
 
     /**
-     * Gets the record associated with the given {@code key}.
-     *
-     * @param key the key from which to get the associated {@link NearCacheRecord}.
-     * @return the {@link NearCacheRecord} associated with the given {@code key}.
+     * @see NearCache#put
      */
-    NearCacheRecord getRecord(K key);
+    void put(K key, Data keyData, V value, Data valueData);
 
     /**
-     * Puts (associates) a value with the given {@code key}.
-     *
-     * @param key     the key to which the given value will be associated.
-     * @param keyData the key as {@link Data} to which the given value will be associated.
-     * @param value   the value that will be associated with the key.
+     * @see NearCache#tryReserveForUpdate
      */
-    void put(K key, Data keyData, V value);
+    long tryReserveForUpdate(K key, Data keyData, NearCache.UpdateSemantic updateSemantic);
 
     /**
-     * Removes the value associated with the given {@code key}.
-     *
-     * @param key the key from which the value will be removed.
-     * @return {@code true} if the value was removed, otherwise {@code false}.
+     * @see NearCache#tryPublishReserved
      */
-    boolean remove(K key);
+    @Nullable
+    V tryPublishReserved(K key, V value, long reservationId, boolean deserialize);
 
     /**
      * Removes the value associated with the given {@code key}
@@ -70,7 +63,7 @@ public interface NearCacheRecordStore<K, V> extends InitializingObject {
      *
      * @param key the key of the value will be invalidated
      */
-    boolean invalidate(K key);
+    void invalidate(K key);
 
     /**
      * Removes all stored values.
@@ -83,26 +76,26 @@ public interface NearCacheRecordStore<K, V> extends InitializingObject {
     void destroy();
 
     /**
-     * Get the {@link com.hazelcast.monitor.NearCacheStats} instance to monitor this record store.
-     *
-     * @return the {@link com.hazelcast.monitor.NearCacheStats} instance to monitor this record store.
-     */
-    NearCacheStats getNearCacheStats();
-
-    /**
-     * Selects the best candidate object to store from the given {@code candidates}.
-     *
-     * @param candidates the candidates from which the best candidate object will be selected.
-     * @return the best candidate object to store, selected from the given {@code candidates}.
-     */
-    Object selectToSave(Object... candidates);
-
-    /**
      * Gets the number of stored records.
      *
      * @return the number of stored records.
      */
     int size();
+
+    /**
+     * Gets the record associated with the given {@code key}.
+     *
+     * @param key the key from which to get the associated {@link NearCacheRecord}.
+     * @return the {@link NearCacheRecord} associated with the given {@code key}.
+     */
+    NearCacheRecord getRecord(K key);
+
+    /**
+     * Get the {@link NearCacheStats} instance to monitor this record store.
+     *
+     * @return the {@link NearCacheStats} instance to monitor this record store.
+     */
+    NearCacheStats getNearCacheStats();
 
     /**
      * Performs expiration and evicts expired records.
@@ -112,14 +105,14 @@ public interface NearCacheRecordStore<K, V> extends InitializingObject {
     /**
      * Does eviction as specified configuration {@link com.hazelcast.config.EvictionConfig}
      * in {@link com.hazelcast.config.NearCacheConfig}.
+     *
+     * @param withoutMaxSizeCheck set {@code true} to evict regardless of a max
+     *                            size check, otherwise set {@code false} to evict
+     *                            after a max size check.
+     * @return {@code true} to indicate eviction
+     * is done otherwise returns {@code false}
      */
-    void doEvictionIfRequired();
-
-    /**
-     * Does eviction as specified configuration {@link com.hazelcast.config.EvictionConfig}
-     * in {@link com.hazelcast.config.NearCacheConfig} regardless from the max-size policy.
-     */
-    void doEviction();
+    boolean doEviction(boolean withoutMaxSizeCheck);
 
     /**
      * Loads the keys into the Near Cache.
@@ -135,13 +128,4 @@ public interface NearCacheRecordStore<K, V> extends InitializingObject {
      * @see StaleReadDetector
      */
     void setStaleReadDetector(StaleReadDetector detector);
-
-    /**
-     * @see StaleReadDetector
-     */
-    StaleReadDetector getStaleReadDetector();
-
-    long tryReserveForUpdate(K key, Data keyData);
-
-    V tryPublishReserved(K key, V value, long reservationId, boolean deserialize);
 }

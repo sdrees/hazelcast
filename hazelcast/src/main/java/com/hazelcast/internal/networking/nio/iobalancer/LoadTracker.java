@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2008-2018, Hazelcast, Inc. All Rights Reserved.
+ * Copyright (c) 2008-2020, Hazelcast, Inc. All Rights Reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -19,40 +19,35 @@ package com.hazelcast.internal.networking.nio.iobalancer;
 import com.hazelcast.internal.networking.nio.MigratablePipeline;
 import com.hazelcast.internal.networking.nio.NioThread;
 import com.hazelcast.logging.ILogger;
-import com.hazelcast.util.ItemCounter;
+import com.hazelcast.internal.util.ItemCounter;
 
 import java.util.HashSet;
-import java.util.Iterator;
 import java.util.Map;
-import java.util.Queue;
 import java.util.Set;
-import java.util.concurrent.LinkedBlockingQueue;
 
-import static com.hazelcast.util.MapUtil.createHashMap;
-import static com.hazelcast.util.StringUtil.LINE_SEPARATOR;
+import static com.hazelcast.internal.util.MapUtil.createHashMap;
+import static com.hazelcast.internal.util.StringUtil.LINE_SEPARATOR;
 
 /**
  * Tracks the load of of NioThread(s) and creates a mapping between NioThread -> NioPipeline.
- * <p/>
+ * <p>
  * This class is not thread-safe with the exception of
  * {@link #addPipeline(MigratablePipeline)}   and
  * {@link #removePipeline(MigratablePipeline)}
  */
 class LoadTracker {
-    final Queue<Runnable> tasks = new LinkedBlockingQueue<Runnable>();
-
     private final ILogger logger;
 
     //all known IO ioThreads. we assume no. of ioThreads is constant during a lifespan of a member
     private final NioThread[] ioThreads;
     private final Map<NioThread, Set<MigratablePipeline>> ownerToPipelines;
 
-    //no. of events per pipeline since an instance started
+    //load per pipeline since an instance started
     private final ItemCounter<MigratablePipeline> lastLoadCounter = new ItemCounter<MigratablePipeline>();
 
-    //no. of events per NioThread since last calculation
+    //load per NioThread since last calculation
     private final ItemCounter<NioThread> ownerLoad = new ItemCounter<NioThread>();
-    //no. of events per pipeline since last calculation
+    //load per pipeline since last calculation
     private final ItemCounter<MigratablePipeline> pipelineLoadCount = new ItemCounter<MigratablePipeline>();
 
     //contains all known pipelines
@@ -80,21 +75,11 @@ class LoadTracker {
      * @return recalculated imbalance
      */
     LoadImbalance updateImbalance() {
-        handleAddedOrRemovedConnections();
         clearWorkingImbalance();
         updateNewWorkingImbalance();
         updateNewFinalImbalance();
         printDebugTable();
         return imbalance;
-    }
-
-    private void handleAddedOrRemovedConnections() {
-        Iterator<Runnable> iterator = tasks.iterator();
-        while (iterator.hasNext()) {
-            Runnable task = iterator.next();
-            task.run();
-            iterator.remove();
-        }
     }
 
     // just for testing
@@ -136,14 +121,6 @@ class LoadTracker {
         }
     }
 
-    void notifyPipelineAdded(MigratablePipeline pipeline) {
-        tasks.offer(new AddPipelineTask(pipeline));
-    }
-
-    void notifyPipelineRemoved(MigratablePipeline pipeline) {
-        tasks.offer(new RemovePipelineTask(pipeline));
-    }
-
     private void updateNewWorkingImbalance() {
         for (MigratablePipeline pipeline : pipelines) {
             updatePipelineState(pipeline);
@@ -154,13 +131,17 @@ class LoadTracker {
         long pipelineLoad = getLoadSinceLastCheck(pipeline);
         pipelineLoadCount.set(pipeline, pipelineLoad);
         NioThread owner = pipeline.owner();
+        if (owner == null) {
+            // the pipeline is currently being migrated - owner is null
+            return;
+        }
         ownerLoad.add(owner, pipelineLoad);
         ownerToPipelines.get(owner).add(pipeline);
     }
 
     private long getLoadSinceLastCheck(MigratablePipeline pipeline) {
         long load = pipeline.load();
-        Long lastLoad = lastLoadCounter.getAndSet(pipeline, load);
+        long lastLoad = lastLoadCounter.getAndSet(pipeline, load);
         return load - lastLoad;
     }
 
@@ -176,7 +157,7 @@ class LoadTracker {
         pipelines.add(pipeline);
     }
 
-    private void removePipeline(MigratablePipeline pipeline) {
+    void removePipeline(MigratablePipeline pipeline) {
         pipelines.remove(pipeline);
         pipelineLoadCount.remove(pipeline);
         lastLoadCounter.remove(pipeline);
@@ -199,9 +180,9 @@ class LoadTracker {
 
         sb.append("Min NioThread ")
                 .append(minThread)
-                .append(" received ")
+                .append(" receive-load ")
                 .append(loadPerOwner)
-                .append(" events. ");
+                .append(" load. ");
         sb.append("It contains following pipelines: ").
                 append(LINE_SEPARATOR);
         appendSelectorInfo(minThread, ownerToPipelines, sb);
@@ -209,9 +190,8 @@ class LoadTracker {
         loadPerOwner = ownerLoad.get(maxThread);
         sb.append("Max NioThread ")
                 .append(maxThread)
-                .append(" received ")
-                .append(loadPerOwner)
-                .append(" events. ");
+                .append(" receive-load ")
+                .append(loadPerOwner);
         sb.append("It contains following pipelines: ")
                 .append(LINE_SEPARATOR);
         appendSelectorInfo(maxThread, ownerToPipelines, sb);
@@ -249,41 +229,5 @@ class LoadTracker {
                     .append(LINE_SEPARATOR);
         }
         sb.append(LINE_SEPARATOR);
-    }
-
-    class RemovePipelineTask implements Runnable {
-
-        private final MigratablePipeline pipeline;
-
-        RemovePipelineTask(MigratablePipeline pipeline) {
-            this.pipeline = pipeline;
-        }
-
-        @Override
-        public void run() {
-            if (logger.isFinestEnabled()) {
-                logger.finest("Removing pipeline: " + pipeline);
-            }
-
-            removePipeline(pipeline);
-        }
-    }
-
-    class AddPipelineTask implements Runnable {
-
-        private final MigratablePipeline pipeline;
-
-        AddPipelineTask(MigratablePipeline pipeline) {
-            this.pipeline = pipeline;
-        }
-
-        @Override
-        public void run() {
-            if (logger.isFinestEnabled()) {
-                logger.finest("Adding pipeline: " + pipeline);
-            }
-
-            addPipeline(pipeline);
-        }
     }
 }

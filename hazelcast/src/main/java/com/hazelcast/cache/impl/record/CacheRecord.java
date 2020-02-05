@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2008-2018, Hazelcast, Inc. All Rights Reserved.
+ * Copyright (c) 2008-2020, Hazelcast, Inc. All Rights Reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -18,7 +18,6 @@ package com.hazelcast.cache.impl.record;
 
 import com.hazelcast.internal.eviction.Evictable;
 import com.hazelcast.internal.eviction.Expirable;
-import com.hazelcast.nio.serialization.impl.Versioned;
 
 /**
  * <p>
@@ -28,7 +27,7 @@ import com.hazelcast.nio.serialization.impl.Versioned;
  *
  * @param <V> the type of the value stored by this {@link CacheRecord}
  */
-public interface CacheRecord<V, E> extends Expirable, Evictable<V>, Versioned {
+public interface CacheRecord<V, E> extends Expirable, Evictable<V> {
 
     /**
      * Represents invalid (not set) time for creation time, expiration time, access time, etc...
@@ -54,33 +53,30 @@ public interface CacheRecord<V, E> extends Expirable, Evictable<V>, Versioned {
      *
      * @param time the latest access time of this {@link Evictable} in milliseconds
      */
-    void setAccessTime(long time);
+    void setLastAccessTime(long time);
 
     /**
      * Sets the access hit count of this {@link Evictable}.
      *
      * @param hit the access hit count for this {@link Evictable}
      */
-    void setAccessHit(int hit);
+    void setHits(long hit);
 
     /**
      * Increases the access hit count of this {@link Evictable} as <code>1</code>.
      */
-    void incrementAccessHit();
-
-    /**
-     * Resets the access hit count of this {@link Evictable} to <code>0</code>.
-     */
-    void resetAccessHit();
+    void incrementHits();
 
     /**
      * Sets the expiry policy for this record.
+     *
      * @param expiryPolicy
      */
     void setExpiryPolicy(E expiryPolicy);
 
     /**
      * Gets the expiryPolicy associated with this record.
+     *
      * @return
      */
     E getExpiryPolicy();

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2008-2018, Hazelcast, Inc. All Rights Reserved.
+ * Copyright (c) 2008-2020, Hazelcast, Inc. All Rights Reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -17,24 +17,36 @@
 package com.hazelcast.core;
 
 import com.hazelcast.config.Config;
+import com.hazelcast.config.ConfigAccessor;
 import com.hazelcast.config.ServiceConfig;
-import com.hazelcast.instance.Node;
-import com.hazelcast.spi.InitializingObject;
-import com.hazelcast.spi.NodeEngine;
-import com.hazelcast.spi.Operation;
-import com.hazelcast.spi.OperationService;
-import com.hazelcast.spi.RemoteService;
+import com.hazelcast.instance.impl.Node;
+import com.hazelcast.internal.services.RemoteService;
+import com.hazelcast.internal.util.RootCauseMatcher;
+import com.hazelcast.spi.exception.DistributedObjectDestroyedException;
+import com.hazelcast.spi.impl.InitializingObject;
+import com.hazelcast.spi.impl.NodeEngine;
+import com.hazelcast.spi.impl.NodeEngineImpl;
+import com.hazelcast.spi.impl.operationservice.Operation;
+import com.hazelcast.spi.impl.operationservice.OperationService;
+import com.hazelcast.spi.impl.proxyservice.impl.ProxyRegistry;
 import com.hazelcast.spi.impl.proxyservice.impl.ProxyServiceImpl;
 import com.hazelcast.test.HazelcastParallelClassRunner;
 import com.hazelcast.test.HazelcastTestSupport;
 import com.hazelcast.test.TestHazelcastInstanceFactory;
-import com.hazelcast.test.annotation.ParallelTest;
+import com.hazelcast.test.annotation.ParallelJVMTest;
 import com.hazelcast.test.annotation.QuickTest;
+import org.junit.Rule;
 import org.junit.Test;
 import org.junit.experimental.categories.Category;
+import org.junit.rules.ExpectedException;
 import org.junit.runner.RunWith;
 
+import java.util.ArrayList;
+import java.util.Collection;
+import java.util.UUID;
 import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.Future;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.locks.LockSupport;
 
@@ -44,8 +56,11 @@ import static org.junit.Assert.assertTrue;
 import static org.junit.Assert.fail;
 
 @RunWith(HazelcastParallelClassRunner.class)
-@Category({QuickTest.class, ParallelTest.class})
+@Category({QuickTest.class, ParallelJVMTest.class})
 public class DistributedObjectTest extends HazelcastTestSupport {
+
+    @Rule
+    public ExpectedException expectedException = ExpectedException.none();
 
     @Test
     public void testMap() {
@@ -96,41 +111,6 @@ public class DistributedObjectTest extends HazelcastTestSupport {
         test(instance, object);
     }
 
-    @Test
-    public void testLock() {
-        HazelcastInstance instance = createHazelcastInstance();
-        DistributedObject object = instance.getLock("test");
-        test(instance, object);
-    }
-
-    @Test
-    public void testAtomicLong() {
-        HazelcastInstance instance = createHazelcastInstance();
-        DistributedObject object = instance.getAtomicLong("test");
-        test(instance, object);
-    }
-
-    @Test
-    public void testSemaphore() {
-        HazelcastInstance instance = createHazelcastInstance();
-        DistributedObject object = instance.getSemaphore("test");
-        test(instance, object);
-    }
-
-    @Test
-    public void testCountdownLatch() {
-        HazelcastInstance instance = createHazelcastInstance();
-        DistributedObject object = instance.getCountDownLatch("test");
-        test(instance, object);
-    }
-
-    @Test
-    public void testIdGenerator() {
-        HazelcastInstance instance = createHazelcastInstance();
-        DistributedObject object = instance.getIdGenerator("test");
-        test(instance, object);
-    }
-
     private void test(HazelcastInstance instance, DistributedObject object) {
         DistributedObject object2 = instance.getDistributedObject(object.getServiceName(), object.getName());
         assertEquals(object.getServiceName(), object2.getServiceName());
@@ -142,7 +122,7 @@ public class DistributedObjectTest extends HazelcastTestSupport {
     @Test
     public void testCustomObject() {
         Config config = new Config();
-        config.getServicesConfig().addServiceConfig(
+        ConfigAccessor.getServicesConfig(config).addServiceConfig(
                 new ServiceConfig().setImplementation(new TestInitializingObjectService())
                         .setEnabled(true).setName(TestInitializingObjectService.NAME)
         );
@@ -157,7 +137,7 @@ public class DistributedObjectTest extends HazelcastTestSupport {
         int nodeCount = 4;
         TestHazelcastInstanceFactory factory = createHazelcastInstanceFactory(nodeCount);
         Config config = new Config();
-        config.getServicesConfig().addServiceConfig(
+        ConfigAccessor.getServicesConfig(config).addServiceConfig(
                 new ServiceConfig().setImplementation(new TestInitializingObjectService())
                         .setEnabled(true).setName(TestInitializingObjectService.NAME)
         );
@@ -179,7 +159,7 @@ public class DistributedObjectTest extends HazelcastTestSupport {
         int nodeCount = 4;
         TestHazelcastInstanceFactory factory = createHazelcastInstanceFactory(nodeCount);
         Config config = new Config();
-        config.getServicesConfig().addServiceConfig(
+        ConfigAccessor.getServicesConfig(config).addServiceConfig(
                 new ServiceConfig().setImplementation(new TestInitializingObjectService())
                         .setEnabled(true).setName(TestInitializingObjectService.NAME)
         );
@@ -215,17 +195,68 @@ public class DistributedObjectTest extends HazelcastTestSupport {
         }
     }
 
+    @Test
+    public void testDistributedObjectDestroyed_whenDestroyDuringInitialization()
+            throws InterruptedException, ExecutionException {
+        final CountDownLatch initializationStarted = new CountDownLatch(1);
+        final CountDownLatch objectDestroyed = new CountDownLatch(1);
+        Config config = new Config();
+        ConfigAccessor.getServicesConfig(config).addServiceConfig(
+                new ServiceConfig()
+                        .setEnabled(true)
+                        .setName(TestInitializingObjectService.NAME)
+                        .setImplementation(new TestInitializingObjectService(() -> {
+                                initializationStarted.countDown();
+                                try {
+                                    objectDestroyed.await();
+                                } catch (InterruptedException e) {
+                                    ignore(e);
+                                }
+                        })));
+
+        String serviceName = TestInitializingObjectService.NAME;
+        String objectName = "test-object";
+
+        HazelcastInstance instance = createHazelcastInstance(config);
+        Future f = spawn(() -> {
+            // must fail with DistributedObjectDestroyedException
+            instance.getDistributedObject(serviceName, objectName);
+        });
+        initializationStarted.await();
+        NodeEngineImpl nodeEngine = getNodeEngineImpl(instance);
+        UUID source = nodeEngine.getLocalMember().getUuid();
+        nodeEngine.getProxyService().destroyDistributedObject(serviceName, objectName, source);
+        objectDestroyed.countDown();
+
+        expectedException.expect(ExecutionException.class);
+        expectedException.expectCause(new RootCauseMatcher(DistributedObjectDestroyedException.class));
+        f.get();
+    }
+
     private static class TestInitializingObjectService implements RemoteService {
 
         static final String NAME = "TestInitializingObjectService";
+        private final Runnable initializer;
 
-        @Override
-        public DistributedObject createDistributedObject(final String objectName) {
-            return new TestInitializingObject(objectName);
+        TestInitializingObjectService() {
+            this.initializer = null;
+        }
+
+        TestInitializingObjectService(Runnable initializer) {
+            this.initializer = initializer;
         }
 
         @Override
-        public void destroyDistributedObject(final String objectName) {
+        public DistributedObject createDistributedObject(final String objectName, UUID source, boolean local) {
+            if (initializer != null) {
+                return new TestInitializingObject(objectName, initializer);
+            } else {
+                return new TestInitializingObject(objectName);
+            }
+        }
+
+        @Override
+        public void destroyDistributedObject(final String objectName, boolean local) {
         }
     }
 
@@ -234,9 +265,16 @@ public class DistributedObjectTest extends HazelcastTestSupport {
         private final AtomicBoolean init = new AtomicBoolean(false);
         private final String name;
         private volatile boolean error;
+        private final Runnable initializer;
+
+        TestInitializingObject(final String name, Runnable initializer) {
+            this.name = name;
+            this.initializer = initializer;
+        }
 
         TestInitializingObject(final String name) {
             this.name = name;
+            this.initializer = null;
         }
 
         @Override
@@ -244,6 +282,9 @@ public class DistributedObjectTest extends HazelcastTestSupport {
             if (!init.compareAndSet(false, true)) {
                 error = true;
                 throw new IllegalStateException("InitializingObject must be initialized only once!");
+            }
+            if (initializer != null) {
+                initializer.run();
             }
         }
 
@@ -271,7 +312,7 @@ public class DistributedObjectTest extends HazelcastTestSupport {
     public void testFailingInitialization() {
         TestHazelcastInstanceFactory factory = createHazelcastInstanceFactory(1);
         Config config = new Config();
-        config.getServicesConfig().addServiceConfig(
+        ConfigAccessor.getServicesConfig(config).addServiceConfig(
                 new ServiceConfig().setImplementation(new FailingInitializingObjectService())
                         .setEnabled(true).setName(FailingInitializingObjectService.NAME)
         );
@@ -287,7 +328,7 @@ public class DistributedObjectTest extends HazelcastTestSupport {
     public void testFailingInitialization_whenGetProxyCalledByMultipleThreads() {
         TestHazelcastInstanceFactory factory = createHazelcastInstanceFactory(1);
         Config config = new Config();
-        config.getServicesConfig().addServiceConfig(
+        ConfigAccessor.getServicesConfig(config).addServiceConfig(
                 new ServiceConfig().setImplementation(new FailingInitializingObjectService())
                         .setEnabled(true).setName(FailingInitializingObjectService.NAME)
         );
@@ -318,17 +359,51 @@ public class DistributedObjectTest extends HazelcastTestSupport {
         assertOpenEventually(latch, 30);
     }
 
+    @Test
+    public void testProxyCreation_whenLocalOnly() {
+        int nodeCount = 4;
+        TestHazelcastInstanceFactory factory = createHazelcastInstanceFactory(nodeCount);
+        Config config = new Config();
+        ConfigAccessor.getServicesConfig(config).addServiceConfig(
+                new ServiceConfig().setImplementation(new TestInitializingObjectService())
+                                   .setEnabled(true).setName(TestInitializingObjectService.NAME)
+        );
+
+        String serviceName = TestInitializingObjectService.NAME;
+        String objectName = "test-object";
+
+        HazelcastInstance[] instances = new HazelcastInstance[nodeCount];
+        ProxyRegistry[] registries = new ProxyRegistry[nodeCount];
+        for (int i = 0; i < instances.length; i++) {
+            instances[i] = factory.newHazelcastInstance(config);
+            NodeEngine nodeEngine = getNodeEngineImpl(instances[i]);
+            ProxyServiceImpl proxyService = (ProxyServiceImpl) nodeEngine.getProxyService();
+            registries[i] = proxyService.getOrCreateRegistry(serviceName);
+        }
+
+        for (int i = 0; i < instances.length; i++) {
+            NodeEngine nodeEngine = getNodeEngineImpl(instances[i]);
+            UUID source = nodeEngine.getLocalMember().getUuid();
+            registries[i].createProxy(objectName, source, true, true);
+            for (int j = i + 1; j < instances.length; j++) {
+                Collection<DistributedObject> objects = new ArrayList<>();
+                registries[j].getDistributedObjects(objects);
+                assertTrue(objects.isEmpty());
+            }
+        }
+    }
+
     private static class FailingInitializingObjectService implements RemoteService {
 
         static final String NAME = "FailingInitializingObjectService";
 
         @Override
-        public DistributedObject createDistributedObject(String objectName) {
+        public DistributedObject createDistributedObject(String objectName, UUID source, boolean local) {
             throw new HazelcastException("Object creation is not allowed!");
         }
 
         @Override
-        public void destroyDistributedObject(final String objectName) {
+        public void destroyDistributedObject(final String objectName, boolean local) {
         }
     }
 }

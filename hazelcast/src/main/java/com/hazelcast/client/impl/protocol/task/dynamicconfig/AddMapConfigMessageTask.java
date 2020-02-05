@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2008-2018, Hazelcast, Inc. All Rights Reserved.
+ * Copyright (c) 2008-2020, Hazelcast, Inc. All Rights Reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -20,25 +20,20 @@ import com.hazelcast.client.impl.protocol.ClientMessage;
 import com.hazelcast.client.impl.protocol.codec.DynamicConfigAddMapConfigCodec;
 import com.hazelcast.config.CacheDeserializedValues;
 import com.hazelcast.config.EntryListenerConfig;
-import com.hazelcast.config.EvictionPolicy;
 import com.hazelcast.config.InMemoryFormat;
 import com.hazelcast.config.MapConfig;
 import com.hazelcast.config.MapPartitionLostListenerConfig;
-import com.hazelcast.config.MaxSizeConfig;
-import com.hazelcast.config.MergePolicyConfig;
+import com.hazelcast.config.MetadataPolicy;
 import com.hazelcast.config.PartitioningStrategyConfig;
 import com.hazelcast.config.QueryCacheConfig;
-import com.hazelcast.core.PartitioningStrategy;
-import com.hazelcast.instance.Node;
-import com.hazelcast.map.eviction.MapEvictionPolicy;
-import com.hazelcast.nio.Connection;
+import com.hazelcast.instance.impl.Node;
+import com.hazelcast.internal.dynamicconfig.DynamicConfigurationAwareConfig;
+import com.hazelcast.internal.nio.Connection;
 import com.hazelcast.nio.serialization.IdentifiedDataSerializable;
-import com.hazelcast.version.Version;
+import com.hazelcast.partition.PartitioningStrategy;
 
 import java.util.ArrayList;
 import java.util.List;
-
-import static com.hazelcast.internal.cluster.Versions.V3_10;
 
 public class AddMapConfigMessageTask
         extends AbstractAddConfigMessageTask<DynamicConfigAddMapConfigCodec.RequestParameters> {
@@ -64,35 +59,25 @@ public class AddMapConfigMessageTask
         config.setAsyncBackupCount(parameters.asyncBackupCount);
         config.setBackupCount(parameters.backupCount);
         config.setCacheDeserializedValues(CacheDeserializedValues.valueOf(parameters.cacheDeserializedValues));
-        config.setEvictionPolicy(EvictionPolicy.valueOf(parameters.evictionPolicy));
         if (parameters.listenerConfigs != null && !parameters.listenerConfigs.isEmpty()) {
             config.setEntryListenerConfigs(
                     (List<EntryListenerConfig>) adaptListenerConfigs(parameters.listenerConfigs));
         }
+        config.setMerkleTreeConfig(parameters.merkleTreeConfig);
+        config.setEventJournalConfig(parameters.eventJournalConfig);
         config.setHotRestartConfig(parameters.hotRestartConfig);
         config.setInMemoryFormat(InMemoryFormat.valueOf(parameters.inMemoryFormat));
-        config.setMapAttributeConfigs(parameters.mapAttributeConfigs);
-        if (parameters.mapEvictionPolicy != null) {
-            MapEvictionPolicy evictionPolicy = serializationService.toObject(parameters.mapEvictionPolicy);
-            config.setMapEvictionPolicy(evictionPolicy);
-        }
-        config.setMapIndexConfigs(parameters.mapIndexConfigs);
+        config.setAttributeConfigs(parameters.attributeConfigs);
+        config.setReadBackupData(parameters.readBackupData);
+        config.setStatisticsEnabled(parameters.statisticsEnabled);
+        config.setIndexConfigs(parameters.indexConfigs);
         if (parameters.mapStoreConfig != null) {
             config.setMapStoreConfig(parameters.mapStoreConfig.asMapStoreConfig(serializationService));
         }
         config.setTimeToLiveSeconds(parameters.timeToLiveSeconds);
         config.setMaxIdleSeconds(parameters.maxIdleSeconds);
-        config.setMaxSizeConfig(new MaxSizeConfig(parameters.maxSizeConfigSize,
-                MaxSizeConfig.MaxSizePolicy.valueOf(parameters.maxSizeConfigMaxSizePolicy)));
-        Version clusterVersion = nodeEngine.getClusterService().getClusterVersion();
-        if (clusterVersion.isGreaterOrEqual(V3_10) && parameters.mergeBatchSizeExist) {
-            MergePolicyConfig mergePolicyConfig = mergePolicyConfig(true, parameters.mergePolicy,
-                    parameters.mergeBatchSize);
-            config.setMergePolicyConfig(mergePolicyConfig);
-        } else {
-            // RU_COMPAT_3_9
-            config.setMergePolicy(parameters.mergePolicy);
-        }
+        config.setEvictionConfig(parameters.evictionConfig.asEvictionConfg(serializationService));
+        config.setMergePolicyConfig(mergePolicyConfig(parameters.mergePolicy, parameters.mergeBatchSize));
         if (parameters.nearCacheConfig != null) {
             config.setNearCacheConfig(parameters.nearCacheConfig.asNearCacheConfig(serializationService));
         }
@@ -101,7 +86,7 @@ public class AddMapConfigMessageTask
             config.setPartitionLostListenerConfigs(
                     (List<MapPartitionLostListenerConfig>) adaptListenerConfigs(parameters.partitionLostListenerConfigs));
         }
-        config.setQuorumName(parameters.quorumName);
+        config.setSplitBrainProtectionName(parameters.splitBrainProtectionName);
         if (parameters.queryCacheConfigs != null && !parameters.queryCacheConfigs.isEmpty()) {
             List<QueryCacheConfig> queryCacheConfigs = new ArrayList<QueryCacheConfig>(parameters.queryCacheConfigs.size());
             for (QueryCacheConfigHolder holder : parameters.queryCacheConfigs) {
@@ -110,6 +95,7 @@ public class AddMapConfigMessageTask
             config.setQueryCacheConfigs(queryCacheConfigs);
         }
         config.setWanReplicationRef(parameters.wanReplicationRef);
+        config.setMetadataPolicy(MetadataPolicy.getById(parameters.metadataPolicy));
         return config;
     }
 
@@ -128,5 +114,14 @@ public class AddMapConfigMessageTask
     @Override
     public String getMethodName() {
         return "addMapConfig";
+    }
+
+    @Override
+    protected boolean checkStaticConfigDoesNotExist(IdentifiedDataSerializable config) {
+        DynamicConfigurationAwareConfig nodeConfig = (DynamicConfigurationAwareConfig) nodeEngine.getConfig();
+        MapConfig mapConfig = (MapConfig) config;
+        return nodeConfig.checkStaticConfigDoesNotExist(
+                nodeConfig.getStaticConfig().getMapConfigs(),
+                mapConfig.getName(), mapConfig);
     }
 }

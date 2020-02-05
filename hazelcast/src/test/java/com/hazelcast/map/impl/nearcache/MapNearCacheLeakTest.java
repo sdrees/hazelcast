@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2008-2018, Hazelcast, Inc. All Rights Reserved.
+ * Copyright (c) 2008-2020, Hazelcast, Inc. All Rights Reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -20,18 +20,18 @@ import com.hazelcast.config.Config;
 import com.hazelcast.config.InMemoryFormat;
 import com.hazelcast.config.MapConfig;
 import com.hazelcast.core.HazelcastInstance;
-import com.hazelcast.core.IMap;
 import com.hazelcast.internal.adapter.IMapDataStructureAdapter;
-import com.hazelcast.internal.nearcache.AbstractNearCacheLeakTest;
 import com.hazelcast.internal.nearcache.NearCache;
 import com.hazelcast.internal.nearcache.NearCacheManager;
-import com.hazelcast.internal.nearcache.NearCacheTestContext;
-import com.hazelcast.internal.nearcache.NearCacheTestContextBuilder;
+import com.hazelcast.internal.nearcache.impl.AbstractNearCacheLeakTest;
+import com.hazelcast.internal.nearcache.impl.NearCacheTestContext;
+import com.hazelcast.internal.nearcache.impl.NearCacheTestContextBuilder;
 import com.hazelcast.internal.nearcache.impl.invalidation.RepairingTask;
-import com.hazelcast.nio.serialization.Data;
-import com.hazelcast.test.HazelcastParametersRunnerFactory;
+import com.hazelcast.internal.serialization.Data;
+import com.hazelcast.map.IMap;
+import com.hazelcast.test.HazelcastParallelParametersRunnerFactory;
 import com.hazelcast.test.TestHazelcastInstanceFactory;
-import com.hazelcast.test.annotation.ParallelTest;
+import com.hazelcast.test.annotation.ParallelJVMTest;
 import com.hazelcast.test.annotation.QuickTest;
 import org.junit.After;
 import org.junit.Before;
@@ -44,17 +44,17 @@ import org.junit.runners.Parameterized.UseParametersRunnerFactory;
 
 import java.util.Collection;
 
-import static com.hazelcast.internal.nearcache.NearCacheTestUtils.createNearCacheConfig;
-import static com.hazelcast.internal.nearcache.NearCacheTestUtils.getBaseConfig;
-import static com.hazelcast.internal.nearcache.NearCacheTestUtils.getMapNearCacheManager;
+import static com.hazelcast.internal.nearcache.impl.NearCacheTestUtils.createNearCacheConfig;
+import static com.hazelcast.internal.nearcache.impl.NearCacheTestUtils.getBaseConfig;
+import static com.hazelcast.internal.nearcache.impl.NearCacheTestUtils.getMapNearCacheManager;
 import static java.util.Arrays.asList;
 
 /**
  * Basic Near Cache tests for {@link IMap} on Hazelcast members.
  */
 @RunWith(Parameterized.class)
-@UseParametersRunnerFactory(HazelcastParametersRunnerFactory.class)
-@Category({ParallelTest.class, QuickTest.class})
+@UseParametersRunnerFactory(HazelcastParallelParametersRunnerFactory.class)
+@Category({ParallelJVMTest.class, QuickTest.class})
 public class MapNearCacheLeakTest extends AbstractNearCacheLeakTest<Data, String> {
 
     @Parameter

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2008-2018, Hazelcast, Inc. All Rights Reserved.
+ * Copyright (c) 2008-2020, Hazelcast, Inc. All Rights Reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -18,7 +18,7 @@ package com.hazelcast.map.impl;
 
 import com.hazelcast.core.EntryAdapter;
 import com.hazelcast.core.EntryEvent;
-import com.hazelcast.core.MapEvent;
+import com.hazelcast.map.MapEvent;
 import com.hazelcast.map.listener.EntryAddedListener;
 import com.hazelcast.map.listener.EntryEvictedListener;
 import com.hazelcast.map.listener.EntryExpiredListener;
@@ -34,7 +34,7 @@ import com.hazelcast.map.listener.MapEvictedListener;
  * com.hazelcast.map.listener.MapListener}.
  *
  * The difference between this adapter and {@link EntryAdapter} is,
- * {@link EntryAdapter} is deprecated form of this one and it doesn't
+ * {@link EntryAdapter} is more limited form of this one and it doesn't
  * implement newly added listener interfaces.
  *
  * @param <K> key of the map entry

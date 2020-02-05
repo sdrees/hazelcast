@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2008-2018, Hazelcast, Inc. All Rights Reserved.
+ * Copyright (c) 2008-2020, Hazelcast, Inc. All Rights Reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -16,23 +16,25 @@
 
 package com.hazelcast.map.impl.operation;
 
-import com.hazelcast.core.EntryView;
 import com.hazelcast.map.EntryProcessor;
+import com.hazelcast.map.IMap;
 import com.hazelcast.map.impl.MapEntries;
+import com.hazelcast.internal.iteration.IterationPointer;
 import com.hazelcast.map.impl.query.Query;
-import com.hazelcast.map.merge.MapMergePolicy;
-import com.hazelcast.nio.serialization.Data;
+import com.hazelcast.internal.serialization.Data;
 import com.hazelcast.query.Predicate;
-import com.hazelcast.spi.OperationFactory;
+import com.hazelcast.spi.impl.operationservice.Operation;
+import com.hazelcast.spi.impl.operationservice.OperationFactory;
 import com.hazelcast.spi.merge.SplitBrainMergePolicy;
 import com.hazelcast.spi.merge.SplitBrainMergeTypes.MapMergeTypes;
 
 import java.util.List;
 import java.util.Set;
+import java.util.UUID;
 
 /**
  * Provides {@link com.hazelcast.config.InMemoryFormat InMemoryFormat} specific
- * operations for {@link com.hazelcast.core.IMap IMap}.
+ * operations for {@link IMap IMap}.
  */
 public interface MapOperationProvider {
 
@@ -46,7 +48,7 @@ public interface MapOperationProvider {
 
     MapOperation createPutTransientOperation(String name, Data key, Data value, long ttl, long maxIdle);
 
-    MapOperation createSetTTLOperation(String name, Data key, long ttl);
+    MapOperation createSetTtlOperation(String name, Data key, long ttl);
 
     MapOperation createTryRemoveOperation(String name, Data dataKey, long timeout);
 
@@ -56,7 +58,7 @@ public interface MapOperationProvider {
 
     MapOperation createReplaceIfSameOperation(String name, Data dataKey, Data expect, Data update);
 
-    MapOperation createRemoveOperation(String name, Data key, boolean disableWanReplicationEvent);
+    MapOperation createRemoveOperation(String name, Data key);
 
     /**
      * Creates a delete operation for an entry with key equal to {@code key} from the map named {@code name}.
@@ -83,7 +85,7 @@ public interface MapOperationProvider {
 
     MapOperation createGetOperation(String name, Data dataKey);
 
-    MapOperation createQueryOperation(Query query);
+    Operation createQueryOperation(Query query);
 
     MapOperation createQueryPartitionOperation(Query query);
 
@@ -100,36 +102,47 @@ public interface MapOperationProvider {
 
     MapOperation createPutAllOperation(String name, MapEntries mapEntries);
 
-    MapOperation createPutFromLoadAllOperation(String name, List<Data> keyValueSequence);
+    MapOperation createPutFromLoadAllOperation(String name, List<Data> keyValueSequence, boolean expirationTime);
 
     MapOperation createTxnDeleteOperation(String name, Data dataKey, long version);
 
-    MapOperation createTxnLockAndGetOperation(String name, Data dataKey, long timeout, long ttl, String ownerUuid,
+    MapOperation createTxnLockAndGetOperation(String name, Data dataKey, long timeout, long ttl, UUID ownerUuid,
                                               boolean shouldLoad, boolean blockReads);
 
     MapOperation createTxnSetOperation(String name, Data dataKey, Data value, long version, long ttl);
 
-    MapOperation createLegacyMergeOperation(String name, EntryView<Data, Data> entryView, MapMergePolicy policy,
-                                            boolean disableWanReplicationEvent);
-
-    MapOperation createMergeOperation(String name, MapMergeTypes mergingValue,
-                                      SplitBrainMergePolicy<Data, MapMergeTypes> mergePolicy, boolean disableWanReplicationEvent);
+    MapOperation createMergeOperation(String name, MapMergeTypes<Object, Object> mergingValue,
+                                      SplitBrainMergePolicy<Object, MapMergeTypes<Object, Object>, Object> mergePolicy,
+                                      boolean disableWanReplicationEvent);
 
     MapOperation createMapFlushOperation(String name);
 
     MapOperation createLoadMapOperation(String name, boolean replaceExistingValues);
 
-    MapOperation createFetchKeysOperation(String name, int lastTableIndex, int fetchSize);
-
-    MapOperation createFetchEntriesOperation(String name, int lastTableIndex, int fetchSize);
+    /**
+     * Creates an operation for fetching a segment of a keys from a single
+     * partition.
+     *
+     * @see com.hazelcast.map.impl.proxy.MapProxyImpl#iterator(int, int, boolean)
+     */
+    MapOperation createFetchKeysOperation(String name, IterationPointer[] pointers, int fetchSize);
 
     /**
-     * Creates an operation for fetching a segment of a query result from a single partition.
+     * Creates an operation for fetching a segment of a entries from a single
+     * partition.
+     *
+     * @see com.hazelcast.map.impl.proxy.MapProxyImpl#iterator(int, int, boolean)
+     */
+    MapOperation createFetchEntriesOperation(String name, IterationPointer[] pointers, int fetchSize);
+
+    /**
+     * Creates an operation for fetching a segment of a query result from a
+     * single partition.
      *
      * @see com.hazelcast.map.impl.proxy.MapProxyImpl#iterator(int, int, com.hazelcast.projection.Projection, Predicate)
      * @since 3.9
      */
-    MapOperation createFetchWithQueryOperation(String name, int lastTableIndex, int fetchSize, Query query);
+    MapOperation createFetchWithQueryOperation(String name, IterationPointer[] pointers, int fetchSize, Query query);
 
     OperationFactory createPartitionWideEntryOperationFactory(String name, EntryProcessor entryProcessor);
 
@@ -155,6 +168,8 @@ public interface MapOperationProvider {
 
     OperationFactory createPutAllOperationFactory(String name, int[] partitions, MapEntries[] mapEntries);
 
-    OperationFactory createMergeOperationFactory(String name, int[] partitions, List<MapMergeTypes>[] mergingEntries,
-                                                 SplitBrainMergePolicy<Data, MapMergeTypes> mergePolicy);
+    OperationFactory createMergeOperationFactory(String name, int[] partitions,
+                                                 List<MapMergeTypes<Object, Object>>[] mergingEntries,
+                                                 SplitBrainMergePolicy<Object, MapMergeTypes<Object, Object>,
+                                                         Object> mergePolicy);
 }

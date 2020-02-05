@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2008-2018, Hazelcast, Inc. All Rights Reserved.
+ * Copyright (c) 2008-2020, Hazelcast, Inc. All Rights Reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -17,11 +17,11 @@
 package com.hazelcast.multimap;
 
 import com.hazelcast.config.Config;
+import com.hazelcast.config.ConfigAccessor;
 import com.hazelcast.config.ServiceConfig;
 import com.hazelcast.core.HazelcastInstance;
-import com.hazelcast.core.IQueue;
-import com.hazelcast.core.MultiMap;
-import com.hazelcast.core.TransactionalMultiMap;
+import com.hazelcast.collection.IQueue;
+import com.hazelcast.transaction.TransactionalMultiMap;
 import com.hazelcast.map.impl.tx.MapTransactionStressTest.DummyTransactionalService;
 import com.hazelcast.map.impl.tx.MapTransactionStressTest.ProducerThread;
 import com.hazelcast.test.HazelcastParallelClassRunner;
@@ -59,7 +59,7 @@ public class MultiMapTransactionStressTest extends HazelcastTestSupport {
                 .setImplementation(new DummyTransactionalService(dummyTxService));
 
         Config config = new Config();
-        config.getServicesConfig().addServiceConfig(serviceConfig);
+        ConfigAccessor.getServicesConfig(config).addServiceConfig(serviceConfig);
 
         hz = createHazelcastInstance(config);
         name = randomMapName();

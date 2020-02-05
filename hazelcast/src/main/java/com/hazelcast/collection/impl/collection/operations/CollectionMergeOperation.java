@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2008-2018, Hazelcast, Inc. All Rights Reserved.
+ * Copyright (c) 2008-2020, Hazelcast, Inc. All Rights Reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -21,17 +21,17 @@ import com.hazelcast.collection.impl.collection.CollectionDataSerializerHook;
 import com.hazelcast.collection.impl.collection.CollectionItem;
 import com.hazelcast.nio.ObjectDataInput;
 import com.hazelcast.nio.ObjectDataOutput;
-import com.hazelcast.spi.Operation;
-import com.hazelcast.spi.RemoteService;
+import com.hazelcast.spi.impl.operationservice.Operation;
+import com.hazelcast.internal.services.RemoteService;
 import com.hazelcast.spi.merge.SplitBrainMergePolicy;
 import com.hazelcast.spi.merge.SplitBrainMergeTypes.CollectionMergeTypes;
-import com.hazelcast.spi.serialization.SerializationService;
+import com.hazelcast.internal.serialization.SerializationService;
 
 import java.io.IOException;
 import java.util.Collection;
 
 import static com.hazelcast.spi.impl.merge.MergingValueFactory.createMergingValue;
-import static com.hazelcast.util.CollectionUtil.isEmpty;
+import static com.hazelcast.internal.util.CollectionUtil.isEmpty;
 
 /**
  * Merges a {@link CollectionMergeTypes} for split-brain healing with a {@link SplitBrainMergePolicy}.
@@ -40,14 +40,15 @@ import static com.hazelcast.util.CollectionUtil.isEmpty;
  */
 public class CollectionMergeOperation extends CollectionBackupAwareOperation {
 
-    private SplitBrainMergePolicy<Collection<Object>, CollectionMergeTypes> mergePolicy;
+    private SplitBrainMergePolicy<Collection<Object>, CollectionMergeTypes<Object>, Collection<Object>> mergePolicy;
     private CollectionMergeTypes mergingValue;
 
     private transient Collection<CollectionItem> backupCollection;
     private transient boolean shouldBackup;
 
-    public CollectionMergeOperation(String name, SplitBrainMergePolicy<Collection<Object>, CollectionMergeTypes> mergePolicy,
-                                    CollectionMergeTypes mergingValue) {
+    public CollectionMergeOperation(String name,
+                                    SplitBrainMergePolicy<Collection<Object>, CollectionMergeTypes<Object>,
+                                            Collection<Object>> mergePolicy, CollectionMergeTypes<Object> mergingValue) {
         super(name);
         this.mergePolicy = mergePolicy;
         this.mergingValue = mergingValue;
@@ -66,15 +67,16 @@ public class CollectionMergeOperation extends CollectionBackupAwareOperation {
         shouldBackup = currentCollectionIsEmpty != backupCollection.isEmpty() || currentItemId != container.getCurrentId();
     }
 
-    private Collection<CollectionItem> merge(CollectionContainer container, CollectionMergeTypes mergingValue,
-                                             SplitBrainMergePolicy<Collection<Object>, CollectionMergeTypes> mergePolicy) {
+    private Collection<CollectionItem> merge(CollectionContainer container, CollectionMergeTypes<Object> mergingValue,
+                                             SplitBrainMergePolicy<Collection<Object>, CollectionMergeTypes<Object>,
+                                                     Collection<Object>> mergePolicy) {
         SerializationService serializationService = getNodeEngine().getSerializationService();
         serializationService.getManagedContext().initialize(mergingValue);
         serializationService.getManagedContext().initialize(mergePolicy);
 
         Collection<CollectionItem> existingItems = container.getCollection();
 
-        CollectionMergeTypes existingValue = createMergingValueOrNull(serializationService, existingItems);
+        CollectionMergeTypes<Object> existingValue = createMergingValueOrNull(serializationService, existingItems);
         Collection<Object> newValues = mergePolicy.merge(mergingValue, existingValue);
 
         if (isEmpty(newValues)) {
@@ -82,15 +84,15 @@ public class CollectionMergeOperation extends CollectionBackupAwareOperation {
             service.destroyDistributedObject(name);
         } else if (existingValue == null) {
             createNewCollectionItems(container, existingItems, newValues, serializationService);
-        } else if (!newValues.equals(existingValue.getValue())) {
+        } else if (!newValues.equals(existingValue.getRawValue())) {
             container.clear(false);
             createNewCollectionItems(container, existingItems, newValues, serializationService);
         }
         return existingItems;
     }
 
-    private CollectionMergeTypes createMergingValueOrNull(SerializationService serializationService,
-                                                          Collection<CollectionItem> existingItems) {
+    private CollectionMergeTypes<Object> createMergingValueOrNull(SerializationService serializationService,
+                                                                  Collection<CollectionItem> existingItems) {
         return existingItems.isEmpty() ? null : createMergingValue(serializationService, existingItems);
     }
 
@@ -127,7 +129,7 @@ public class CollectionMergeOperation extends CollectionBackupAwareOperation {
     }
 
     @Override
-    public int getId() {
+    public int getClassId() {
         return CollectionDataSerializerHook.COLLECTION_MERGE;
     }
 }

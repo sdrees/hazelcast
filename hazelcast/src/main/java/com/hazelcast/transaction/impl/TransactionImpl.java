@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2008-2018, Hazelcast, Inc. All Rights Reserved.
+ * Copyright (c) 2008-2020, Hazelcast, Inc. All Rights Reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -19,11 +19,12 @@ package com.hazelcast.transaction.impl;
 import com.hazelcast.core.HazelcastInstanceNotActiveException;
 import com.hazelcast.core.MemberLeftException;
 import com.hazelcast.internal.cluster.ClusterService;
+import com.hazelcast.internal.util.FutureUtil.ExceptionHandler;
 import com.hazelcast.logging.ILogger;
-import com.hazelcast.nio.Address;
-import com.hazelcast.spi.NodeEngine;
-import com.hazelcast.spi.Operation;
-import com.hazelcast.spi.OperationService;
+import com.hazelcast.cluster.Address;
+import com.hazelcast.spi.impl.NodeEngine;
+import com.hazelcast.spi.impl.operationservice.Operation;
+import com.hazelcast.spi.impl.operationservice.OperationService;
 import com.hazelcast.spi.exception.TargetNotMemberException;
 import com.hazelcast.transaction.TransactionException;
 import com.hazelcast.transaction.TransactionNotActiveException;
@@ -33,17 +34,25 @@ import com.hazelcast.transaction.impl.operations.CreateTxBackupLogOperation;
 import com.hazelcast.transaction.impl.operations.PurgeTxBackupLogOperation;
 import com.hazelcast.transaction.impl.operations.ReplicateTxBackupLogOperation;
 import com.hazelcast.transaction.impl.operations.RollbackTxBackupLogOperation;
-import com.hazelcast.util.ExceptionUtil;
 
+import javax.annotation.Nonnull;
+import javax.annotation.Nullable;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.UUID;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeoutException;
 import java.util.logging.Level;
 
+import static com.hazelcast.internal.util.Clock.currentTimeMillis;
+import static com.hazelcast.internal.util.ExceptionUtil.rethrow;
+import static com.hazelcast.internal.util.FutureUtil.RETHROW_TRANSACTION_EXCEPTION;
+import static com.hazelcast.internal.util.FutureUtil.logAllExceptions;
+import static com.hazelcast.internal.util.FutureUtil.waitUntilAllRespondedWithDeadline;
+import static com.hazelcast.internal.util.FutureUtil.waitWithDeadline;
+import static com.hazelcast.internal.util.UuidUtil.newUnsecureUUID;
 import static com.hazelcast.transaction.TransactionOptions.TransactionType;
-import static com.hazelcast.transaction.TransactionOptions.TransactionType.LOCAL;
 import static com.hazelcast.transaction.TransactionOptions.TransactionType.ONE_PHASE;
 import static com.hazelcast.transaction.TransactionOptions.TransactionType.TWO_PHASE;
 import static com.hazelcast.transaction.impl.Transaction.State.ACTIVE;
@@ -56,14 +65,6 @@ import static com.hazelcast.transaction.impl.Transaction.State.PREPARING;
 import static com.hazelcast.transaction.impl.Transaction.State.ROLLED_BACK;
 import static com.hazelcast.transaction.impl.Transaction.State.ROLLING_BACK;
 import static com.hazelcast.transaction.impl.TransactionManagerServiceImpl.SERVICE_NAME;
-import static com.hazelcast.util.Clock.currentTimeMillis;
-import static com.hazelcast.util.ExceptionUtil.rethrow;
-import static com.hazelcast.util.FutureUtil.ExceptionHandler;
-import static com.hazelcast.util.FutureUtil.RETHROW_TRANSACTION_EXCEPTION;
-import static com.hazelcast.util.FutureUtil.logAllExceptions;
-import static com.hazelcast.util.FutureUtil.waitUntilAllRespondedWithDeadline;
-import static com.hazelcast.util.FutureUtil.waitWithDeadline;
-import static com.hazelcast.util.UuidUtil.newUnsecureUuidString;
 import static java.lang.Boolean.TRUE;
 import static java.util.concurrent.TimeUnit.MILLISECONDS;
 
@@ -78,12 +79,12 @@ public class TransactionImpl implements Transaction {
     private final ExceptionHandler replicationTxExceptionHandler;
     private final TransactionManagerServiceImpl transactionManagerService;
     private final NodeEngine nodeEngine;
-    private final String txnId;
+    private final UUID txnId;
     private final int durability;
     private final TransactionType transactionType;
     private final boolean checkThreadAccess;
     private final ILogger logger;
-    private final String txOwnerUuid;
+    private final UUID txOwnerUuid;
     private final TransactionLog transactionLog;
     private Long threadId;
     private long timeoutMillis;
@@ -93,19 +94,24 @@ public class TransactionImpl implements Transaction {
     private boolean backupLogsCreated;
     private boolean originatedFromClient;
 
-    public TransactionImpl(TransactionManagerServiceImpl transactionManagerService, NodeEngine nodeEngine,
-                           TransactionOptions options, String txOwnerUuid) {
+    public TransactionImpl(@Nonnull TransactionManagerServiceImpl transactionManagerService,
+                           @Nonnull NodeEngine nodeEngine,
+                           @Nonnull TransactionOptions options,
+                           @Nullable UUID txOwnerUuid) {
         this(transactionManagerService, nodeEngine, options, txOwnerUuid, false);
     }
 
-    public TransactionImpl(TransactionManagerServiceImpl transactionManagerService, NodeEngine nodeEngine,
-                           TransactionOptions options, String txOwnerUuid, boolean originatedFromClient) {
+    public TransactionImpl(@Nonnull TransactionManagerServiceImpl transactionManagerService,
+                           @Nonnull NodeEngine nodeEngine,
+                           @Nonnull TransactionOptions options,
+                           @Nullable UUID txOwnerUuid,
+                           boolean originatedFromClient) {
         this.transactionLog = new TransactionLog();
         this.transactionManagerService = transactionManagerService;
         this.nodeEngine = nodeEngine;
-        this.txnId = newUnsecureUuidString();
+        this.txnId = newUnsecureUUID();
         this.timeoutMillis = options.getTimeoutMillis();
-        this.transactionType = options.getTransactionType() == LOCAL ? ONE_PHASE : options.getTransactionType();
+        this.transactionType = options.getTransactionType();
         this.durability = transactionType == ONE_PHASE ? 0 : options.getDurability();
         this.txOwnerUuid = txOwnerUuid == null ? nodeEngine.getLocalMember().getUuid() : txOwnerUuid;
         this.checkThreadAccess = txOwnerUuid == null;
@@ -119,8 +125,8 @@ public class TransactionImpl implements Transaction {
 
     // used by tx backups
     TransactionImpl(TransactionManagerServiceImpl transactionManagerService, NodeEngine nodeEngine,
-                    String txnId, List<TransactionLogRecord> transactionLog, long timeoutMillis,
-                    long startTime, String txOwnerUuid) {
+                    UUID txnId, List<TransactionLogRecord> transactionLog, long timeoutMillis,
+                    long startTime, UUID txOwnerUuid) {
         this.transactionLog = new TransactionLog(transactionLog);
         this.transactionManagerService = transactionManagerService;
         this.nodeEngine = nodeEngine;
@@ -140,7 +146,7 @@ public class TransactionImpl implements Transaction {
     }
 
     @Override
-    public String getTxnId() {
+    public UUID getTxnId() {
         return txnId;
     }
 
@@ -149,7 +155,7 @@ public class TransactionImpl implements Transaction {
     }
 
     @Override
-    public String getOwnerUuid() {
+    public UUID getOwnerUuid() {
         return txOwnerUuid;
     }
 
@@ -437,7 +443,7 @@ public class TransactionImpl implements Transaction {
 
     protected ReplicateTxBackupLogOperation createReplicateTxBackupLogOperation() {
         return new ReplicateTxBackupLogOperation(
-                transactionLog.getRecordList(), txOwnerUuid, txnId, timeoutMillis, startTime);
+                transactionLog.getRecords(), txOwnerUuid, txnId, timeoutMillis, startTime);
     }
 
     protected RollbackTxBackupLogOperation createRollbackTxBackupLogOperation() {
@@ -481,7 +487,7 @@ public class TransactionImpl implements Transaction {
                         return;
                     }
                 }
-                throw ExceptionUtil.rethrow(throwable);
+                throw rethrow(throwable);
             }
         };
     }

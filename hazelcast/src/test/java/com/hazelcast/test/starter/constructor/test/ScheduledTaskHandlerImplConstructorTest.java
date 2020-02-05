@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2008-2018, Hazelcast, Inc. All Rights Reserved.
+ * Copyright (c) 2008-2020, Hazelcast, Inc. All Rights Reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -16,43 +16,44 @@
 
 package com.hazelcast.test.starter.constructor.test;
 
-import com.hazelcast.nio.Address;
 import com.hazelcast.scheduledexecutor.ScheduledTaskHandler;
 import com.hazelcast.scheduledexecutor.impl.ScheduledTaskHandlerImpl;
 import com.hazelcast.test.HazelcastParallelClassRunner;
-import com.hazelcast.test.annotation.ParallelTest;
+import com.hazelcast.test.annotation.ParallelJVMTest;
 import com.hazelcast.test.annotation.QuickTest;
 import com.hazelcast.test.starter.constructor.ScheduledTaskHandlerImplConstructor;
 import org.junit.Test;
 import org.junit.experimental.categories.Category;
 import org.junit.runner.RunWith;
 
+import java.util.UUID;
+
 import static org.junit.Assert.assertEquals;
 
 @RunWith(HazelcastParallelClassRunner.class)
-@Category({QuickTest.class, ParallelTest.class})
+@Category({QuickTest.class, ParallelJVMTest.class})
 public class ScheduledTaskHandlerImplConstructorTest {
 
     @Test
-    public void testConstructor() throws Exception {
+    public void testConstructor() {
         String schedulerName = "myScheduler";
         String taskName = "myTask";
         int partitionId = 23;
-        Address address = new Address("172.16.16.1", 4223);
+        UUID uuid = UUID.randomUUID();
 
-        ScheduledTaskHandler handlerWithAddress = ScheduledTaskHandlerImpl.of(address, schedulerName, taskName);
+        ScheduledTaskHandler handlerWithUuid = ScheduledTaskHandlerImpl.of(uuid, schedulerName, taskName);
         ScheduledTaskHandler handlerWithPartitionId = ScheduledTaskHandlerImpl.of(partitionId, schedulerName, taskName);
 
         ScheduledTaskHandlerImplConstructor constructor = new ScheduledTaskHandlerImplConstructor(ScheduledTaskHandlerImpl.class);
-        ScheduledTaskHandler clonedHandlerWithAddress = (ScheduledTaskHandler) constructor.createNew(handlerWithAddress);
+        ScheduledTaskHandler clonedHandlerWithUuid = (ScheduledTaskHandler) constructor.createNew(handlerWithUuid);
         ScheduledTaskHandler clonedHandlerWithPartitionId = (ScheduledTaskHandler) constructor.createNew(handlerWithPartitionId);
 
-        assertThatScheduledTaskHandlerAreEqual(handlerWithAddress, clonedHandlerWithAddress);
+        assertThatScheduledTaskHandlerAreEqual(handlerWithUuid, clonedHandlerWithUuid);
         assertThatScheduledTaskHandlerAreEqual(handlerWithPartitionId, clonedHandlerWithPartitionId);
     }
 
     private static void assertThatScheduledTaskHandlerAreEqual(ScheduledTaskHandler expected, ScheduledTaskHandler actual) {
-        assertEquals(expected.getAddress(), actual.getAddress());
+        assertEquals(expected.getUuid(), actual.getUuid());
         assertEquals(expected.getSchedulerName(), actual.getSchedulerName());
         assertEquals(expected.getTaskName(), actual.getTaskName());
         assertEquals(expected.getPartitionId(), actual.getPartitionId());

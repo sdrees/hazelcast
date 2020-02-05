@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2008-2018, Hazelcast, Inc. All Rights Reserved.
+ * Copyright (c) 2008-2020, Hazelcast, Inc. All Rights Reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -21,19 +21,19 @@ import com.hazelcast.internal.serialization.InternalSerializationService;
 import com.hazelcast.internal.util.counters.MwCounter;
 import com.hazelcast.internal.util.counters.SwCounter;
 import com.hazelcast.logging.ILogger;
-import com.hazelcast.nio.Address;
-import com.hazelcast.nio.Bits;
-import com.hazelcast.nio.Packet;
-import com.hazelcast.spi.NodeEngine;
+import com.hazelcast.cluster.Address;
+import com.hazelcast.internal.nio.Bits;
+import com.hazelcast.internal.nio.Packet;
+import com.hazelcast.spi.impl.NodeEngine;
 import com.hazelcast.spi.impl.operationservice.impl.responses.ErrorResponse;
-import com.hazelcast.util.function.Consumer;
 
 import java.nio.ByteOrder;
+import java.util.function.Consumer;
 
 import static com.hazelcast.internal.util.counters.MwCounter.newMwCounter;
 import static com.hazelcast.internal.util.counters.SwCounter.newSwCounter;
-import static com.hazelcast.nio.Packet.FLAG_OP_RESPONSE;
-import static com.hazelcast.nio.Packet.Type.OPERATION;
+import static com.hazelcast.internal.nio.Packet.FLAG_OP_RESPONSE;
+import static com.hazelcast.internal.nio.Packet.Type.OPERATION;
 import static com.hazelcast.spi.impl.SpiDataSerializerHook.BACKUP_ACK_RESPONSE;
 import static com.hazelcast.spi.impl.SpiDataSerializerHook.CALL_TIMEOUT_RESPONSE;
 import static com.hazelcast.spi.impl.SpiDataSerializerHook.ERROR_RESPONSE;
@@ -41,17 +41,17 @@ import static com.hazelcast.spi.impl.SpiDataSerializerHook.NORMAL_RESPONSE;
 import static com.hazelcast.spi.impl.operationservice.impl.responses.NormalResponse.OFFSET_BACKUP_ACKS;
 import static com.hazelcast.spi.impl.operationservice.impl.responses.Response.OFFSET_CALL_ID;
 import static com.hazelcast.spi.impl.operationservice.impl.responses.Response.OFFSET_TYPE_ID;
-import static com.hazelcast.util.Preconditions.checkNotNull;
-import static com.hazelcast.util.Preconditions.checkTrue;
+import static com.hazelcast.internal.util.Preconditions.checkNotNull;
+import static com.hazelcast.internal.util.Preconditions.checkTrue;
 
 /**
  * Responsible for handling responses for invocations. Based on the content of the
  * response packet, it will lookup the Invocation from the InvocationRegistry and
  * notify the Invocation.
  *
- * InboundResponseHandlers are not threadsafe. So if there are multiple threads
+ * InboundResponseHandlers are not thread-safe. So if there are multiple threads
  * processing responses, each thread needs to get its own instance. Only the backup
- * handling is threadsafe since backups can be completed locally by any thread.
+ * handling is thread-safe since backups can be completed locally by any thread.
  */
 public final class InboundResponseHandler implements Consumer<Packet> {
 
@@ -119,7 +119,7 @@ public final class InboundResponseHandler implements Consumer<Packet> {
             // taking too much time.
             if (invocation == null) {
                 if (logger.isFinestEnabled()) {
-                    logger.finest("No Invocation found for backup response with callId " + callId);
+                    logger.finest("No Invocation found for backup response with callId=" + callId);
                 }
                 return;
             }
@@ -137,7 +137,7 @@ public final class InboundResponseHandler implements Consumer<Packet> {
         if (invocation == null) {
             responsesMissing.inc();
             if (nodeEngine.isRunning() && callId != 0) {
-                logger.warning("No Invocation found for error response with callId: " + callId + " sent from " + sender);
+                logger.warning("No Invocation found for error response with callId=" + callId + " sent from " + sender);
             }
             return;
         }
@@ -152,7 +152,7 @@ public final class InboundResponseHandler implements Consumer<Packet> {
         if (invocation == null) {
             responsesMissing.inc();
             if (nodeEngine.isRunning()) {
-                logger.warning("No Invocation found for normal response with callId " + callId + " sent from " + sender);
+                logger.warning("No Invocation found for normal response with callId=" + callId + " sent from " + sender);
             }
             return;
         }
@@ -166,7 +166,7 @@ public final class InboundResponseHandler implements Consumer<Packet> {
         if (invocation == null) {
             responsesMissing.inc();
             if (nodeEngine.isRunning()) {
-                logger.warning("No Invocation found for call timeout response with callId" + callId + " sent from " + sender);
+                logger.warning("No Invocation found for call timeout response with callId=" + callId + " sent from " + sender);
             }
             return;
         }

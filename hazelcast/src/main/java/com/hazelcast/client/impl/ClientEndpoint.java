@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2008-2018, Hazelcast, Inc. All Rights Reserved.
+ * Copyright (c) 2008-2020, Hazelcast, Inc. All Rights Reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -16,20 +16,23 @@
 
 package com.hazelcast.client.impl;
 
-import com.hazelcast.client.impl.client.ClientPrincipal;
-import com.hazelcast.core.Client;
-import com.hazelcast.nio.Connection;
+import com.hazelcast.client.Client;
+import com.hazelcast.client.impl.statistics.ClientStatistics;
+import com.hazelcast.internal.metrics.DynamicMetricsProvider;
+import com.hazelcast.internal.nio.Connection;
 import com.hazelcast.security.Credentials;
 import com.hazelcast.transaction.TransactionContext;
 
 import javax.security.auth.Subject;
 import javax.security.auth.login.LoginContext;
+import java.util.Set;
+import java.util.UUID;
 import java.util.concurrent.Callable;
 
 /**
  * Represents an endpoint to a client. So for each client connected to a member, a ClientEndpoint object is available.
  */
-public interface ClientEndpoint extends Client {
+public interface ClientEndpoint extends Client, DynamicMetricsProvider {
 
     /**
      * Checks if the endpoint is alive.
@@ -48,7 +51,7 @@ public interface ClientEndpoint extends Client {
      * @param topic   topic name of listener(mostly distributed object name)
      * @param id      registration ID of remove action
      */
-    void addListenerDestroyAction(String service, String topic, String id);
+    void addListenerDestroyAction(String service, String topic, UUID id);
 
     /**
      * Adds a remove callable to be called when endpoint is destroyed
@@ -57,50 +60,35 @@ public interface ClientEndpoint extends Client {
      * @param registrationId registration ID of destroy action
      * @param removeAction   callable that will be called when endpoint is destroyed
      */
-    void addDestroyAction(String registrationId, Callable<Boolean> removeAction);
+    void addDestroyAction(UUID registrationId, Callable<Boolean> removeAction);
 
     /**
      * @param id registration ID of destroy action
      * @return true if remove is successful
      */
-    boolean removeDestroyAction(String id);
+    boolean removeDestroyAction(UUID id);
 
     Credentials getCredentials();
 
     void setTransactionContext(TransactionContext context);
 
-    TransactionContext getTransactionContext(String txnId);
+    TransactionContext getTransactionContext(UUID txnId);
 
-    void removeTransactionContext(String txnId);
-
-    /**
-     * Indicates whether this endpoint is the owner connection for that client.
-     * @return {@code true} when this endpoint is the owner connection for the client
-     */
-    boolean isOwnerConnection();
+    void removeTransactionContext(UUID txnId);
 
     Subject getSubject();
-
-    void clearAllListeners();
 
     Connection getConnection();
 
     void setLoginContext(LoginContext lc);
 
-    void authenticated(ClientPrincipal principal, Credentials credentials, boolean firstConnection,
-                       String clientVersion, long authCorrelationId);
-
-    void authenticated(ClientPrincipal principal);
+    void authenticated(UUID clientUuid, Credentials credentials, String clientVersion,
+                       long authCorrelationId, String clientName, Set<String> labels);
 
     /**
      * @return true if endpoint is authenticated with valid security credentials, returns false otherwise
      */
     boolean isAuthenticated();
-
-    /**
-     * @return the client version as calculated by {@link com.hazelcast.instance.BuildInfo}
-     */
-    int getClientVersion();
 
     /**
      * @param version the version string as obtained from the environment
@@ -112,10 +100,17 @@ public interface ClientEndpoint extends Client {
      *
      * @param stats the latest statistics retrieved from the client
      */
-    void setClientStatistics(String stats);
+    void setClientStatistics(ClientStatistics stats);
 
     /**
-     * @return statistics string for the client
+     * Returns the latest client statistics.
+     *
+     * @return the client statistics
      */
-    String getClientStatistics();
+    ClientStatistics getClientStatistics();
+
+    /**
+     * @return client attributes string for the client
+     */
+    String getClientAttributes();
 }

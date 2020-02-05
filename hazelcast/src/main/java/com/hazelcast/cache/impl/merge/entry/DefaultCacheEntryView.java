@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2008-2018, Hazelcast, Inc. All Rights Reserved.
+ * Copyright (c) 2008-2020, Hazelcast, Inc. All Rights Reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -18,12 +18,12 @@ package com.hazelcast.cache.impl.merge.entry;
 
 import com.hazelcast.cache.CacheEntryView;
 import com.hazelcast.cache.impl.CacheDataSerializerHook;
-import com.hazelcast.internal.cluster.Versions;
+import com.hazelcast.internal.nio.DataWriter;
+import com.hazelcast.internal.nio.IOUtil;
 import com.hazelcast.nio.ObjectDataInput;
 import com.hazelcast.nio.ObjectDataOutput;
-import com.hazelcast.nio.serialization.Data;
+import com.hazelcast.internal.serialization.Data;
 import com.hazelcast.nio.serialization.IdentifiedDataSerializable;
-import com.hazelcast.nio.serialization.impl.Versioned;
 
 import java.io.IOException;
 
@@ -31,7 +31,7 @@ import java.io.IOException;
  * Default heap based implementation of {@link com.hazelcast.cache.CacheEntryView}.
  */
 public class DefaultCacheEntryView
-        implements CacheEntryView<Data, Data>, IdentifiedDataSerializable, Versioned {
+        implements CacheEntryView<Data, Data>, IdentifiedDataSerializable {
 
     private Data key;
     private Data value;
@@ -82,7 +82,7 @@ public class DefaultCacheEntryView
     }
 
     @Override
-    public long getAccessHit() {
+    public long getHits() {
         return accessHit;
     }
 
@@ -98,15 +98,14 @@ public class DefaultCacheEntryView
 
     @Override
     public void writeData(ObjectDataOutput out) throws IOException {
+        assert out instanceof DataWriter;
         out.writeLong(creationTime);
         out.writeLong(expirationTime);
         out.writeLong(lastAccessTime);
         out.writeLong(accessHit);
-        out.writeData(key);
-        out.writeData(value);
-        if (out.getVersion().isGreaterOrEqual(Versions.V3_11)) {
-            out.writeData(expiryPolicy);
-        }
+        IOUtil.writeData(out, key);
+        IOUtil.writeData(out, value);
+        IOUtil.writeData(out, expiryPolicy);
     }
 
     @Override
@@ -115,11 +114,9 @@ public class DefaultCacheEntryView
         expirationTime = in.readLong();
         lastAccessTime = in.readLong();
         accessHit = in.readLong();
-        key = in.readData();
-        value = in.readData();
-        if (in.getVersion().isGreaterOrEqual(Versions.V3_11)) {
-            expiryPolicy = in.readData();
-        }
+        key = IOUtil.readData(in);
+        value = IOUtil.readData(in);
+        expiryPolicy = IOUtil.readData(in);
     }
 
     @Override
@@ -128,7 +125,7 @@ public class DefaultCacheEntryView
     }
 
     @Override
-    public int getId() {
+    public int getClassId() {
         return CacheDataSerializerHook.DEFAULT_CACHE_ENTRY_VIEW;
     }
 }

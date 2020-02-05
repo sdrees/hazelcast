@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2008-2018, Hazelcast, Inc. All Rights Reserved.
+ * Copyright (c) 2008-2020, Hazelcast, Inc. All Rights Reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -18,16 +18,16 @@ package com.hazelcast.cache.impl;
 
 import com.hazelcast.config.AbstractCacheConfig;
 import com.hazelcast.config.CacheConfig;
+import com.hazelcast.config.CacheConfigAccessor;
+import com.hazelcast.internal.nio.IOUtil;
+import com.hazelcast.internal.serialization.SerializationService;
 import com.hazelcast.nio.ObjectDataInput;
 import com.hazelcast.nio.ObjectDataOutput;
-import com.hazelcast.nio.serialization.IdentifiedDataSerializable;
-import com.hazelcast.nio.serialization.impl.Versioned;
-import com.hazelcast.spi.serialization.SerializationService;
+import com.hazelcast.spi.impl.SerializationServiceSupport;
+import com.hazelcast.spi.tenantcontrol.TenantControl;
 
 import javax.cache.configuration.CacheEntryListenerConfiguration;
 import java.io.IOException;
-
-import static com.hazelcast.internal.cluster.Versions.V3_10;
 
 /**
  * This subclass of {@link CacheConfig} is used to communicate cache configurations in pre-join cache operations when cluster
@@ -41,7 +41,7 @@ import static com.hazelcast.internal.cluster.Versions.V3_10;
  * @param <V> the value type
  * @since 3.9
  */
-public class PreJoinCacheConfig<K, V> extends CacheConfig<K, V> implements Versioned, IdentifiedDataSerializable {
+public class PreJoinCacheConfig<K, V> extends CacheConfig<K, V> {
     public PreJoinCacheConfig() {
         super();
     }
@@ -74,66 +74,54 @@ public class PreJoinCacheConfig<K, V> extends CacheConfig<K, V> implements Versi
     }
 
     @Override
+    protected void writeTenant(ObjectDataOutput out) throws IOException {
+        out.writeObject(CacheConfigAccessor.getTenantControl(this));
+    }
+
+    @Override
+    protected void readTenant(ObjectDataInput in) throws IOException {
+        TenantControl tc = in.readObject();
+        CacheConfigAccessor.setTenantControl(this, tc);
+    }
+
+    @Override
     protected void writeFactories(ObjectDataOutput out) throws IOException {
-        // RU_COMPAT_3_9
-        if (out.getVersion().isGreaterOrEqual(V3_10)) {
-            SerializationService serializationService = out.getSerializationService();
-            out.writeData(cacheLoaderFactory.getSerializedValue(serializationService));
-            out.writeData(cacheWriterFactory.getSerializedValue(serializationService));
-            out.writeData(expiryPolicyFactory.getSerializedValue(serializationService));
-        } else {
-            super.writeFactories(out);
-        }
+        assert (out instanceof SerializationServiceSupport) : "out must implement SerializationServiceSupport";
+        SerializationService serializationService = ((SerializationServiceSupport) out).getSerializationService();
+        IOUtil.writeData(out, cacheLoaderFactory.getSerializedValue(serializationService));
+        IOUtil.writeData(out, cacheWriterFactory.getSerializedValue(serializationService));
+        IOUtil.writeData(out, expiryPolicyFactory.getSerializedValue(serializationService));
     }
 
     @Override
     protected void readFactories(ObjectDataInput in) throws IOException {
-        // RU_COMPAT_3_9
-        if (in.getVersion().isUnknownOrLessThan(V3_10)) {
-            super.readFactories(in);
-        } else {
-            cacheLoaderFactory = DeferredValue.withSerializedValue(in.readData());
-            cacheWriterFactory = DeferredValue.withSerializedValue(in.readData());
-            expiryPolicyFactory = DeferredValue.withSerializedValue(in.readData());
-        }
+        cacheLoaderFactory = DeferredValue.withSerializedValue(IOUtil.readData(in));
+        cacheWriterFactory = DeferredValue.withSerializedValue(IOUtil.readData(in));
+        expiryPolicyFactory = DeferredValue.withSerializedValue(IOUtil.readData(in));
     }
 
     @Override
     protected void writeListenerConfigurations(ObjectDataOutput out) throws IOException {
-        // RU_COMPAT_3_9
-        if (out.getVersion().isGreaterOrEqual(V3_10)) {
-            out.writeInt(listenerConfigurations.size());
-            for (DeferredValue<CacheEntryListenerConfiguration<K, V>> config : listenerConfigurations) {
-                out.writeData(config.getSerializedValue(out.getSerializationService()));
-            }
-        } else {
-            super.writeListenerConfigurations(out);
+        assert (out instanceof SerializationServiceSupport) : "out must implement SerializationServiceSupport";
+        out.writeInt(listenerConfigurations.size());
+        for (DeferredValue<CacheEntryListenerConfiguration<K, V>> config : listenerConfigurations) {
+            IOUtil.writeData(out, config.getSerializedValue(((SerializationServiceSupport) out).getSerializationService()));
         }
     }
 
     @Override
     protected void readListenerConfigurations(ObjectDataInput in) throws IOException {
-        // RU_COMPAT_3_9
-        if (in.getVersion().isUnknownOrLessThan(V3_10)) {
-            super.readListenerConfigurations(in);
-        } else {
-            int size = in.readInt();
-            listenerConfigurations = createConcurrentSet();
-            for (int i = 0; i < size; i++) {
-                DeferredValue<CacheEntryListenerConfiguration<K, V>> serializedConfig =
-                        DeferredValue.withSerializedValue(in.readData());
-                listenerConfigurations.add(serializedConfig);
-            }
+        int size = in.readInt();
+        listenerConfigurations = createConcurrentSet();
+        for (int i = 0; i < size; i++) {
+            DeferredValue<CacheEntryListenerConfiguration<K, V>> serializedConfig =
+                    DeferredValue.withSerializedValue(IOUtil.readData(in));
+            listenerConfigurations.add(serializedConfig);
         }
     }
 
     @Override
-    public int getFactoryId() {
-        return CacheDataSerializerHook.F_ID;
-    }
-
-    @Override
-    public int getId() {
+    public int getClassId() {
         return CacheDataSerializerHook.PRE_JOIN_CACHE_CONFIG;
     }
 
@@ -151,11 +139,7 @@ public class PreJoinCacheConfig<K, V> extends CacheConfig<K, V> implements Versi
             return false;
         }
 
-        if (!this.getValueClassName().equals(that.getValueClassName())) {
-            return false;
-        }
-
-        return true;
+        return this.getValueClassName().equals(that.getValueClassName());
     }
 
     /**

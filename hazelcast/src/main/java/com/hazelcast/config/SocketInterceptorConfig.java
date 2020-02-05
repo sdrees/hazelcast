@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2008-2018, Hazelcast, Inc. All Rights Reserved.
+ * Copyright (c) 2008-2020, Hazelcast, Inc. All Rights Reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -16,7 +16,14 @@
 
 package com.hazelcast.config;
 
+import com.hazelcast.nio.SocketInterceptor;
+
+import javax.annotation.Nonnull;
+import java.util.Objects;
 import java.util.Properties;
+
+import static com.hazelcast.internal.util.Preconditions.checkHasText;
+import static com.hazelcast.internal.util.Preconditions.checkNotNull;
 
 /**
  * Contains the configuration for interceptor socket.
@@ -27,41 +34,54 @@ public class SocketInterceptorConfig {
     private Object implementation;
     private Properties properties = new Properties();
 
+    public SocketInterceptorConfig() {
+    }
+
+    public SocketInterceptorConfig(SocketInterceptorConfig socketInterceptorConfig) {
+        enabled = socketInterceptorConfig.enabled;
+        className = socketInterceptorConfig.className;
+        implementation = socketInterceptorConfig.implementation;
+        properties = new Properties();
+        properties.putAll(socketInterceptorConfig.properties);
+    }
+
     /**
-     * Returns the name of the {@link com.hazelcast.nio.SocketInterceptor} implementation class.
+     * Returns the name of the {@link SocketInterceptor} implementation class.
      *
-     * @return name of the {@link com.hazelcast.nio.SocketInterceptor} implementation class
+     * @return name of the {@link SocketInterceptor} implementation class
      */
     public String getClassName() {
         return className;
     }
 
     /**
-     * Sets the name for the {@link com.hazelcast.nio.SocketInterceptor} implementation class.
+     * Sets the name for the {@link SocketInterceptor} implementation class.
      *
-     * @param className the name of the {@link com.hazelcast.nio.SocketInterceptor} implementation class to set
+     * @param className the name of the {@link SocketInterceptor} implementation class to set
      * @return this SocketInterceptorConfig instance
      */
-    public SocketInterceptorConfig setClassName(String className) {
-        this.className = className;
+    public SocketInterceptorConfig setClassName(@Nonnull String className) {
+        this.className = checkHasText(className, "Socket interceptor class name must contain text");
+        this.implementation = null;
         return this;
     }
 
     /**
-     * Sets the {@link com.hazelcast.nio.SocketInterceptor} implementation object.
+     * Sets the {@link SocketInterceptor} implementation object.
      *
-     * @param implementation the {@link com.hazelcast.nio.SocketInterceptor} implementation object to set
+     * @param implementation the {@link SocketInterceptor} implementation object to set
      * @return this SocketInterceptorConfig instance
      */
-    public SocketInterceptorConfig setImplementation(Object implementation) {
-        this.implementation = implementation;
+    public SocketInterceptorConfig setImplementation(@Nonnull Object implementation) {
+        this.implementation = checkNotNull(implementation, "Socket interceptor cannot be null!");
+        this.className = null;
         return this;
     }
 
     /**
-     * Returns the {@link com.hazelcast.nio.SocketInterceptor} implementation object.
+     * Returns the {@link SocketInterceptor} implementation object.
      *
-     * @return the {@link com.hazelcast.nio.SocketInterceptor} implementation object
+     * @return the {@link SocketInterceptor} implementation object
      */
     public Object getImplementation() {
         return implementation;
@@ -136,7 +156,6 @@ public class SocketInterceptorConfig {
     }
 
     @Override
-    @SuppressWarnings({"checkstyle:cyclomaticcomplexity", "checkstyle:npathcomplexity"})
     public final boolean equals(Object o) {
         if (this == o) {
             return true;
@@ -147,25 +166,15 @@ public class SocketInterceptorConfig {
 
         SocketInterceptorConfig that = (SocketInterceptorConfig) o;
 
-        if (enabled != that.enabled) {
-            return false;
-        }
-        if (className != null ? !className.equals(that.className) : that.className != null) {
-            return false;
-        }
-        if (implementation != null ? !implementation.equals(that.implementation) : that.implementation != null) {
-            return false;
-        }
-        return properties != null ? properties.equals(that.properties) : that.properties == null;
+        return enabled == that.enabled
+            && Objects.equals(implementation, that.implementation)
+            && Objects.equals(className, that.className)
+            && Objects.equals(properties, that.properties);
     }
 
     @Override
     public final int hashCode() {
-        int result = (enabled ? 1 : 0);
-        result = 31 * result + (className != null ? className.hashCode() : 0);
-        result = 31 * result + (implementation != null ? implementation.hashCode() : 0);
-        result = 31 * result + (properties != null ? properties.hashCode() : 0);
-        return result;
+        return Objects.hash(enabled, implementation, className, properties);
     }
 
     @Override

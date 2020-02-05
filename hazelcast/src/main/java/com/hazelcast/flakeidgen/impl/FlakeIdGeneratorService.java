@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2008-2018, Hazelcast, Inc. All Rights Reserved.
+ * Copyright (c) 2008-2020, Hazelcast, Inc. All Rights Reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -18,35 +18,38 @@ package com.hazelcast.flakeidgen.impl;
 
 import com.hazelcast.core.DistributedObject;
 import com.hazelcast.flakeidgen.FlakeIdGenerator;
-import com.hazelcast.monitor.LocalFlakeIdGeneratorStats;
-import com.hazelcast.monitor.impl.LocalFlakeIdGeneratorStatsImpl;
-import com.hazelcast.spi.ManagedService;
-import com.hazelcast.spi.NodeEngine;
-import com.hazelcast.spi.RemoteService;
-import com.hazelcast.spi.StatisticsAwareService;
-import com.hazelcast.util.ConstructorFunction;
+import com.hazelcast.internal.metrics.DynamicMetricsProvider;
+import com.hazelcast.internal.metrics.MetricDescriptor;
+import com.hazelcast.internal.metrics.MetricsCollectionContext;
+import com.hazelcast.internal.monitor.LocalFlakeIdGeneratorStats;
+import com.hazelcast.internal.monitor.impl.LocalFlakeIdGeneratorStatsImpl;
+import com.hazelcast.internal.services.ManagedService;
+import com.hazelcast.internal.services.RemoteService;
+import com.hazelcast.internal.services.StatisticsAwareService;
+import com.hazelcast.internal.util.ConstructorFunction;
+import com.hazelcast.spi.impl.NodeEngine;
+import com.hazelcast.spi.impl.NodeEngineImpl;
+import com.hazelcast.spi.properties.ClusterProperty;
 
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Properties;
+import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 
-import static com.hazelcast.util.ConcurrencyUtil.getOrPutIfAbsent;
+import static com.hazelcast.internal.metrics.MetricDescriptorConstants.FLAKE_ID_GENERATOR_PREFIX;
+import static com.hazelcast.internal.metrics.impl.ProviderHelper.provide;
+import static com.hazelcast.internal.util.ConcurrencyUtil.getOrPutIfAbsent;
 
 public class FlakeIdGeneratorService implements ManagedService, RemoteService,
-        StatisticsAwareService<LocalFlakeIdGeneratorStats> {
+                                                StatisticsAwareService<LocalFlakeIdGeneratorStats>, DynamicMetricsProvider {
 
     public static final String SERVICE_NAME = "hz:impl:flakeIdGeneratorService";
 
     private NodeEngine nodeEngine;
-    private final ConcurrentHashMap<String, LocalFlakeIdGeneratorStatsImpl> statsMap
-        = new ConcurrentHashMap<String, LocalFlakeIdGeneratorStatsImpl>();
+    private final ConcurrentHashMap<String, LocalFlakeIdGeneratorStatsImpl> statsMap = new ConcurrentHashMap<>();
     private final ConstructorFunction<String, LocalFlakeIdGeneratorStatsImpl> localFlakeIdStatsConstructorFunction
-        = new ConstructorFunction<String, LocalFlakeIdGeneratorStatsImpl>() {
-        public LocalFlakeIdGeneratorStatsImpl createNew(String key) {
-            return new LocalFlakeIdGeneratorStatsImpl();
-        }
-    };
+        = key -> new LocalFlakeIdGeneratorStatsImpl();
 
     public FlakeIdGeneratorService(NodeEngine nodeEngine) {
         this.nodeEngine = nodeEngine;
@@ -55,6 +58,11 @@ public class FlakeIdGeneratorService implements ManagedService, RemoteService,
     @Override
     public void init(NodeEngine nodeEngine, Properties properties) {
         this.nodeEngine = nodeEngine;
+
+        boolean dsMetricsEnabled = nodeEngine.getProperties().getBoolean(ClusterProperty.METRICS_DATASTRUCTURES);
+        if (dsMetricsEnabled) {
+            ((NodeEngineImpl) nodeEngine).getMetricsRegistry().registerDynamicMetricsProvider(this);
+        }
     }
 
     @Override
@@ -68,18 +76,18 @@ public class FlakeIdGeneratorService implements ManagedService, RemoteService,
     }
 
     @Override
-    public DistributedObject createDistributedObject(String name) {
-        return new FlakeIdGeneratorProxy(name, nodeEngine, this);
+    public DistributedObject createDistributedObject(String name, UUID source, boolean local) {
+        return new FlakeIdGeneratorProxy(name, nodeEngine, this, source);
     }
 
     @Override
-    public void destroyDistributedObject(String name) {
+    public void destroyDistributedObject(String name, boolean local) {
         statsMap.remove(name);
     }
 
     @Override
     public Map<String, LocalFlakeIdGeneratorStats> getStats() {
-        return new HashMap<String, LocalFlakeIdGeneratorStats>(statsMap);
+        return new HashMap<>(statsMap);
     }
 
     /**
@@ -90,10 +98,21 @@ public class FlakeIdGeneratorService implements ManagedService, RemoteService,
      * @param batchSize size of the batch created
      */
     public void updateStatsForBatch(String name, int batchSize) {
-        getLocalFlakeIdStats(name).update(batchSize);
+        LocalFlakeIdGeneratorStatsImpl stats = getLocalFlakeIdStats(name);
+        if (stats != null) {
+            stats.update(batchSize);
+        }
     }
 
     private LocalFlakeIdGeneratorStatsImpl getLocalFlakeIdStats(String name) {
+        if (!nodeEngine.getConfig().getFlakeIdGeneratorConfig(name).isStatisticsEnabled()) {
+            return null;
+        }
         return getOrPutIfAbsent(statsMap, name, localFlakeIdStatsConstructorFunction);
+    }
+
+    @Override
+    public void provideDynamicMetrics(MetricDescriptor descriptor, MetricsCollectionContext context) {
+        provide(descriptor, context, FLAKE_ID_GENERATOR_PREFIX, getStats());
     }
 }

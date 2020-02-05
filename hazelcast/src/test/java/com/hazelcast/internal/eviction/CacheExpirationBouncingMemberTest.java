@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2008-2018, Hazelcast, Inc. All Rights Reserved.
+ * Copyright (c) 2008-2020, Hazelcast, Inc. All Rights Reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -16,118 +16,107 @@
 
 package com.hazelcast.internal.eviction;
 
-import com.hazelcast.cache.HazelcastCacheManager;
 import com.hazelcast.cache.HazelcastExpiryPolicy;
+import com.hazelcast.cache.impl.CachePartitionSegment;
 import com.hazelcast.cache.impl.CacheService;
-import com.hazelcast.cache.impl.HazelcastServerCacheManager;
-import com.hazelcast.cache.impl.HazelcastServerCachingProvider;
 import com.hazelcast.cache.impl.ICacheRecordStore;
-import com.hazelcast.cluster.ClusterState;
 import com.hazelcast.config.CacheConfig;
 import com.hazelcast.core.HazelcastInstance;
-import com.hazelcast.spi.partition.IPartitionService;
-import com.hazelcast.test.AssertTask;
+import com.hazelcast.core.IFunction;
+import com.hazelcast.internal.partition.InternalPartitionService;
+import com.hazelcast.spi.impl.NodeEngineImpl;
 import com.hazelcast.test.HazelcastSerialClassRunner;
-import com.hazelcast.test.HazelcastTestSupport;
+import com.hazelcast.test.OverridePropertyRule;
 import com.hazelcast.test.annotation.SlowTest;
-import com.hazelcast.test.bounce.BounceMemberRule;
 import org.junit.Rule;
-import org.junit.Test;
 import org.junit.experimental.categories.Category;
 import org.junit.runner.RunWith;
 
 import javax.cache.Cache;
 import javax.cache.configuration.FactoryBuilder;
 import javax.cache.spi.CachingProvider;
-import java.util.concurrent.atomic.AtomicReferenceArray;
+import java.util.ArrayList;
+import java.util.Iterator;
+import java.util.List;
+import java.util.concurrent.TimeUnit;
 
-import static org.junit.Assert.assertEquals;
+import static com.hazelcast.cache.CacheTestSupport.createServerCachingProvider;
+import static com.hazelcast.cache.impl.eviction.CacheClearExpiredRecordsTask.PROP_TASK_PERIOD_SECONDS;
+import static com.hazelcast.test.OverridePropertyRule.set;
 
 @RunWith(HazelcastSerialClassRunner.class)
 @Category(SlowTest.class)
-public class CacheExpirationBouncingMemberTest extends HazelcastTestSupport {
+public class CacheExpirationBouncingMemberTest extends AbstractExpirationBouncingMemberTest {
 
-    private String cacheName = "test";
-    private int backupCount = 3;
-    private int keySpace = 1000;
-    private String cacheNameWithPrefix;
+    private static final long EXPIRY_MILLIS = TimeUnit.SECONDS.toMillis(ONE_SECOND);
+    private static final HazelcastExpiryPolicy EXPIRY_POLICY
+            = new HazelcastExpiryPolicy(EXPIRY_MILLIS, EXPIRY_MILLIS, EXPIRY_MILLIS);
 
     @Rule
-    public BounceMemberRule bounceMemberRule = BounceMemberRule.with(getConfig())
-            .clusterSize(4)
-            .driverCount(1)
-            .build();
+    public final OverridePropertyRule overrideTaskSecondsRule
+            = set(PROP_TASK_PERIOD_SECONDS, String.valueOf(ONE_SECOND));
 
-    protected CacheConfig getCacheConfig() {
-        CacheConfig cacheConfig = new CacheConfig();
-        cacheConfig.setName(cacheName);
-        cacheConfig.setBackupCount(backupCount);
-        cacheConfig.setExpiryPolicyFactory(FactoryBuilder.factoryOf(new HazelcastExpiryPolicy(1, 1, 1)));
-        return cacheConfig;
+    @Override
+    protected Runnable[] getTasks() {
+        Cache cache = createCache();
+        return new Runnable[]{new Get(cache), new Set(cache)};
     }
 
-    @Test
-    public void backups_should_be_empty_after_expiration() {
-        Runnable[] methods = new Runnable[2];
-        HazelcastInstance testDriver = bounceMemberRule.getNextTestDriver();
-        final CachingProvider provider = HazelcastServerCachingProvider.createCachingProvider(testDriver);
-        provider.getCacheManager().createCache(cacheName, getCacheConfig());
-        HazelcastCacheManager cacheManager = (HazelcastServerCacheManager) provider.getCacheManager();
-        cacheNameWithPrefix = cacheManager.getCacheNameWithPrefix(cacheName);
+    @Override
+    protected IFunction<HazelcastInstance, List> newExceptionMsgCreator() {
+        return new ExceptionMsgCreator();
+    }
 
-        methods[0] = new Get(provider);
-        methods[1] = new Set(provider);
+    public static class ExceptionMsgCreator implements IFunction<HazelcastInstance, List> {
+        @Override
+        public List apply(HazelcastInstance instance) {
+            List unexpiredMsg = new ArrayList();
 
-        bounceMemberRule.testRepeatedly(methods, 20);
+            NodeEngineImpl nodeEngineImpl = getNodeEngineImpl(instance);
+            CacheService service = nodeEngineImpl.getService(CacheService.SERVICE_NAME);
+            InternalPartitionService partitionService = nodeEngineImpl.getPartitionService();
+            for (int partitionId = 0; partitionId < partitionService.getPartitionCount(); partitionId++) {
+                CachePartitionSegment container = service.getSegment(partitionId);
+                boolean local = partitionService.getPartition(partitionId).isLocal();
+                Iterator<ICacheRecordStore> iterator = container.recordStoreIterator();
+                while (iterator.hasNext()) {
+                    ICacheRecordStore recordStore = iterator.next();
+                    boolean expirable = recordStore.isExpirable();
 
-        assertTrueEventually(new AssertTask() {
-            @Override
-            public void run() {
-                AtomicReferenceArray<HazelcastInstance> members = bounceMemberRule.getMembers();
-                AtomicReferenceArray<HazelcastInstance> testDrivers = bounceMemberRule.getTestDrivers();
-
-                assertSize(members);
-                assertSize(testDrivers);
-            }
-
-            private void assertSize(AtomicReferenceArray<HazelcastInstance> members) {
-                int length = members.length();
-                for (int i = 0; i < length; i++) {
-                    HazelcastInstance node = members.get(i);
-                    assert node != null;
-                    if (node.getLifecycleService().isRunning()
-                            && node.getCluster().getClusterState() != ClusterState.PASSIVE) {
-
-                        ClusterState clusterState = node.getCluster().getClusterState();
-                        CacheService cacheService = getNodeEngineImpl(node).getService(CacheService.SERVICE_NAME);
-                        IPartitionService partitionService = getNodeEngineImpl(node).getPartitionService();
-                        int partitionCount = partitionService.getPartitionCount();
-
-                        for (int j = 0; j < partitionCount; j++) {
-                            ICacheRecordStore recordStore = cacheService.getRecordStore(cacheNameWithPrefix, j);
-                            if (recordStore == null) {
-                                continue;
-                            }
-                            boolean isOwner = partitionService.getPartitionOwner(j).equals(getNodeEngineImpl(node).getThisAddress());
-                            int recordStoreSize = recordStore.size();
-                            String msg = "Failed on node: %s current cluster state is: %s, partitionId: %d"
-                                    + "ownedEntryCount: %d, isOwner: %b";
-                            String formattedMsg = String.format(msg, node.getName(), clusterState, j, recordStoreSize, isOwner);
-                            assertEquals(formattedMsg, 0, recordStoreSize);
-
-                        }
+                    if (recordStore.size() > 0 || recordStore.getExpiredKeysQueue().size() > 0) {
+                        unexpiredMsg.add(recordStore.getPartitionId());
+                        unexpiredMsg.add(recordStore.size());
+                        unexpiredMsg.add(recordStore.getExpiredKeysQueue().size());
+                        unexpiredMsg.add(expirable);
+                        unexpiredMsg.add(local);
+                        unexpiredMsg.add(nodeEngineImpl.getClusterService().getLocalMember().getAddress());
                     }
                 }
             }
-        }, 240);
+            return unexpiredMsg;
+        }
+    }
+
+    private CacheConfig getCacheConfig() {
+        CacheConfig cacheConfig = new CacheConfig();
+        cacheConfig.setName(name);
+        cacheConfig.setBackupCount(backupCount);
+        cacheConfig.setExpiryPolicyFactory(FactoryBuilder.factoryOf(EXPIRY_POLICY));
+        return cacheConfig;
+    }
+
+    private Cache createCache() {
+        HazelcastInstance testDriver = bounceMemberRule.getNextTestDriver();
+        CachingProvider provider = createServerCachingProvider(testDriver);
+        return provider.getCacheManager().createCache(name, getCacheConfig());
     }
 
     private class Get implements Runnable {
 
         private final Cache<Integer, Integer> cache;
 
-        public Get(CachingProvider hz) {
-            this.cache = hz.getCacheManager().getCache(cacheName);
+        Get(Cache cache) {
+            this.cache = cache;
         }
 
         @Override
@@ -142,8 +131,8 @@ public class CacheExpirationBouncingMemberTest extends HazelcastTestSupport {
 
         private final Cache<Integer, Integer> cache;
 
-        public Set(CachingProvider hz) {
-            this.cache = hz.getCacheManager().getCache(cacheName);
+        Set(Cache cache) {
+            this.cache = cache;
         }
 
         @Override

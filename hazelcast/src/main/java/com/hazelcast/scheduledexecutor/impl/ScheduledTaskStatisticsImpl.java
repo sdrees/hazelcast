@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2008-2018, Hazelcast, Inc. All Rights Reserved.
+ * Copyright (c) 2008-2020, Hazelcast, Inc. All Rights Reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -18,16 +18,13 @@ package com.hazelcast.scheduledexecutor.impl;
 
 import com.hazelcast.nio.ObjectDataInput;
 import com.hazelcast.nio.ObjectDataOutput;
-import com.hazelcast.nio.serialization.impl.Versioned;
 import com.hazelcast.scheduledexecutor.ScheduledTaskStatistics;
 
 import java.io.IOException;
 import java.util.concurrent.TimeUnit;
 
-import static com.hazelcast.internal.cluster.Versions.V3_10;
-
 public class ScheduledTaskStatisticsImpl
-        implements ScheduledTaskStatistics, TaskLifecycleListener, Versioned {
+        implements ScheduledTaskStatistics, TaskRuncycleHook {
 
     private static final TimeUnit MEASUREMENT_UNIT = TimeUnit.NANOSECONDS;
 
@@ -105,7 +102,7 @@ public class ScheduledTaskStatisticsImpl
     }
 
     @Override
-    public int getId() {
+    public int getClassId() {
         return ScheduledExecutorDataSerializerHook.TASK_STATS;
     }
 
@@ -116,10 +113,7 @@ public class ScheduledTaskStatisticsImpl
         out.writeLong(lastIdleDuration);
         out.writeLong(totalIdleDuration);
         out.writeLong(totalRunDuration);
-        // RU_COMPAT_3_9
-        if (out.getVersion().isGreaterOrEqual(V3_10)) {
-            out.writeLong(lastRunDuration);
-        }
+        out.writeLong(lastRunDuration);
     }
 
     @Override
@@ -129,10 +123,7 @@ public class ScheduledTaskStatisticsImpl
         lastIdleDuration = in.readLong();
         totalIdleDuration = in.readLong();
         totalRunDuration = in.readLong();
-        // RU_COMPAT_3_9
-        if (in.getVersion().isGreaterOrEqual(V3_10)) {
-            lastRunDuration = in.readLong();
-        }
+        lastRunDuration = in.readLong();
     }
 
     @Override

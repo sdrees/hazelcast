@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2008-2018, Hazelcast, Inc. All Rights Reserved.
+ * Copyright (c) 2008-2020, Hazelcast, Inc. All Rights Reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -34,7 +34,7 @@ public interface MemberSocketInterceptor extends SocketInterceptor {
      * meaning security requirements and clusters are matching.
      *
      * @param acceptedSocket accepted socket
-     * @throws IOException
+     * @throws IOException in case of any exceptional case
      */
     void onAccept(Socket acceptedSocket) throws IOException;
 }

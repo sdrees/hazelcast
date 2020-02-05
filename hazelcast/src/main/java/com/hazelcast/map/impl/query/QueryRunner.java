@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2008-2018, Hazelcast, Inc. All Rights Reserved.
+ * Copyright (c) 2008-2020, Hazelcast, Inc. All Rights Reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -17,28 +17,29 @@
 package com.hazelcast.map.impl.query;
 
 import com.hazelcast.internal.cluster.ClusterService;
+import com.hazelcast.internal.iteration.IterationPointer;
 import com.hazelcast.internal.serialization.InternalSerializationService;
+import com.hazelcast.internal.util.collection.PartitionIdSet;
 import com.hazelcast.logging.ILogger;
 import com.hazelcast.map.impl.LocalMapStatsProvider;
 import com.hazelcast.map.impl.MapContainer;
 import com.hazelcast.map.impl.MapServiceContext;
-import com.hazelcast.monitor.impl.LocalMapStatsImpl;
 import com.hazelcast.query.Predicate;
 import com.hazelcast.query.impl.Indexes;
 import com.hazelcast.query.impl.QueryableEntriesSegment;
 import com.hazelcast.query.impl.QueryableEntry;
 import com.hazelcast.query.impl.predicates.QueryOptimizer;
-import com.hazelcast.spi.NodeEngine;
-import com.hazelcast.spi.OperationService;
+import com.hazelcast.spi.impl.NodeEngine;
+import com.hazelcast.spi.impl.operationservice.OperationService;
 
 import java.util.Collection;
-import java.util.Collections;
-import java.util.List;
+
+import static com.hazelcast.internal.util.SetUtil.singletonPartitionIdSet;
 
 /**
  * Runs query operations in the calling thread (thus blocking it)
  * <p>
- * Used by query operations only: QueryOperation & QueryPartitionOperation
+ * Used by query operations only: QueryOperation &amp; QueryPartitionOperation
  * Should not be used by proxies or any other query related objects.
  */
 public class QueryRunner {
@@ -55,7 +56,11 @@ public class QueryRunner {
     protected final PartitionScanExecutor partitionScanExecutor;
     protected final ResultProcessorRegistry resultProcessorRegistry;
 
-    public QueryRunner(MapServiceContext mapServiceContext, QueryOptimizer optimizer, PartitionScanExecutor partitionScanExecutor,
+    private final int partitionCount;
+
+    public QueryRunner(MapServiceContext mapServiceContext,
+                       QueryOptimizer optimizer,
+                       PartitionScanExecutor partitionScanExecutor,
                        ResultProcessorRegistry resultProcessorRegistry) {
         this.mapServiceContext = mapServiceContext;
         this.nodeEngine = mapServiceContext.getNodeEngine();
@@ -68,38 +73,40 @@ public class QueryRunner {
         this.localMapStatsProvider = mapServiceContext.getLocalMapStatsProvider();
         this.partitionScanExecutor = partitionScanExecutor;
         this.resultProcessorRegistry = resultProcessorRegistry;
+        this.partitionCount = nodeEngine.getPartitionService().getPartitionCount();
     }
 
     /**
-     * Runs a query on a chunk of a single partition. The chunk is defined by the offset {@code tableIndex}
-     * and the soft limit {@code fetchSize}.
+     * Runs a query on a chunk of a single partition. The chunk is defined by
+     * the {@code pointers} and the soft limit is defined by the {@code fetchSize}.
      *
      * @param query       the query
      * @param partitionId the partition which is queried
-     * @param tableIndex  the index at which to start querying
+     * @param pointers    the pointers defining the state of iteration
      * @param fetchSize   the soft limit for the number of items to be queried
-     * @return the queried entries along with the next {@code tableIndex} to resume querying
+     * @return the queryied entries along with the next {@code tableIndex} to resume querying
      */
-    public ResultSegment runPartitionScanQueryOnPartitionChunk(Query query, int partitionId, int tableIndex, int fetchSize) {
-        final MapContainer mapContainer = mapServiceContext.getMapContainer(query.getMapName());
-        final Predicate predicate = queryOptimizer.optimize(query.getPredicate(), mapContainer.getIndexes(partitionId));
-        final QueryableEntriesSegment entries = partitionScanExecutor
-                .execute(query.getMapName(), predicate, partitionId, tableIndex, fetchSize);
+    public ResultSegment runPartitionScanQueryOnPartitionChunk(Query query,
+                                                               int partitionId,
+                                                               IterationPointer[] pointers,
+                                                               int fetchSize) {
+        MapContainer mapContainer = mapServiceContext.getMapContainer(query.getMapName());
+        Predicate predicate = queryOptimizer.optimize(query.getPredicate(), mapContainer.getIndexes(partitionId));
+        QueryableEntriesSegment entries = partitionScanExecutor
+                .execute(query.getMapName(), predicate, partitionId, pointers, fetchSize);
 
-        updateStatistics(mapContainer);
+        ResultProcessor processor = resultProcessorRegistry.get(query.getResultType());
+        Result result = processor.populateResult(query, Long.MAX_VALUE, entries.getEntries(),
+                singletonPartitionIdSet(partitionCount, partitionId));
 
-        final ResultProcessor processor = resultProcessorRegistry.get(query.getResultType());
-        final Result result = processor
-                .populateResult(query, Long.MAX_VALUE, entries.getEntries(), Collections.singletonList(partitionId));
-
-        return new ResultSegment(result, entries.getNextTableIndexToReadFrom());
+        return new ResultSegment(result, entries.getPointers());
     }
 
     // MIGRATION SAFE QUERYING -> MIGRATION STAMPS ARE VALIDATED (does not have to run on a partition thread)
     // full query = index query (if possible), then partition-scan query
     public Result runIndexOrPartitionScanQueryOnOwnedPartitions(Query query) {
         int migrationStamp = getMigrationStamp();
-        Collection<Integer> initialPartitions = mapServiceContext.getOwnedPartitions();
+        PartitionIdSet initialPartitions = mapServiceContext.getOwnedPartitions();
         MapContainer mapContainer = mapServiceContext.getMapContainer(query.getMapName());
 
         // to optimize the query we need to get any index instance
@@ -111,16 +118,66 @@ public class QueryRunner {
         Predicate predicate = queryOptimizer.optimize(query.getPredicate(), indexes);
 
         // then we try to run using an index, but if that doesn't work, we'll try a full table scan
-        Collection<QueryableEntry> entries = runUsingGlobalIndexSafely(predicate, mapContainer, migrationStamp);
+        Collection<QueryableEntry> entries = runUsingGlobalIndexSafely(predicate, mapContainer,
+                migrationStamp, initialPartitions.size());
 
         Result result;
         if (entries == null) {
             result = runUsingPartitionScanSafely(query, predicate, initialPartitions, migrationStamp);
+            if (result == null) {
+                // full scan didn't work, returning empty result
+                result = populateEmptyResult(query, initialPartitions);
+            }
         } else {
-            result = populateResult(query, initialPartitions, entries);
+            result = populateNonEmptyResult(query, entries, initialPartitions);
         }
 
-        updateStatistics(mapContainer);
+        return result;
+    }
+
+    /**
+     * Performs the given query using indexes.
+     * <p>
+     * The method may return a special failure result, which has {@code null}
+     * {@link Result#getPartitionIds() partition IDs}, in the following
+     * situations:
+     * <ul>
+     * <li>If a partition migration is detected during the query execution.
+     * <li>If it's impossible to perform the given query using indexes.
+     * </ul>
+     * <p>
+     * The method may be invoked on any thread.
+     *
+     * @param query the query to perform.
+     * @return the result of the query; if the result has {@code null} {@link
+     * Result#getPartitionIds() partition IDs} this indicates a failure.
+     */
+    public Result runIndexQueryOnOwnedPartitions(Query query) {
+        int migrationStamp = getMigrationStamp();
+        PartitionIdSet initialPartitions = mapServiceContext.getOwnedPartitions();
+        MapContainer mapContainer = mapServiceContext.getMapContainer(query.getMapName());
+
+        // to optimize the query we need to get any index instance
+        Indexes indexes = mapContainer.getIndexes();
+        if (indexes == null) {
+            indexes = mapContainer.getIndexes(initialPartitions.iterator().next());
+        }
+        // first we optimize the query
+        Predicate predicate = queryOptimizer.optimize(query.getPredicate(), indexes);
+
+        // then we try to run using an index
+        Collection<QueryableEntry> entries = runUsingGlobalIndexSafely(predicate, mapContainer,
+                migrationStamp, initialPartitions.size());
+
+        Result result;
+        if (entries == null) {
+            // failed with index query because of ongoing migrations
+            result = populateEmptyResult(query, initialPartitions);
+        } else {
+            // success
+            result = populateNonEmptyResult(query, entries, initialPartitions);
+        }
+
         return result;
     }
 
@@ -128,7 +185,7 @@ public class QueryRunner {
     // for a single partition. If the index is global it won't be asked
     public Result runPartitionIndexOrPartitionScanQueryOnGivenOwnedPartition(Query query, int partitionId) {
         MapContainer mapContainer = mapServiceContext.getMapContainer(query.getMapName());
-        List<Integer> partitions = Collections.singletonList(partitionId);
+        PartitionIdSet partitions = singletonPartitionIdSet(partitionCount, partitionId);
 
         // first we optimize the query
         Predicate predicate = queryOptimizer.optimize(query.getPredicate(), mapContainer.getIndexes(partitionId));
@@ -136,7 +193,7 @@ public class QueryRunner {
         Collection<QueryableEntry> entries = null;
         Indexes indexes = mapContainer.getIndexes(partitionId);
         if (indexes != null && !indexes.isGlobal()) {
-            entries = indexes.query(predicate);
+            entries = indexes.query(predicate, partitions.size());
         }
 
         Result result;
@@ -145,32 +202,9 @@ public class QueryRunner {
             partitionScanExecutor.execute(query.getMapName(), predicate, partitions, result);
             result.completeConstruction(partitions);
         } else {
-            result = populateResult(query, partitions, entries);
+            result = populateNonEmptyResult(query, entries, partitions);
         }
 
-        updateStatistics(mapContainer);
-        return result;
-    }
-
-    private Result populateResult(Query query, Collection<Integer> partitions, Collection<QueryableEntry> entries) {
-        if (entries != null) {
-            // if results have been returned and partition state has not changed, set the partition IDs
-            // so that caller is aware of partitions from which results were obtained.
-            return populateNonEmptyResult(query, entries, partitions);
-        } else {
-            // else: if fallback to full table scan also failed to return any results due to migrations,
-            // then return empty result set without any partition IDs set (so that it is ignored by callers).
-            return populateEmptyResult(query, partitions);
-        }
-    }
-
-    Result runPartitionScanQueryOnGivenOwnedPartition(Query query, int partitionId) {
-        MapContainer mapContainer = mapServiceContext.getMapContainer(query.getMapName());
-        Predicate predicate = queryOptimizer.optimize(query.getPredicate(), mapContainer.getIndexes(partitionId));
-        Collection<Integer> partitions = Collections.singletonList(partitionId);
-        Result result = createResult(query, partitions);
-        partitionScanExecutor.execute(query.getMapName(), predicate, partitions, result);
-        result.completeConstruction(partitions);
         return result;
     }
 
@@ -180,18 +214,18 @@ public class QueryRunner {
 
     protected Result populateEmptyResult(Query query, Collection<Integer> initialPartitions) {
         return resultProcessorRegistry.get(query.getResultType())
-                                      .populateResult(query, queryResultSizeLimiter.getNodeResultLimit(initialPartitions.size()));
+                .populateResult(query, queryResultSizeLimiter.getNodeResultLimit(initialPartitions.size()));
     }
 
     protected Result populateNonEmptyResult(Query query, Collection<QueryableEntry> entries,
-                                            Collection<Integer> initialPartitions) {
+                                            PartitionIdSet initialPartitions) {
         ResultProcessor processor = resultProcessorRegistry.get(query.getResultType());
         return processor.populateResult(query, queryResultSizeLimiter.getNodeResultLimit(initialPartitions.size()), entries,
                 initialPartitions);
     }
 
     protected Collection<QueryableEntry> runUsingGlobalIndexSafely(Predicate predicate, MapContainer mapContainer,
-                                                                   int migrationStamp) {
+                                                                   int migrationStamp, int ownedPartitionCount) {
 
         // If a migration is in progress or migration ownership changes,
         // do not attempt to use an index as they may have not been created yet.
@@ -209,7 +243,7 @@ public class QueryRunner {
             // leverage index on this node in a global way.
             return null;
         }
-        Collection<QueryableEntry> entries = indexes.query(predicate);
+        Collection<QueryableEntry> entries = indexes.query(predicate, ownedPartitionCount);
         if (entries == null) {
             return null;
         }
@@ -226,8 +260,8 @@ public class QueryRunner {
         return null;
     }
 
-    protected Result runUsingPartitionScanSafely(Query query, Predicate predicate, Collection<Integer> partitions,
-                                                 int migrationStamp) {
+    protected Result runUsingPartitionScanSafely(Query query, Predicate predicate,
+                                                 PartitionIdSet partitions, int migrationStamp) {
 
         if (!validateMigrationStamp(migrationStamp)) {
             return null;
@@ -244,7 +278,8 @@ public class QueryRunner {
             result.completeConstruction(partitions);
             return result;
         }
-        return createResult(query, partitions);
+
+        return null;
     }
 
     private int getMigrationStamp() {
@@ -253,12 +288,5 @@ public class QueryRunner {
 
     private boolean validateMigrationStamp(int migrationStamp) {
         return mapServiceContext.getService().validateMigrationStamp(migrationStamp);
-    }
-
-    private void updateStatistics(MapContainer mapContainer) {
-        if (mapContainer.getMapConfig().isStatisticsEnabled()) {
-            LocalMapStatsImpl localStats = localMapStatsProvider.getLocalMapStatsImpl(mapContainer.getName());
-            localStats.incrementOtherOperations();
-        }
     }
 }

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2008-2018, Hazelcast, Inc. All Rights Reserved.
+ * Copyright (c) 2008-2020, Hazelcast, Inc. All Rights Reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -16,13 +16,16 @@
 
 package com.hazelcast.core;
 
+import com.hazelcast.spi.eviction.EvictableEntryView;
+import com.hazelcast.map.MapStore;
+
 /**
  * Represents a read-only view of a data structure entry.
  *
  * @param <K> the type of the key
  * @param <V> the type of the value
  */
-public interface EntryView<K, V> {
+public interface EntryView<K, V> extends EvictableEntryView<K, V> {
 
     /**
      * Returns the key of the entry.

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2008-2018, Hazelcast, Inc. All Rights Reserved.
+ * Copyright (c) 2008-2020, Hazelcast, Inc. All Rights Reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -18,7 +18,7 @@ package com.hazelcast.nio.serialization.compatibility;
 
 import com.hazelcast.nio.ObjectDataInput;
 import com.hazelcast.nio.ObjectDataOutput;
-import com.hazelcast.nio.serialization.Data;
+import com.hazelcast.internal.serialization.Data;
 import com.hazelcast.nio.serialization.IdentifiedDataSerializable;
 import com.hazelcast.nio.serialization.Portable;
 import com.hazelcast.nio.serialization.PortableReader;
@@ -26,6 +26,9 @@ import com.hazelcast.nio.serialization.PortableWriter;
 
 import java.io.IOException;
 import java.util.Arrays;
+
+import static com.hazelcast.internal.nio.IOUtil.readData;
+import static com.hazelcast.internal.nio.IOUtil.writeData;
 
 public class APortable implements Portable {
 
@@ -218,7 +221,7 @@ public class APortable implements Portable {
         dataOutput.writeObject(customByteArraySerializableObject);
         dataOutput.writeObject(customStreamSerializableObject);
 
-        dataOutput.writeData(data);
+        writeData(dataOutput, data);
     }
 
     public void readPortable(PortableReader reader) throws IOException {
@@ -306,7 +309,7 @@ public class APortable implements Portable {
         customByteArraySerializableObject = dataInput.readObject();
         customStreamSerializableObject = dataInput.readObject();
 
-        data = dataInput.readData();
+        data = readData(dataInput);
     }
 
     @Override

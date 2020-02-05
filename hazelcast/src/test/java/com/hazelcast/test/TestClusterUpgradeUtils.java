@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2008-2018, Hazelcast, Inc. All Rights Reserved.
+ * Copyright (c) 2008-2020, Hazelcast, Inc. All Rights Reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -66,12 +66,9 @@ public final class TestClusterUpgradeUtils {
                 waitAllForSafeState(membersToUpgrade);
                 if (assertClusterSize) {
                     // assert all members are in the cluster
-                    assertTrueEventually(new AssertTask() {
-                        @Override
-                        public void run() {
-                            assertEquals(membersToUpgrade.length, membersToUpgrade[0].getCluster().getMembers().size());
-                        }
-                    }, 30);
+                    assertTrueEventually(()
+                            -> assertEquals(membersToUpgrade[0].toString(),
+                            membersToUpgrade.length, membersToUpgrade[0].getCluster().getMembers().size()));
                 }
             }
         } finally {

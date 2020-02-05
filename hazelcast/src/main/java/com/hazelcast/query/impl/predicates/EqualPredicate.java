@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2008-2018, Hazelcast, Inc. All Rights Reserved.
+ * Copyright (c) 2008-2020, Hazelcast, Inc. All Rights Reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -16,28 +16,32 @@
 
 package com.hazelcast.query.impl.predicates;
 
+import com.hazelcast.internal.serialization.BinaryInterface;
 import com.hazelcast.nio.ObjectDataInput;
 import com.hazelcast.nio.ObjectDataOutput;
-import com.hazelcast.nio.serialization.BinaryInterface;
 import com.hazelcast.query.Predicate;
+import com.hazelcast.query.impl.Comparables;
 import com.hazelcast.query.impl.Index;
-import com.hazelcast.query.impl.IndexImpl;
+import com.hazelcast.query.impl.Indexes;
 import com.hazelcast.query.impl.QueryContext;
 import com.hazelcast.query.impl.QueryableEntry;
 
 import java.io.IOException;
-import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
+
+import static com.hazelcast.query.impl.predicates.PredicateUtils.isNull;
 
 /**
  * Equal Predicate
  */
 @BinaryInterface
-public class EqualPredicate extends AbstractIndexAwarePredicate implements NegatablePredicate {
+public class EqualPredicate extends AbstractIndexAwarePredicate
+        implements NegatablePredicate, RangePredicate, VisitablePredicate {
 
     private static final long serialVersionUID = 1L;
 
-    protected Comparable value;
+    Comparable value;
 
     public EqualPredicate() {
     }
@@ -52,17 +56,26 @@ public class EqualPredicate extends AbstractIndexAwarePredicate implements Negat
     }
 
     @Override
+    public Predicate accept(Visitor visitor, Indexes indexes) {
+        return visitor.visit(this, indexes);
+    }
+
+    @Override
     public Set<QueryableEntry> filter(QueryContext queryContext) {
-        Index index = getIndex(queryContext);
+        Index index = matchIndex(queryContext, QueryContext.IndexMatchHint.PREFER_UNORDERED);
+        if (index == null) {
+            return null;
+        }
         return index.getRecords(value);
     }
 
-    protected boolean applyForSingleAttributeValue(Map.Entry mapEntry, Comparable attributeValue) {
+    protected boolean applyForSingleAttributeValue(Comparable attributeValue) {
         if (attributeValue == null) {
-            return value == null || value == IndexImpl.NULL;
+            return isNull(value);
         }
-        value = convert(mapEntry, attributeValue, value);
-        return attributeValue.equals(value);
+        value = convert(attributeValue, value);
+        attributeValue = (Comparable) convertEnumValue(attributeValue);
+        return Comparables.equal(attributeValue, value);
     }
 
     @Override
@@ -75,21 +88,6 @@ public class EqualPredicate extends AbstractIndexAwarePredicate implements Negat
     public void readData(ObjectDataInput in) throws IOException {
         super.readData(in);
         value = in.readObject();
-    }
-
-    @Override
-    public String toString() {
-        return attributeName + "=" + value;
-    }
-
-    @Override
-    public Predicate negate() {
-        return new NotEqualPredicate(attributeName, value);
-    }
-
-    @Override
-    public int getId() {
-        return PredicateDataSerializerHook.EQUAL_PREDICATE;
     }
 
     @Override
@@ -109,7 +107,7 @@ public class EqualPredicate extends AbstractIndexAwarePredicate implements Negat
             return false;
         }
 
-        return value != null ? value.equals(that.value) : that.value == null;
+        return Objects.equals(value, that.value);
     }
 
     @Override
@@ -123,4 +121,45 @@ public class EqualPredicate extends AbstractIndexAwarePredicate implements Negat
         result = 31 * result + (value != null ? value.hashCode() : 0);
         return result;
     }
+
+    @Override
+    public String toString() {
+        return attributeName + "=" + value;
+    }
+
+    @Override
+    public Predicate negate() {
+        return new NotEqualPredicate(attributeName, value);
+    }
+
+    @Override
+    public int getClassId() {
+        return PredicateDataSerializerHook.EQUAL_PREDICATE;
+    }
+
+    @Override
+    public String getAttribute() {
+        return attributeName;
+    }
+
+    @Override
+    public Comparable getFrom() {
+        return value;
+    }
+
+    @Override
+    public boolean isFromInclusive() {
+        return true;
+    }
+
+    @Override
+    public Comparable getTo() {
+        return value;
+    }
+
+    @Override
+    public boolean isToInclusive() {
+        return true;
+    }
+
 }

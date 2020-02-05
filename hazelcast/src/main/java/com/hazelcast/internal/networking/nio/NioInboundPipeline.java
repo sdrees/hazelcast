@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2008-2018, Hazelcast, Inc. All Rights Reserved.
+ * Copyright (c) 2008-2020, Hazelcast, Inc. All Rights Reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -19,9 +19,9 @@ package com.hazelcast.internal.networking.nio;
 import com.hazelcast.internal.metrics.Probe;
 import com.hazelcast.internal.networking.ChannelErrorHandler;
 import com.hazelcast.internal.networking.ChannelHandler;
+import com.hazelcast.internal.networking.HandlerStatus;
 import com.hazelcast.internal.networking.InboundHandler;
 import com.hazelcast.internal.networking.InboundPipeline;
-import com.hazelcast.internal.networking.HandlerStatus;
 import com.hazelcast.internal.networking.nio.iobalancer.IOBalancer;
 import com.hazelcast.internal.util.counters.SwCounter;
 import com.hazelcast.logging.ILogger;
@@ -32,10 +32,16 @@ import java.nio.ByteBuffer;
 import java.nio.channels.Selector;
 import java.util.Arrays;
 
+import static com.hazelcast.internal.metrics.MetricDescriptorConstants.NETWORKING_METRIC_NIO_INBOUND_PIPELINE_BYTES_READ;
+import static com.hazelcast.internal.metrics.MetricDescriptorConstants.NETWORKING_METRIC_NIO_INBOUND_PIPELINE_IDLE_TIME_MS;
+import static com.hazelcast.internal.metrics.MetricDescriptorConstants.NETWORKING_METRIC_NIO_INBOUND_PIPELINE_NORMAL_FRAMES_READ;
+import static com.hazelcast.internal.metrics.MetricDescriptorConstants.NETWORKING_METRIC_NIO_INBOUND_PIPELINE_PRIORITY_FRAMES_READ;
+import static com.hazelcast.internal.metrics.ProbeUnit.BYTES;
+import static com.hazelcast.internal.metrics.ProbeUnit.MS;
+import static com.hazelcast.internal.util.Preconditions.checkNotNull;
+import static com.hazelcast.internal.util.collection.ArrayUtils.append;
+import static com.hazelcast.internal.util.collection.ArrayUtils.replaceFirst;
 import static com.hazelcast.internal.util.counters.SwCounter.newSwCounter;
-import static com.hazelcast.util.Preconditions.checkNotNull;
-import static com.hazelcast.util.collection.ArrayUtils.append;
-import static com.hazelcast.util.collection.ArrayUtils.replaceFirst;
 import static java.lang.System.currentTimeMillis;
 import static java.lang.Thread.currentThread;
 import static java.nio.channels.SelectionKey.OP_READ;
@@ -51,11 +57,11 @@ public final class NioInboundPipeline extends NioPipeline implements InboundPipe
     private InboundHandler[] handlers = new InboundHandler[0];
     private ByteBuffer receiveBuffer;
 
-    @Probe(name = "bytesRead")
+    @Probe(name = NETWORKING_METRIC_NIO_INBOUND_PIPELINE_BYTES_READ, unit = BYTES)
     private final SwCounter bytesRead = newSwCounter();
-    @Probe(name = "normalFramesRead")
+    @Probe(name = NETWORKING_METRIC_NIO_INBOUND_PIPELINE_NORMAL_FRAMES_READ)
     private final SwCounter normalFramesRead = newSwCounter();
-    @Probe(name = "priorityFramesRead")
+    @Probe(name = NETWORKING_METRIC_NIO_INBOUND_PIPELINE_PRIORITY_FRAMES_READ)
     private final SwCounter priorityFramesRead = newSwCounter();
     private volatile long lastReadTime;
 
@@ -94,8 +100,8 @@ public final class NioInboundPipeline extends NioPipeline implements InboundPipe
         }
     }
 
-    @Probe(name = "idleTimeMs")
-    private long idleTimeMs() {
+    @Probe(name = NETWORKING_METRIC_NIO_INBOUND_PIPELINE_IDLE_TIME_MS, unit = MS)
+    private long idleTimeMillis() {
         return Math.max(currentTimeMillis() - lastReadTime, 0);
     }
 
@@ -116,10 +122,6 @@ public final class NioInboundPipeline extends NioPipeline implements InboundPipe
             throw new EOFException("Remote socket closed!");
         }
 
-        //System.out.println(channel + " bytes read:" + readBytes);
-
-        // even if no bytes are read; it is still important that we process the pipeline.
-
         bytesRead.inc(readBytes);
 
         // currently the whole pipeline is retried when one of the handlers is dirty; but only the dirty handler
@@ -133,8 +135,8 @@ public final class NioInboundPipeline extends NioPipeline implements InboundPipe
             for (int handlerIndex = 0; handlerIndex < localHandlers.length; handlerIndex++) {
                 InboundHandler handler = localHandlers[handlerIndex];
                 HandlerStatus handlerStatus = handler.onRead();
-
                 if (localHandlers != handlers) {
+                    // change in the pipeline detected, restarting loop
                     handlerIndex = -1;
                     localHandlers = handlers;
                     continue;
@@ -157,9 +159,18 @@ public final class NioInboundPipeline extends NioPipeline implements InboundPipe
             }
         } while (!cleanPipeline);
 
+        if (migrationRequested()) {
+            startMigration();
+            return;
+        }
+
         if (unregisterRead) {
             unregisterOp(OP_READ);
         }
+    }
+
+    long bytesRead() {
+        return bytesRead.get();
     }
 
     @Override
@@ -266,7 +277,7 @@ public final class NioInboundPipeline extends NioPipeline implements InboundPipe
 
     @Override
     public NioInboundPipeline wakeup() {
-        addTaskAndWakeup(new NioPipelineTask(this) {
+        ownerAddTaskAndWakeup(new NioPipelineTask(this) {
             @Override
             protected void run0() throws IOException {
                 registerOp(OP_READ);

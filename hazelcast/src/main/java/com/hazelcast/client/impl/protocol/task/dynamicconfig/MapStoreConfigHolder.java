@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2008-2018, Hazelcast, Inc. All Rights Reserved.
+ * Copyright (c) 2008-2020, Hazelcast, Inc. All Rights Reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -16,12 +16,14 @@
 
 package com.hazelcast.client.impl.protocol.task.dynamicconfig;
 
+import com.hazelcast.client.impl.protocol.util.PropertiesUtil;
 import com.hazelcast.config.MapStoreConfig;
 import com.hazelcast.config.MapStoreConfig.InitialLoadMode;
-import com.hazelcast.nio.serialization.Data;
-import com.hazelcast.spi.serialization.SerializationService;
+import com.hazelcast.internal.serialization.Data;
+import com.hazelcast.internal.serialization.SerializationService;
+import com.hazelcast.internal.util.StringUtil;
 
-import java.util.Properties;
+import java.util.Map;
 
 /**
  * Client protocol adapter for {@link com.hazelcast.config.MapStoreConfig}
@@ -36,10 +38,25 @@ public class MapStoreConfigHolder {
     private int writeBatchSize;
     private Data implementation;
     private Data factoryImplementation;
-    private Properties properties;
+    private Map<String, String> properties;
     private String initialLoadMode;
 
     public MapStoreConfigHolder() {
+    }
+
+    public MapStoreConfigHolder(boolean enabled, boolean writeCoalescing, int writeDelaySeconds, int writeBatchSize,
+                                String className, Data implementation, String factoryClassName,
+                                Data factoryImplementation, Map<String, String> properties, String initialLoadMode) {
+        this.enabled = enabled;
+        this.writeCoalescing = writeCoalescing;
+        this.className = className;
+        this.factoryClassName = factoryClassName;
+        this.writeDelaySeconds = writeDelaySeconds;
+        this.writeBatchSize = writeBatchSize;
+        this.implementation = implementation;
+        this.factoryImplementation = factoryImplementation;
+        this.properties = properties;
+        this.initialLoadMode = initialLoadMode;
     }
 
     public boolean isEnabled() {
@@ -106,11 +123,11 @@ public class MapStoreConfigHolder {
         this.factoryImplementation = factoryImplementation;
     }
 
-    public Properties getProperties() {
+    public Map<String, String> getProperties() {
         return properties;
     }
 
-    public void setProperties(Properties properties) {
+    public void setProperties(Map<String, String> properties) {
         this.properties = properties;
     }
 
@@ -124,16 +141,26 @@ public class MapStoreConfigHolder {
 
     public MapStoreConfig asMapStoreConfig(SerializationService serializationService) {
         MapStoreConfig config = new MapStoreConfig();
-        config.setClassName(className);
+        if (!StringUtil.isNullOrEmptyAfterTrim(className)) {
+            config.setClassName(className);
+        }
         config.setEnabled(enabled);
-        config.setFactoryClassName(factoryClassName);
+        if (!StringUtil.isNullOrEmptyAfterTrim(factoryClassName)) {
+            config.setFactoryClassName(factoryClassName);
+        }
         config.setInitialLoadMode(InitialLoadMode.valueOf(initialLoadMode));
-        config.setProperties(properties);
+        config.setProperties(PropertiesUtil.fromMap(properties));
         config.setWriteBatchSize(writeBatchSize);
         config.setWriteCoalescing(writeCoalescing);
         config.setWriteDelaySeconds(writeDelaySeconds);
-        config.setImplementation(serializationService.toObject(implementation));
-        config.setFactoryImplementation(serializationService.toObject(factoryImplementation));
+        Object implementation = serializationService.toObject(this.implementation);
+        if (implementation != null) {
+            config.setImplementation(implementation);
+        }
+        Object factoryImplementation = serializationService.toObject(this.factoryImplementation);
+        if (factoryImplementation != null) {
+            config.setFactoryImplementation(factoryImplementation);
+        }
         return config;
     }
 
@@ -148,7 +175,7 @@ public class MapStoreConfigHolder {
         holder.setFactoryImplementation(serializationService.toData(config.getFactoryImplementation()));
         holder.setImplementation(serializationService.toData(config.getImplementation()));
         holder.setInitialLoadMode(config.getInitialLoadMode().name());
-        holder.setProperties(config.getProperties());
+        holder.setProperties(PropertiesUtil.toMap(config.getProperties()));
         holder.setWriteBatchSize(config.getWriteBatchSize());
         holder.setWriteCoalescing(config.isWriteCoalescing());
         holder.setWriteDelaySeconds(config.getWriteDelaySeconds());

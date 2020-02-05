@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2008-2018, Hazelcast, Inc. All Rights Reserved.
+ * Copyright (c) 2008-2020, Hazelcast, Inc. All Rights Reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -17,7 +17,7 @@
 package com.hazelcast.map.impl.journal;
 
 import com.hazelcast.journal.EventJournalEventAdapter;
-import com.hazelcast.map.journal.EventJournalMapEvent;
+import com.hazelcast.map.EventJournalMapEvent;
 
 public class EventJournalMapEventAdapter<K, V> implements EventJournalEventAdapter<K, V, EventJournalMapEvent<K, V>> {
     @Override
@@ -46,6 +46,8 @@ public class EventJournalMapEventAdapter<K, V> implements EventJournalEventAdapt
                 return EventType.UPDATED;
             case EVICTED:
                 return EventType.EVICTED;
+            case LOADED:
+                return EventType.LOADED;
             default:
                 throw new IllegalArgumentException("Unknown event journal event type " + e.getType());
         }

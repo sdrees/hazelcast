@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2008-2018, Hazelcast, Inc. All Rights Reserved.
+ * Copyright (c) 2008-2020, Hazelcast, Inc. All Rights Reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -16,20 +16,24 @@
 
 package com.hazelcast.spi.impl.eventservice.impl;
 
+import com.hazelcast.cluster.Address;
 import com.hazelcast.internal.metrics.Probe;
-import com.hazelcast.nio.Address;
-import com.hazelcast.spi.EventFilter;
-import com.hazelcast.spi.ListenerWrapperEventFilter;
-import com.hazelcast.spi.NotifiableEventListener;
-import com.hazelcast.util.ConcurrencyUtil;
-import com.hazelcast.util.ConstructorFunction;
+import com.hazelcast.internal.services.ListenerWrapperEventFilter;
+import com.hazelcast.internal.services.NotifiableEventListener;
+import com.hazelcast.internal.util.ConcurrencyUtil;
+import com.hazelcast.internal.util.ConstructorFunction;
+import com.hazelcast.spi.impl.eventservice.EventFilter;
 
+import javax.annotation.Nonnull;
 import java.util.Collection;
 import java.util.Iterator;
+import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.atomic.AtomicLong;
 
+import static com.hazelcast.internal.metrics.MetricDescriptorConstants.EVENT_METRIC_EVENT_SERVICE_SEGMENT_LISTENER_COUNT;
+import static com.hazelcast.internal.metrics.MetricDescriptorConstants.EVENT_METRIC_EVENT_SERVICE_SEGMENT_PUBLICATION_COUNT;
 import static java.util.Collections.newSetFromMap;
 
 /**
@@ -43,20 +47,28 @@ import static java.util.Collections.newSetFromMap;
  * @param <S> the service type for which this segment is responsible
  */
 public class EventServiceSegment<S> {
-    /** The name of the service for which this segment is responsible */
+    /**
+     * The name of the service for which this segment is responsible
+     */
     private final String serviceName;
-    /** The service for which this segment is responsible */
+    /**
+     * The service for which this segment is responsible
+     */
     private final S service;
 
-    /** Map of {@link Registration}s grouped by event topic */
+    /**
+     * Map of {@link Registration}s grouped by event topic
+     */
     private final ConcurrentMap<String, Collection<Registration>> registrations
-            = new ConcurrentHashMap<String, Collection<Registration>>();
+            = new ConcurrentHashMap<>();
 
-    /** Registration ID to registration map */
-    @Probe(name = "listenerCount")
-    private final ConcurrentMap<String, Registration> registrationIdMap = new ConcurrentHashMap<String, Registration>();
+    /**
+     * Registration ID to registration map
+     */
+    @Probe(name = EVENT_METRIC_EVENT_SERVICE_SEGMENT_LISTENER_COUNT)
+    private final ConcurrentMap<UUID, Registration> registrationIdMap = new ConcurrentHashMap<>();
 
-    @Probe(name = "publicationCount")
+    @Probe(name = EVENT_METRIC_EVENT_SERVICE_SEGMENT_PUBLICATION_COUNT)
     private final AtomicLong totalPublishes = new AtomicLong();
 
     public EventServiceSegment(String serviceName, S service) {
@@ -119,15 +131,11 @@ public class EventServiceSegment<S> {
      * @param forceCreate whether to create the registration set if none exists or to return null
      * @return the collection of registrations for the topic or null if none exists and {@code forceCreate} is {@code false}
      */
-    public Collection<Registration> getRegistrations(String topic, boolean forceCreate) {
+    public Collection<Registration> getRegistrations(@Nonnull String topic, boolean forceCreate) {
         Collection<Registration> listenerList = registrations.get(topic);
         if (listenerList == null && forceCreate) {
             ConstructorFunction<String, Collection<Registration>> func
-                    = new ConstructorFunction<String, Collection<Registration>>() {
-                public Collection<Registration> createNew(String key) {
-                    return newSetFromMap(new ConcurrentHashMap<Registration, Boolean>());
-                }
-            };
+                    = key -> newSetFromMap(new ConcurrentHashMap<Registration, Boolean>());
             return ConcurrencyUtil.getOrPutIfAbsent(registrations, topic, func);
         }
         return listenerList;
@@ -136,7 +144,7 @@ public class EventServiceSegment<S> {
     /**
      * Returns the map from registration ID to the listener registration.
      */
-    public ConcurrentMap<String, Registration> getRegistrationIdMap() {
+    public ConcurrentMap<UUID, Registration> getRegistrationIdMap() {
         return registrationIdMap;
     }
 
@@ -152,9 +160,9 @@ public class EventServiceSegment<S> {
      *
      * @param topic        the event topic
      * @param registration the listener registration
-     * @return if the registration is added
+     * @return true if the registration is added
      */
-    public boolean addRegistration(String topic, Registration registration) {
+    public boolean addRegistration(@Nonnull String topic, Registration registration) {
         Collection<Registration> registrations = getRegistrations(topic, true);
         if (registrations.add(registration)) {
             registrationIdMap.put(registration.getId(), registration);
@@ -170,9 +178,9 @@ public class EventServiceSegment<S> {
      *
      * @param topic the registration topic name
      * @param id    the registration ID
-     * @return the registration which was removed or {@code null} if none matchec
+     * @return the registration which was removed or {@code null} if none matched
      */
-    public Registration removeRegistration(String topic, String id) {
+    public Registration removeRegistration(String topic, UUID id) {
         Registration registration = registrationIdMap.remove(id);
         if (registration != null) {
             final Collection<Registration> all = registrations.get(topic);

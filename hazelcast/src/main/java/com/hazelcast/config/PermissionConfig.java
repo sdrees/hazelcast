@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2008-2018, Hazelcast, Inc. All Rights Reserved.
+ * Copyright (c) 2008-2020, Hazelcast, Inc. All Rights Reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -16,19 +16,29 @@
 
 package com.hazelcast.config;
 
-import java.util.HashSet;
+import com.hazelcast.internal.config.ConfigDataSerializerHook;
+import com.hazelcast.internal.util.StringUtil;
+import com.hazelcast.nio.ObjectDataInput;
+import com.hazelcast.nio.ObjectDataOutput;
+import com.hazelcast.nio.serialization.IdentifiedDataSerializable;
+
+import java.io.IOException;
 import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
+
+import static com.hazelcast.internal.util.SetUtil.createHashSet;
+import static java.util.Collections.newSetFromMap;
 
 /**
  * Contains the configuration for a permission.
  */
-public class PermissionConfig {
+public class PermissionConfig implements IdentifiedDataSerializable {
 
     private PermissionType type;
     private String name;
     private String principal;
-    private Set<String> endpoints = new HashSet<String>();
-    private Set<String> actions = new HashSet<String>();
+    private Set<String> endpoints = newSetFromMap(new ConcurrentHashMap<>());
+    private Set<String> actions = newSetFromMap(new ConcurrentHashMap<>());
 
     public PermissionConfig() {
     }
@@ -80,10 +90,6 @@ public class PermissionConfig {
          */
         SET("set-permission"),
         /**
-         * ID generator
-         */
-        ID_GENERATOR("id-generator-permission"),
-        /**
          * Flake ID generator
          */
         FLAKE_ID_GENERATOR("flake-id-generator-permission"),
@@ -95,6 +101,10 @@ public class PermissionConfig {
          * Atomic long
          */
         ATOMIC_LONG("atomic-long-permission"),
+        /**
+         * Atomic long
+         */
+        ATOMIC_REFERENCE("atomic-reference-permission"),
         /**
          * Countdown Latch
          */
@@ -220,6 +230,62 @@ public class PermissionConfig {
     }
 
     @Override
+    public int getFactoryId() {
+        return ConfigDataSerializerHook.F_ID;
+    }
+
+    @Override
+    public int getClassId() {
+        return ConfigDataSerializerHook.PERMISSION_CONFIG;
+    }
+
+    @Override
+    public void writeData(ObjectDataOutput out) throws IOException {
+        out.writeUTF(type.getNodeName());
+        out.writeUTF(name);
+        if (StringUtil.isNullOrEmptyAfterTrim(principal)) {
+            out.writeUTF("*");
+        } else {
+            out.writeUTF(principal);
+        }
+
+        out.writeInt(endpoints.size());
+        for (String endpoint : endpoints) {
+            out.writeUTF(endpoint);
+        }
+
+        out.writeInt(actions.size());
+        for (String action : actions) {
+            out.writeUTF(action);
+        }
+    }
+
+    @Override
+    public void readData(ObjectDataInput in) throws IOException {
+        type = PermissionType.getType(in.readUTF());
+        name = in.readUTF();
+        principal = in.readUTF();
+
+        int endpointsSize = in.readInt();
+        if (endpointsSize != 0) {
+            Set<String> endpoints = createHashSet(endpointsSize);
+            for (int i = 0; i < endpointsSize; i++) {
+                endpoints.add(in.readUTF());
+            }
+            this.endpoints = endpoints;
+        }
+
+        int actionsSize = in.readInt();
+        if (actionsSize != 0) {
+            Set<String> actions = createHashSet(actionsSize);
+            for (int i = 0; i < actionsSize; i++) {
+                actions.add(in.readUTF());
+            }
+            this.actions = actions;
+        }
+    }
+
+    @Override
     @SuppressWarnings("checkstyle:npathcomplexity")
     public boolean equals(Object o) {
         if (this == o) {
@@ -261,7 +327,7 @@ public class PermissionConfig {
         return "PermissionConfig{"
                 + "type=" + type
                 + ", name='" + name + '\''
-                + ", principal='" + principal + '\''
+                + ", clientUuid='" + principal + '\''
                 + ", endpoints=" + endpoints
                 + ", actions=" + actions
                 + '}';

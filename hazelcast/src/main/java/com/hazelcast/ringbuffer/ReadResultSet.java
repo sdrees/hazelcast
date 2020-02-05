@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2008-2018, Hazelcast, Inc. All Rights Reserved.
+ * Copyright (c) 2008-2020, Hazelcast, Inc. All Rights Reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -24,7 +24,7 @@ package com.hazelcast.ringbuffer;
  * Important:<br>
  * If an item is retrieved multiple times from the result set, a new
  * instance is returned for every invocation. This is done to prevent
- * unexpected sharing if the {@link com.hazelcast.core.ICompletableFuture}
+ * unexpected sharing if the {@link java.util.concurrent.CompletionStage}
  * is shared between multiple threads.
  *
  * @param <E> item type

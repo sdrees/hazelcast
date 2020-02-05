@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2008-2018, Hazelcast, Inc. All Rights Reserved.
+ * Copyright (c) 2008-2020, Hazelcast, Inc. All Rights Reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -16,7 +16,6 @@
 
 package com.hazelcast.multimap.impl.operations;
 
-import com.hazelcast.core.EntryEventType;
 import com.hazelcast.multimap.impl.MultiMapContainer;
 import com.hazelcast.multimap.impl.MultiMapDataSerializerHook;
 import com.hazelcast.multimap.impl.MultiMapMergeContainer;
@@ -24,9 +23,9 @@ import com.hazelcast.multimap.impl.MultiMapRecord;
 import com.hazelcast.multimap.impl.MultiMapValue;
 import com.hazelcast.nio.ObjectDataInput;
 import com.hazelcast.nio.ObjectDataOutput;
-import com.hazelcast.nio.serialization.Data;
-import com.hazelcast.spi.BackupAwareOperation;
-import com.hazelcast.spi.Operation;
+import com.hazelcast.internal.serialization.Data;
+import com.hazelcast.spi.impl.operationservice.BackupAwareOperation;
+import com.hazelcast.spi.impl.operationservice.Operation;
 import com.hazelcast.spi.merge.SplitBrainMergePolicy;
 import com.hazelcast.spi.merge.SplitBrainMergeTypes.MultiMapMergeTypes;
 
@@ -36,7 +35,7 @@ import java.util.Collection;
 import java.util.List;
 import java.util.Map;
 
-import static com.hazelcast.util.MapUtil.createHashMap;
+import static com.hazelcast.internal.util.MapUtil.createHashMap;
 
 /**
  * Merges multiple {@link MultiMapMergeContainer} for split-brain healing with a {@link SplitBrainMergePolicy}.
@@ -46,7 +45,7 @@ import static com.hazelcast.util.MapUtil.createHashMap;
 public class MergeOperation extends AbstractMultiMapOperation implements BackupAwareOperation {
 
     private List<MultiMapMergeContainer> mergeContainers;
-    private SplitBrainMergePolicy<Collection<Object>, MultiMapMergeTypes> mergePolicy;
+    private SplitBrainMergePolicy<Collection<Object>, MultiMapMergeTypes<Object, Object>, Collection<Object>> mergePolicy;
 
     private transient Map<Data, Collection<MultiMapRecord>> resultMap;
 
@@ -54,7 +53,8 @@ public class MergeOperation extends AbstractMultiMapOperation implements BackupA
     }
 
     public MergeOperation(String name, List<MultiMapMergeContainer> mergeContainers,
-                          SplitBrainMergePolicy<Collection<Object>, MultiMapMergeTypes> mergePolicy) {
+                          SplitBrainMergePolicy<Collection<Object>, MultiMapMergeTypes<Object, Object>,
+                                  Collection<Object>> mergePolicy) {
         super(name);
         this.mergeContainers = mergeContainers;
         this.mergePolicy = mergePolicy;
@@ -75,7 +75,6 @@ public class MergeOperation extends AbstractMultiMapOperation implements BackupA
             MultiMapValue result = container.merge(mergeContainer, mergePolicy);
             if (result != null) {
                 resultMap.put(key, result.getCollection(false));
-                publishEvent(EntryEventType.MERGED, key, result, null);
             }
         }
         response = !resultMap.isEmpty();
@@ -105,7 +104,7 @@ public class MergeOperation extends AbstractMultiMapOperation implements BackupA
     protected void readInternal(ObjectDataInput in) throws IOException {
         super.readInternal(in);
         int size = in.readInt();
-        mergeContainers = new ArrayList<MultiMapMergeContainer>(size);
+        mergeContainers = new ArrayList<>(size);
         for (int i = 0; i < size; i++) {
             MultiMapMergeContainer container = in.readObject();
             mergeContainers.add(container);
@@ -114,7 +113,7 @@ public class MergeOperation extends AbstractMultiMapOperation implements BackupA
     }
 
     @Override
-    public int getId() {
+    public int getClassId() {
         return MultiMapDataSerializerHook.MERGE_OPERATION;
     }
 }

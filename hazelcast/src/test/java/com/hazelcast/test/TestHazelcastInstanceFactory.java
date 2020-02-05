@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2008-2018, Hazelcast, Inc. All Rights Reserved.
+ * Copyright (c) 2008-2020, Hazelcast, Inc. All Rights Reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -16,15 +16,21 @@
 
 package com.hazelcast.test;
 
+import com.hazelcast.cluster.Address;
 import com.hazelcast.config.Config;
 import com.hazelcast.config.NetworkConfig;
 import com.hazelcast.config.XmlConfigBuilder;
 import com.hazelcast.core.Hazelcast;
 import com.hazelcast.core.HazelcastInstance;
-import com.hazelcast.instance.HazelcastInstanceFactory;
-import com.hazelcast.instance.NodeContext;
-import com.hazelcast.nio.Address;
-import com.hazelcast.spi.properties.GroupProperty;
+import com.hazelcast.function.FunctionEx;
+import com.hazelcast.instance.impl.DefaultNodeContext;
+import com.hazelcast.instance.impl.HazelcastInstanceFactory;
+import com.hazelcast.instance.impl.NodeContext;
+import com.hazelcast.internal.metrics.MetricsPublisher;
+import com.hazelcast.internal.metrics.impl.MetricsService;
+import com.hazelcast.spi.impl.NodeEngine;
+import com.hazelcast.spi.properties.ClusterProperty;
+import com.hazelcast.test.metrics.MetricsRule;
 import com.hazelcast.test.mocknetwork.TestNodeRegistry;
 
 import java.net.UnknownHostException;
@@ -39,10 +45,11 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.atomic.AtomicInteger;
 
-import static com.hazelcast.instance.TestUtil.terminateInstance;
+import static com.hazelcast.instance.impl.TestUtil.terminateInstance;
+import static com.hazelcast.internal.util.Preconditions.checkNotNull;
 import static com.hazelcast.test.HazelcastTestSupport.getAddress;
 import static com.hazelcast.test.HazelcastTestSupport.getNode;
-import static com.hazelcast.util.Preconditions.checkNotNull;
+import static com.hazelcast.test.HazelcastTestSupport.getNodeEngineImpl;
 import static java.util.Arrays.asList;
 import static java.util.Collections.unmodifiableCollection;
 
@@ -53,29 +60,39 @@ public class TestHazelcastInstanceFactory {
     protected final TestNodeRegistry registry;
 
     private final boolean isMockNetwork = TestEnvironment.isMockNetwork();
-    private final ConcurrentMap<Integer, Address> addressMap = new ConcurrentHashMap<Integer, Address>();
+    private final ConcurrentMap<Integer, Address> addressMap = new ConcurrentHashMap<>();
     private final AtomicInteger nodeIndex = new AtomicInteger();
-
     private final int count;
+
+    private MetricsRule metricsRule;
 
     public TestHazelcastInstanceFactory() {
         this(0);
     }
 
-    public TestHazelcastInstanceFactory(int count) {
-        fillAddressMap(count);
-        this.count = count;
-        this.registry = createRegistry();
+    public TestHazelcastInstanceFactory(int initialPort, String... addresses) {
+        fillAddressMap(initialPort, addresses);
+        this.count = addresses.length;
+        this.registry = isMockNetwork ? createRegistry() : null;
     }
 
     public TestHazelcastInstanceFactory(String... addresses) {
         this(-1, addresses);
     }
 
-    public TestHazelcastInstanceFactory(int initialPort, String... addresses) {
-        fillAddressMap(initialPort, addresses);
-        this.count = addresses.length;
-        this.registry = createRegistry();
+    public TestHazelcastInstanceFactory(int count) {
+        fillAddressMap(count);
+        this.count = count;
+        this.registry = isMockNetwork ? createRegistry() : null;
+    }
+
+    public TestHazelcastInstanceFactory withMetricsRule(MetricsRule metricsRule) {
+        this.metricsRule = metricsRule;
+        return this;
+    }
+
+    protected TestNodeRegistry createRegistry() {
+        return new TestNodeRegistry(getKnownAddresses(), DefaultNodeContext.EXTENSION_PRIORITY_LIST);
     }
 
     public int getCount() {
@@ -123,7 +140,11 @@ public class TestHazelcastInstanceFactory {
         if (isMockNetwork) {
             config = initOrCreateConfig(config);
             NodeContext nodeContext = registry.createNodeContext(address);
-            return HazelcastInstanceFactory.newHazelcastInstance(config, instanceName, nodeContext);
+            HazelcastInstance hazelcastInstance =
+                HazelcastInstanceFactory.newHazelcastInstance(config, instanceName, nodeContext);
+            registerTestMetricsPublisher(hazelcastInstance);
+
+            return hazelcastInstance;
         }
         throw new UnsupportedOperationException("Explicit address is only available for mock network setup!");
     }
@@ -164,9 +185,13 @@ public class TestHazelcastInstanceFactory {
             Address thisAddress = address != null ? address : nextAddress(config.getNetworkConfig().getPort());
             NodeContext nodeContext = registry.createNodeContext(thisAddress,
                     blockedAddresses == null
-                            ? Collections.<Address>emptySet()
-                            : new HashSet<Address>(asList(blockedAddresses)));
-            return HazelcastInstanceFactory.newHazelcastInstance(config, instanceName, nodeContext);
+                            ? Collections.emptySet()
+                            : new HashSet<>(asList(blockedAddresses)));
+            HazelcastInstance hazelcastInstance =
+                HazelcastInstanceFactory.newHazelcastInstance(config, instanceName, nodeContext);
+            registerTestMetricsPublisher(hazelcastInstance);
+
+            return hazelcastInstance;
         }
         throw new UnsupportedOperationException("Explicit address is only available for mock network setup!");
     }
@@ -195,9 +220,22 @@ public class TestHazelcastInstanceFactory {
         if (isMockNetwork) {
             config = initOrCreateConfig(config);
             NodeContext nodeContext = registry.createNodeContext(nextAddress(config.getNetworkConfig().getPort()));
-            return HazelcastInstanceFactory.newHazelcastInstance(config, instanceName, nodeContext);
+            HazelcastInstance hazelcastInstance = HazelcastInstanceFactory
+                    .newHazelcastInstance(config, instanceName, nodeContext);
+            registerTestMetricsPublisher(hazelcastInstance);
+            return hazelcastInstance;
         }
-        return HazelcastInstanceFactory.newHazelcastInstance(config);
+        HazelcastInstance hazelcastInstance = HazelcastInstanceFactory.newHazelcastInstance(config);
+        registerTestMetricsPublisher(hazelcastInstance);
+        return hazelcastInstance;
+    }
+
+    private void registerTestMetricsPublisher(HazelcastInstance hazelcastInstance) {
+        if (metricsRule != null && metricsRule.isEnabled()) {
+            MetricsService metricService = getNodeEngineImpl(hazelcastInstance).getService(MetricsService.SERVICE_NAME);
+            metricService.registerPublisher(
+                    (FunctionEx<NodeEngine, MetricsPublisher>) nodeEngine -> metricsRule.getMetricsPublisher(hazelcastInstance));
+        }
     }
 
     public Address nextAddress() {
@@ -268,7 +306,9 @@ public class TestHazelcastInstanceFactory {
     public void terminate(HazelcastInstance instance) {
         Address address = getNode(instance).address;
         terminateInstance(instance);
-        registry.removeInstance(address);
+        if (isMockNetwork) {
+            registry.removeInstance(address);
+        }
     }
 
     /**
@@ -319,10 +359,6 @@ public class TestHazelcastInstanceFactory {
         }
     }
 
-    private TestNodeRegistry createRegistry() {
-        return isMockNetwork ? new TestNodeRegistry(getKnownAddresses()) : null;
-    }
-
     /**
      * Returns a list of addresses with the {@code 127.0.0.1} host and starting
      * with the {@value DEFAULT_INITIAL_PORT} port or an empty list in case mock
@@ -356,14 +392,14 @@ public class TestHazelcastInstanceFactory {
         }
     }
 
-    private static Config initOrCreateConfig(Config config) {
+    public static Config initOrCreateConfig(Config config) {
         if (config == null) {
             config = new XmlConfigBuilder().build();
         }
-        config.setProperty(GroupProperty.WAIT_SECONDS_BEFORE_JOIN.getName(), "0");
-        String gracefulShutdownMaxWaitValue = System.getProperty(GroupProperty.GRACEFUL_SHUTDOWN_MAX_WAIT.getName(), "120");
-        config.setProperty(GroupProperty.GRACEFUL_SHUTDOWN_MAX_WAIT.getName(), gracefulShutdownMaxWaitValue);
-        config.setProperty(GroupProperty.PARTITION_BACKUP_SYNC_INTERVAL.getName(), "1");
+        config.setProperty(ClusterProperty.WAIT_SECONDS_BEFORE_JOIN.getName(), "0");
+        String gracefulShutdownMaxWaitValue = System.getProperty(ClusterProperty.GRACEFUL_SHUTDOWN_MAX_WAIT.getName(), "120");
+        config.setProperty(ClusterProperty.GRACEFUL_SHUTDOWN_MAX_WAIT.getName(), gracefulShutdownMaxWaitValue);
+        config.setProperty(ClusterProperty.PARTITION_BACKUP_SYNC_INTERVAL.getName(), "1");
         config.getNetworkConfig().getJoin().getMulticastConfig().setEnabled(false);
         return config;
     }
@@ -373,6 +409,9 @@ public class TestHazelcastInstanceFactory {
      * instances. This allows an address to be reused.
      */
     public void cleanup() {
+        if (!isMockNetwork) {
+            return;
+        }
         final TestNodeRegistry registry = getRegistry();
         synchronized (addressMap) {
             final Iterator<Entry<Integer, Address>> addressIterator = addressMap.entrySet().iterator();

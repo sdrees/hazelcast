@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2008-2018, Hazelcast, Inc. All Rights Reserved.
+ * Copyright (c) 2008-2020, Hazelcast, Inc. All Rights Reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -19,14 +19,14 @@ package com.hazelcast.transaction.impl.xa;
 import com.hazelcast.collection.impl.list.ListService;
 import com.hazelcast.collection.impl.queue.QueueService;
 import com.hazelcast.collection.impl.set.SetService;
-import com.hazelcast.core.TransactionalList;
-import com.hazelcast.core.TransactionalMap;
-import com.hazelcast.core.TransactionalMultiMap;
-import com.hazelcast.core.TransactionalQueue;
-import com.hazelcast.core.TransactionalSet;
+import com.hazelcast.transaction.TransactionalList;
+import com.hazelcast.transaction.TransactionalMap;
+import com.hazelcast.transaction.TransactionalMultiMap;
+import com.hazelcast.transaction.TransactionalQueue;
+import com.hazelcast.transaction.TransactionalSet;
 import com.hazelcast.map.impl.MapService;
 import com.hazelcast.multimap.impl.MultiMapService;
-import com.hazelcast.spi.TransactionalService;
+import com.hazelcast.internal.services.TransactionalService;
 import com.hazelcast.spi.impl.NodeEngineImpl;
 import com.hazelcast.transaction.TransactionContext;
 import com.hazelcast.transaction.TransactionException;
@@ -35,10 +35,10 @@ import com.hazelcast.transaction.TransactionalObject;
 import com.hazelcast.transaction.impl.Transaction;
 import com.hazelcast.transaction.impl.TransactionalObjectKey;
 
-import javax.transaction.xa.XAResource;
 import javax.transaction.xa.Xid;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.UUID;
 
 public class XATransactionContextImpl implements TransactionContext {
 
@@ -47,7 +47,7 @@ public class XATransactionContextImpl implements TransactionContext {
     private final Map<TransactionalObjectKey, TransactionalObject> txnObjectMap
             = new HashMap<TransactionalObjectKey, TransactionalObject>(2);
 
-    public XATransactionContextImpl(NodeEngineImpl nodeEngine, Xid xid, String txOwnerUuid,
+    public XATransactionContextImpl(NodeEngineImpl nodeEngine, Xid xid, UUID txOwnerUuid,
                                     int timeout, boolean originatedFromClient) {
         this.nodeEngine = nodeEngine;
         this.transaction = new XATransaction(nodeEngine, xid, txOwnerUuid, timeout, originatedFromClient);
@@ -69,7 +69,7 @@ public class XATransactionContextImpl implements TransactionContext {
     }
 
     @Override
-    public String getTxnId() {
+    public UUID getTxnId() {
         return transaction.getTxnId();
     }
 
@@ -118,7 +118,7 @@ public class XATransactionContextImpl implements TransactionContext {
 
         final Object service = nodeEngine.getService(serviceName);
         if (service instanceof TransactionalService) {
-            nodeEngine.getProxyService().initializeDistributedObject(serviceName, name);
+            nodeEngine.getProxyService().initializeDistributedObject(serviceName, name, transaction.getOwnerUuid());
             obj = ((TransactionalService) service).createTransactionalObject(name, transaction);
             txnObjectMap.put(key, obj);
         } else {
@@ -129,10 +129,5 @@ public class XATransactionContextImpl implements TransactionContext {
 
     XATransaction getTransaction() {
         return transaction;
-    }
-
-    @Override
-    public XAResource getXaResource() {
-        throw new UnsupportedOperationException("Use HazelcastInstance.getXAResource() instead!");
     }
 }

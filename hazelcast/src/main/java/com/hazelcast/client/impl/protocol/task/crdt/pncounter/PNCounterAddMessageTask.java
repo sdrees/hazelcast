@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2008-2018, Hazelcast, Inc. All Rights Reserved.
+ * Copyright (c) 2008-2020, Hazelcast, Inc. All Rights Reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -19,51 +19,51 @@ package com.hazelcast.client.impl.protocol.task.crdt.pncounter;
 import com.hazelcast.client.impl.protocol.ClientMessage;
 import com.hazelcast.client.impl.protocol.codec.PNCounterAddCodec;
 import com.hazelcast.client.impl.protocol.codec.PNCounterAddCodec.RequestParameters;
-import com.hazelcast.client.impl.protocol.task.AbstractAddressMessageTask;
+import com.hazelcast.client.impl.protocol.task.AbstractTargetMessageTask;
 import com.hazelcast.cluster.impl.VectorClock;
 import com.hazelcast.config.PNCounterConfig;
-import com.hazelcast.crdt.pncounter.PNCounterService;
-import com.hazelcast.crdt.pncounter.operations.AddOperation;
-import com.hazelcast.crdt.pncounter.operations.CRDTTimestampedLong;
-import com.hazelcast.instance.Node;
-import com.hazelcast.nio.Address;
-import com.hazelcast.nio.Connection;
+import com.hazelcast.crdt.pncounter.PNCounter;
+import com.hazelcast.internal.crdt.pncounter.PNCounterService;
+import com.hazelcast.internal.crdt.pncounter.operations.AddOperation;
+import com.hazelcast.internal.crdt.pncounter.operations.CRDTTimestampedLong;
+import com.hazelcast.instance.impl.Node;
+import com.hazelcast.internal.nio.Connection;
 import com.hazelcast.security.permission.ActionConstants;
 import com.hazelcast.security.permission.PNCounterPermission;
-import com.hazelcast.spi.Operation;
+import com.hazelcast.spi.impl.operationservice.Operation;
 
 import java.security.Permission;
 import java.util.Map.Entry;
+import java.util.UUID;
 
 /**
  * Task responsible for processing client messages for updating the
- * {@link com.hazelcast.crdt.pncounter.PNCounter} state.
+ * {@link PNCounter} state.
  * If this message was sent from a client with smart routing disabled, the
  * member may forward the request to a different target member.
  */
-public class PNCounterAddMessageTask extends AbstractAddressMessageTask<RequestParameters> {
+public class PNCounterAddMessageTask extends AbstractTargetMessageTask<RequestParameters> {
 
     public PNCounterAddMessageTask(ClientMessage clientMessage, Node node, Connection connection) {
         super(clientMessage, node, connection);
     }
 
     @Override
-    protected Address getAddress() {
-        return parameters.targetReplica;
+    protected UUID getTargetUuid() {
+        return parameters.targetReplicaUUID;
     }
 
     @Override
     protected Operation prepareOperation() {
         final VectorClock vectorClock = new VectorClock();
         if (parameters.replicaTimestamps != null) {
-            for (Entry<String, Long> timestamp : parameters.replicaTimestamps) {
+            for (Entry<UUID, Long> timestamp : parameters.replicaTimestamps) {
                 vectorClock.setReplicaTimestamp(timestamp.getKey(), timestamp.getValue());
             }
         }
 
         return new AddOperation(parameters.name, parameters.delta, parameters.getBeforeUpdate, vectorClock);
     }
-
 
     @Override
     protected PNCounterAddCodec.RequestParameters decodeClientMessage(ClientMessage clientMessage) {

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2008-2018, Hazelcast, Inc. All Rights Reserved.
+ * Copyright (c) 2008-2020, Hazelcast, Inc. All Rights Reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -19,18 +19,20 @@ package com.hazelcast.client.impl.protocol.task.map;
 import com.hazelcast.client.impl.protocol.ClientMessage;
 import com.hazelcast.client.impl.protocol.codec.MapLoadAllCodec;
 import com.hazelcast.client.impl.protocol.task.AbstractCallableMessageTask;
+import com.hazelcast.client.impl.protocol.task.BlockingMessageTask;
 import com.hazelcast.core.DistributedObject;
-import com.hazelcast.instance.Node;
+import com.hazelcast.instance.impl.Node;
 import com.hazelcast.map.impl.MapService;
 import com.hazelcast.map.impl.proxy.MapProxyImpl;
-import com.hazelcast.nio.Connection;
+import com.hazelcast.internal.nio.Connection;
 import com.hazelcast.security.permission.ActionConstants;
 import com.hazelcast.security.permission.MapPermission;
 
 import java.security.Permission;
+import java.util.UUID;
 
 public class MapLoadAllMessageTask
-        extends AbstractCallableMessageTask<MapLoadAllCodec.RequestParameters> {
+        extends AbstractCallableMessageTask<MapLoadAllCodec.RequestParameters> implements BlockingMessageTask {
 
     public MapLoadAllMessageTask(ClientMessage clientMessage, Node node, Connection connection) {
         super(clientMessage, node, connection);
@@ -39,9 +41,10 @@ public class MapLoadAllMessageTask
     @Override
     protected Object call() {
         final MapService mapService = getService(MapService.SERVICE_NAME);
+        UUID source = endpoint.getUuid();
         final DistributedObject distributedObject
                 = mapService.getMapServiceContext().getNodeEngine().getProxyService()
-                .getDistributedObject(MapService.SERVICE_NAME, parameters.name);
+                .getDistributedObject(MapService.SERVICE_NAME, parameters.name, source);
         final MapProxyImpl mapProxy = (MapProxyImpl) distributedObject;
         mapProxy.loadAll(parameters.replaceExistingValues);
         return null;

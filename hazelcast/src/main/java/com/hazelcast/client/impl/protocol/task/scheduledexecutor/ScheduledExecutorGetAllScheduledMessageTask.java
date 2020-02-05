@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2008-2018, Hazelcast, Inc. All Rights Reserved.
+ * Copyright (c) 2008-2020, Hazelcast, Inc. All Rights Reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -19,43 +19,45 @@ package com.hazelcast.client.impl.protocol.task.scheduledexecutor;
 import com.hazelcast.client.impl.protocol.ClientMessage;
 import com.hazelcast.client.impl.protocol.codec.ScheduledExecutorGetAllScheduledFuturesCodec;
 import com.hazelcast.client.impl.protocol.task.AbstractMessageTask;
-import com.hazelcast.core.Member;
-import com.hazelcast.instance.Node;
+import com.hazelcast.client.impl.protocol.task.BlockingMessageTask;
+import com.hazelcast.cluster.impl.MemberImpl;
+import com.hazelcast.instance.impl.Node;
 import com.hazelcast.internal.cluster.ClusterService;
-import com.hazelcast.nio.Connection;
+import com.hazelcast.internal.nio.Connection;
+import com.hazelcast.internal.partition.IPartitionService;
 import com.hazelcast.scheduledexecutor.ScheduledTaskHandler;
 import com.hazelcast.scheduledexecutor.impl.DistributedScheduledExecutorService;
 import com.hazelcast.scheduledexecutor.impl.InvokeOnMembers;
+import com.hazelcast.scheduledexecutor.impl.ScheduledTaskHandlerAccessor;
 import com.hazelcast.scheduledexecutor.impl.operations.GetAllScheduledOnMemberOperation;
 import com.hazelcast.scheduledexecutor.impl.operations.GetAllScheduledOnPartitionOperationFactory;
 import com.hazelcast.security.permission.ActionConstants;
 import com.hazelcast.security.permission.ScheduledExecutorPermission;
-import com.hazelcast.spi.Operation;
-import com.hazelcast.spi.partition.IPartitionService;
-import com.hazelcast.util.function.Supplier;
+import com.hazelcast.spi.impl.operationservice.Operation;
 
 import java.security.Permission;
 import java.util.Collection;
-import java.util.LinkedHashMap;
+import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
+import java.util.function.Supplier;
 
-import static com.hazelcast.util.ExceptionUtil.rethrow;
+import static com.hazelcast.internal.util.ExceptionUtil.rethrow;
 
 public class ScheduledExecutorGetAllScheduledMessageTask
-        extends AbstractMessageTask<ScheduledExecutorGetAllScheduledFuturesCodec.RequestParameters> {
+        extends AbstractMessageTask<ScheduledExecutorGetAllScheduledFuturesCodec.RequestParameters>
+        implements BlockingMessageTask {
 
     public ScheduledExecutorGetAllScheduledMessageTask(ClientMessage clientMessage, Node node, Connection connection) {
         super(clientMessage, node, connection);
     }
 
     @Override
-    protected void processMessage()
-            throws Throwable {
-        Map<Member, List<ScheduledTaskHandler>> scheduledTasks = new LinkedHashMap<Member, List<ScheduledTaskHandler>>();
+    protected void processMessage() {
+        List<ScheduledTaskHandler> scheduledTasks = new LinkedList<>();
         retrieveAllMemberOwnedScheduled(scheduledTasks);
         retrieveAllPartitionOwnedScheduled(scheduledTasks);
-        sendResponse(scheduledTasks.entrySet());
+        sendResponse(scheduledTasks);
     }
 
     @Override
@@ -66,7 +68,7 @@ public class ScheduledExecutorGetAllScheduledMessageTask
     @Override
     protected ClientMessage encodeResponse(Object response) {
         return ScheduledExecutorGetAllScheduledFuturesCodec
-                .encodeResponse((Collection<Map.Entry<Member, List<ScheduledTaskHandler>>>) response);
+                .encodeResponse((Collection<ScheduledTaskHandler>) response);
     }
 
     @Override
@@ -94,7 +96,7 @@ public class ScheduledExecutorGetAllScheduledMessageTask
         return new Object[]{parameters.schedulerName};
     }
 
-    private void retrieveAllMemberOwnedScheduled(Map<Member, List<ScheduledTaskHandler>> accumulator) {
+    private void retrieveAllMemberOwnedScheduled(List<ScheduledTaskHandler> accumulator) {
         try {
             InvokeOnMembers invokeOnMembers = new InvokeOnMembers(nodeEngine, getServiceName(),
                     new GetAllScheduledOnMemberOperationFactory(parameters.schedulerName),
@@ -105,7 +107,7 @@ public class ScheduledExecutorGetAllScheduledMessageTask
         }
     }
 
-    private void retrieveAllPartitionOwnedScheduled(Map<Member, List<ScheduledTaskHandler>> accumulator) {
+    private void retrieveAllPartitionOwnedScheduled(List<ScheduledTaskHandler> accumulator) {
         try {
             accumulateTaskHandlersAsUrnValues(accumulator, nodeEngine.getOperationService().invokeOnAllPartitions(
                     getServiceName(), new GetAllScheduledOnPartitionOperationFactory(parameters.schedulerName)));
@@ -115,29 +117,25 @@ public class ScheduledExecutorGetAllScheduledMessageTask
     }
 
     @SuppressWarnings("unchecked")
-    private void accumulateTaskHandlersAsUrnValues(Map<Member, List<ScheduledTaskHandler>> accumulator,
+    private void accumulateTaskHandlersAsUrnValues(List<ScheduledTaskHandler> accumulator,
                                                    Map<?, ?> taskHandlersMap) {
 
         ClusterService clusterService = nodeEngine.getClusterService();
         IPartitionService partitionService = nodeEngine.getPartitionService();
 
         for (Map.Entry<?, ?> entry : taskHandlersMap.entrySet()) {
-            Member owner;
+            MemberImpl owner;
             Object key = entry.getKey();
             if (key instanceof Number) {
                 owner = clusterService.getMember(partitionService.getPartitionOwner((Integer) key));
             } else {
-                owner = (Member) key;
+                owner = (MemberImpl) key;
             }
-
             List<ScheduledTaskHandler> handlers = (List<ScheduledTaskHandler>) entry.getValue();
-
-            if (accumulator.containsKey(owner)) {
-                List<ScheduledTaskHandler> memberUrns = accumulator.get(owner);
-                memberUrns.addAll(handlers);
-            } else {
-                accumulator.put(owner, handlers);
+            for (ScheduledTaskHandler handler : handlers) {
+                ScheduledTaskHandlerAccessor.setUuid(handler, owner.getUuid());
             }
+            accumulator.addAll(handlers);
         }
     }
 

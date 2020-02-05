@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2008-2018, Hazelcast, Inc. All Rights Reserved.
+ * Copyright (c) 2008-2020, Hazelcast, Inc. All Rights Reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -19,6 +19,7 @@ package com.hazelcast.internal.metrics.metricsets;
 import com.hazelcast.internal.metrics.DoubleProbeFunction;
 import com.hazelcast.internal.metrics.LongProbeFunction;
 import com.hazelcast.internal.metrics.MetricsRegistry;
+import com.hazelcast.internal.util.OperatingSystemMXBeanSupport;
 import com.hazelcast.logging.ILogger;
 import com.hazelcast.logging.Logger;
 
@@ -27,8 +28,19 @@ import java.lang.management.OperatingSystemMXBean;
 import java.lang.reflect.Method;
 import java.util.logging.Level;
 
+import static com.hazelcast.internal.metrics.MetricDescriptorConstants.OS_FULL_METRIC_COMMITTED_VIRTUAL_MEMORY_SIZE;
+import static com.hazelcast.internal.metrics.MetricDescriptorConstants.OS_FULL_METRIC_FREE_PHYSICAL_MEMORY_SIZE;
+import static com.hazelcast.internal.metrics.MetricDescriptorConstants.OS_FULL_METRIC_FREE_SWAP_SPACE_SIZE;
+import static com.hazelcast.internal.metrics.MetricDescriptorConstants.OS_FULL_METRIC_MAX_FILE_DESCRIPTOR_COUNT;
+import static com.hazelcast.internal.metrics.MetricDescriptorConstants.OS_FULL_METRIC_OPEN_FILE_DESCRIPTOR_COUNT;
+import static com.hazelcast.internal.metrics.MetricDescriptorConstants.OS_FULL_METRIC_PROCESS_CPU_LOAD;
+import static com.hazelcast.internal.metrics.MetricDescriptorConstants.OS_FULL_METRIC_PROCESS_CPU_TIME;
+import static com.hazelcast.internal.metrics.MetricDescriptorConstants.OS_FULL_METRIC_SYSTEM_CPU_LOAD;
+import static com.hazelcast.internal.metrics.MetricDescriptorConstants.OS_FULL_METRIC_SYSTEM_LOAD_AVERAGE;
+import static com.hazelcast.internal.metrics.MetricDescriptorConstants.OS_FULL_METRIC_TOTAL_PHYSICAL_MEMORY_SIZE;
+import static com.hazelcast.internal.metrics.MetricDescriptorConstants.OS_FULL_METRIC_TOTAL_SWAP_SPACE_SIZE;
 import static com.hazelcast.internal.metrics.ProbeLevel.MANDATORY;
-import static com.hazelcast.util.Preconditions.checkNotNull;
+import static com.hazelcast.internal.util.Preconditions.checkNotNull;
 
 /**
  * A Metric set for exposing {@link java.lang.management.OperatingSystemMXBean} metrics.
@@ -52,33 +64,33 @@ public final class OperatingSystemMetricSet {
 
         OperatingSystemMXBean mxBean = ManagementFactory.getOperatingSystemMXBean();
 
-        registerMethod(metricsRegistry, mxBean, "getCommittedVirtualMemorySize", "os.committedVirtualMemorySize");
-        registerMethod(metricsRegistry, mxBean, "getFreePhysicalMemorySize", "os.freePhysicalMemorySize");
-        registerMethod(metricsRegistry, mxBean, "getFreeSwapSpaceSize", "os.freeSwapSpaceSize");
-        registerMethod(metricsRegistry, mxBean, "getProcessCpuTime", "os.processCpuTime");
-        registerMethod(metricsRegistry, mxBean, "getTotalPhysicalMemorySize", "os.totalPhysicalMemorySize");
-        registerMethod(metricsRegistry, mxBean, "getTotalSwapSpaceSize", "os.totalSwapSpaceSize");
-        registerMethod(metricsRegistry, mxBean, "getMaxFileDescriptorCount", "os.maxFileDescriptorCount");
-        registerMethod(metricsRegistry, mxBean, "getOpenFileDescriptorCount", "os.openFileDescriptorCount");
+        registerMethod(metricsRegistry, mxBean, "getCommittedVirtualMemorySize", OS_FULL_METRIC_COMMITTED_VIRTUAL_MEMORY_SIZE);
+        registerMethod(metricsRegistry, mxBean, "getFreePhysicalMemorySize", OS_FULL_METRIC_FREE_PHYSICAL_MEMORY_SIZE);
+        registerMethod(metricsRegistry, mxBean, "getFreeSwapSpaceSize", OS_FULL_METRIC_FREE_SWAP_SPACE_SIZE);
+        registerMethod(metricsRegistry, mxBean, "getProcessCpuTime", OS_FULL_METRIC_PROCESS_CPU_TIME);
+        registerMethod(metricsRegistry, mxBean, "getTotalPhysicalMemorySize", OS_FULL_METRIC_TOTAL_PHYSICAL_MEMORY_SIZE);
+        registerMethod(metricsRegistry, mxBean, "getTotalSwapSpaceSize", OS_FULL_METRIC_TOTAL_SWAP_SPACE_SIZE);
+        registerMethod(metricsRegistry, mxBean, "getMaxFileDescriptorCount", OS_FULL_METRIC_MAX_FILE_DESCRIPTOR_COUNT);
+        registerMethod(metricsRegistry, mxBean, "getOpenFileDescriptorCount", OS_FULL_METRIC_OPEN_FILE_DESCRIPTOR_COUNT);
 
-        // value will be between 0.0 and 1.0
-        registerMethod(metricsRegistry, mxBean, "getProcessCpuLoad", "os.processCpuLoad", PERCENTAGE_MULTIPLIER);
+        // value will be between 0.0 and 1.0 or a negative value, if not available
+        registerMethod(metricsRegistry, mxBean, "getProcessCpuLoad", OS_FULL_METRIC_PROCESS_CPU_LOAD, PERCENTAGE_MULTIPLIER);
 
-        // value will between 0.0 and 1.0
-        registerMethod(metricsRegistry, mxBean, "getSystemCpuLoad", "os.systemCpuLoad", PERCENTAGE_MULTIPLIER);
+        // value will be between 0.0 and 1.0 or a negative value, if not available
+        registerMethod(metricsRegistry, mxBean, "getSystemCpuLoad", OS_FULL_METRIC_SYSTEM_CPU_LOAD, PERCENTAGE_MULTIPLIER);
 
-        metricsRegistry.register(mxBean, "os.systemLoadAverage", MANDATORY,
-                new DoubleProbeFunction<OperatingSystemMXBean>() {
-                    @Override
-                    public double get(OperatingSystemMXBean bean) {
-                        return bean.getSystemLoadAverage();
-                    }
-                }
+        metricsRegistry.registerStaticProbe(mxBean, OS_FULL_METRIC_SYSTEM_LOAD_AVERAGE, MANDATORY,
+                OperatingSystemMXBean::getSystemLoadAverage
         );
     }
 
     static void registerMethod(MetricsRegistry metricsRegistry, Object osBean, String methodName, String name) {
-        registerMethod(metricsRegistry, osBean, methodName, name, 1);
+        if (OperatingSystemMXBeanSupport.GET_FREE_PHYSICAL_MEMORY_SIZE_DISABLED
+                && methodName.equals("getFreePhysicalMemorySize")) {
+            metricsRegistry.registerStaticProbe(osBean, name, MANDATORY, (LongProbeFunction<Object>) source -> -1);
+        } else {
+            registerMethod(metricsRegistry, osBean, methodName, name, 1);
+        }
     }
 
     private static void registerMethod(MetricsRegistry metricsRegistry, Object osBean, String methodName, String name,
@@ -90,19 +102,11 @@ public final class OperatingSystemMetricSet {
         }
 
         if (long.class.equals(method.getReturnType())) {
-            metricsRegistry.register(osBean, name, MANDATORY, new LongProbeFunction() {
-                @Override
-                public long get(Object bean) throws Exception {
-                    return (Long) method.invoke(bean, EMPTY_ARGS) * multiplier;
-                }
-            });
+            metricsRegistry.registerStaticProbe(osBean, name, MANDATORY,
+                    (LongProbeFunction) bean -> (Long) method.invoke(bean, EMPTY_ARGS) * multiplier);
         } else {
-            metricsRegistry.register(osBean, name, MANDATORY, new DoubleProbeFunction() {
-                @Override
-                public double get(Object bean) throws Exception {
-                    return (Double) method.invoke(bean, EMPTY_ARGS) * multiplier;
-                }
-            });
+            metricsRegistry.registerStaticProbe(osBean, name, MANDATORY,
+                    (DoubleProbeFunction) bean -> (Double) method.invoke(bean, EMPTY_ARGS) * multiplier);
         }
     }
 
@@ -111,7 +115,7 @@ public final class OperatingSystemMetricSet {
      *
      * @param source     the source object.
      * @param methodName the name of the method to retrieve.
-     * @param name the probe name
+     * @param name       the probe name
      * @return the method
      */
     private static Method getMethod(Object source, String methodName, String name) {

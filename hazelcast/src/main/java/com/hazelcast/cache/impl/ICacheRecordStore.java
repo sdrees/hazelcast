@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2008-2018, Hazelcast, Inc. All Rights Reserved.
+ * Copyright (c) 2008-2020, Hazelcast, Inc. All Rights Reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -16,30 +16,31 @@
 
 package com.hazelcast.cache.impl;
 
-import com.hazelcast.cache.CacheEntryView;
-import com.hazelcast.cache.CacheMergePolicy;
 import com.hazelcast.cache.impl.record.CacheRecord;
 import com.hazelcast.config.CacheConfig;
+import com.hazelcast.internal.eviction.ExpiredKey;
+import com.hazelcast.internal.iteration.IterationPointer;
 import com.hazelcast.internal.nearcache.impl.invalidation.InvalidationQueue;
 import com.hazelcast.map.impl.MapEntries;
-import com.hazelcast.wan.impl.CallerProvenance;
-import com.hazelcast.internal.eviction.ExpiredKey;
-import com.hazelcast.nio.serialization.Data;
-import com.hazelcast.spi.ObjectNamespace;
+import com.hazelcast.internal.serialization.Data;
+import com.hazelcast.internal.services.ObjectNamespace;
+import com.hazelcast.spi.impl.operationservice.Operation;
 import com.hazelcast.spi.merge.SplitBrainMergePolicy;
 import com.hazelcast.spi.merge.SplitBrainMergeTypes.CacheMergeTypes;
+import com.hazelcast.wan.impl.CallerProvenance;
 
 import javax.cache.expiry.ExpiryPolicy;
 import javax.cache.processor.EntryProcessor;
 import java.util.Collection;
 import java.util.Map;
 import java.util.Set;
+import java.util.UUID;
 
 /**
  * {@link ICacheRecordStore} is the core contract providing internal functionality to
  * {@link com.hazelcast.cache.ICache} implementations on partition scope. All of the ICache methods actually
  * map to a method on this interface through Hazelcast's RPC mechanism. Hazelcast
- * {@link com.hazelcast.spi.Operation} is sent to the relevant partition to be executed and the final
+ * {@link Operation} is sent to the relevant partition to be executed and the final
  * results are returned to the callers.
  * <p>
  * For each partition, there is only one {@link ICacheRecordStore} in the cluster.
@@ -87,7 +88,7 @@ public interface ICacheRecordStore {
      * @param caller       UUID of the calling node or client.
      * @return the stored {@link CacheRecord}  (added as new record or updated). <code>null</code> if record has expired.
      */
-    CacheRecord put(Data key, Object value, ExpiryPolicy expiryPolicy, String caller, int completionId);
+    CacheRecord put(Data key, Object value, ExpiryPolicy expiryPolicy, UUID caller, int completionId);
 
     /**
      * Associates the specified value with the specified key in this cache,
@@ -109,7 +110,7 @@ public interface ICacheRecordStore {
      * @return the value associated with the key at the start of the operation or
      * null if none was associated.
      */
-    Object getAndPut(Data key, Object value, ExpiryPolicy expiryPolicy, String caller, int completionId);
+    Object getAndPut(Data key, Object value, ExpiryPolicy expiryPolicy, UUID caller, int completionId);
 
     /**
      * Removes the mapping for a key from this cache if it is present.
@@ -131,7 +132,7 @@ public interface ICacheRecordStore {
      * @param caller       UUID of the calling node or client.
      * @return true if a value was set..
      */
-    boolean putIfAbsent(Data key, Object value, ExpiryPolicy expiryPolicy, String caller, int completionId);
+    boolean putIfAbsent(Data key, Object value, ExpiryPolicy expiryPolicy, UUID caller, int completionId);
 
     /**
      * Atomically removes the entry for a key only if it is currently mapped to some
@@ -153,7 +154,7 @@ public interface ICacheRecordStore {
      * @param caller UUID of the calling node or client.
      * @return the value if one existed or null if no mapping existed for this key.
      */
-    Object getAndRemove(Data key, String caller, int completionId);
+    Object getAndRemove(Data key, UUID caller, int completionId);
 
     /**
      * Removes the mapping for a key from this cache if it is present.
@@ -177,10 +178,9 @@ public interface ICacheRecordStore {
      * @param provenance   caller operation provenance
      * @return returns false if there was no matching key.
      */
-    boolean remove(Data key, String caller, String origin, int completionId, CallerProvenance provenance);
+    boolean remove(Data key, UUID caller, UUID origin, int completionId, CallerProvenance provenance);
 
-    boolean remove(Data key, String caller, String origin, int completionId);
-
+    boolean remove(Data key, UUID caller, UUID origin, int completionId);
 
 
     /**
@@ -206,7 +206,7 @@ public interface ICacheRecordStore {
      *                     the request in the cluster.
      * @return returns false if there was no matching key.
      */
-    boolean remove(Data key, Object value, String caller, String origin, int completionId);
+    boolean remove(Data key, Object value, UUID caller, UUID origin, int completionId);
 
     /**
      * Atomically replaces the entry for a key only if currently mapped to some
@@ -228,7 +228,7 @@ public interface ICacheRecordStore {
      * @param caller       UUID of the calling node or client.
      * @return <tt>true</tt> if the value was replaced.
      */
-    boolean replace(Data key, Object value, ExpiryPolicy expiryPolicy, String caller, int completionId);
+    boolean replace(Data key, Object value, ExpiryPolicy expiryPolicy, UUID caller, int completionId);
 
     /**
      * Atomically replaces the entry for a key only if currently mapped to a
@@ -252,7 +252,7 @@ public interface ICacheRecordStore {
      * @param caller       UUID of the calling node or client.
      * @return <tt>true</tt> if the value was replaced.
      */
-    boolean replace(Data key, Object oldValue, Object newValue, ExpiryPolicy expiryPolicy, String caller, int completionId);
+    boolean replace(Data key, Object oldValue, Object newValue, ExpiryPolicy expiryPolicy, UUID caller, int completionId);
 
     /**
      * Atomically replaces the value for a given key if and only if there is a
@@ -277,7 +277,7 @@ public interface ICacheRecordStore {
      * @return the previous value associated with the specified key, or
      * <tt>null</tt> if there was no mapping for the key.
      */
-    Object getAndReplace(Data key, Object value, ExpiryPolicy expiryPolicy, String caller, int completionId);
+    Object getAndReplace(Data key, Object value, ExpiryPolicy expiryPolicy, UUID caller, int completionId);
 
 
     /**
@@ -287,7 +287,7 @@ public interface ICacheRecordStore {
      * @param keys         keys for the entries
      * @param expiryPolicy custom expiry policy or null to use configured default value
      */
-    void setExpiryPolicy(Collection<Data> keys, Object expiryPolicy, String source);
+    boolean setExpiryPolicy(Collection<Data> keys, Object expiryPolicy, UUID source);
 
     Object getExpiryPolicy(Data key);
 
@@ -435,22 +435,39 @@ public interface ICacheRecordStore {
     CacheRecord removeRecord(Data key);
 
     /**
-     * Starting from the provided table index, a set of keys are returned with a maximum size of <code>size</code>
+     * Fetch minimally {@code size} keys from the {@code pointers} position.
+     * The key is fetched on-heap.
+     * The method may return less keys if iteration has completed.
+     * <p>
+     * NOTE: The implementation is free to return more than {@code size} items.
+     * This can happen if we cannot easily resume from the last returned item
+     * by receiving the {@code tableIndex} of the last item. The index can
+     * represent a bucket with multiple items and in this case the returned
+     * object will contain all items in that bucket, regardless if we exceed
+     * the requested {@code size}.
      *
-     * @param tableIndex initial table index.
-     * @param size       maximum key set size.
-     * @return {@link CacheKeyIterationResult} which wraps keys and last tableIndex.
+     * @param pointers the pointers defining the state of iteration
+     * @param size     the minimal count of returned items, unless iteration has completed
+     * @return fetched keys and the new iteration state
      */
-    CacheKeyIterationResult fetchKeys(int tableIndex, int size);
+    CacheKeysWithCursor fetchKeys(IterationPointer[] pointers, int size);
 
     /**
-     * Starting from the provided table index, a set of entries are returned with a maximum size of <code>size</code>
+     * Fetch minimally {@code size} items from the {@code pointers} position.
+     * Both the key and value are fetched on-heap.
+     * <p>
+     * NOTE: The implementation is free to return more than {@code size} items.
+     * This can happen if we cannot easily resume from the last returned item
+     * by receiving the {@code tableIndex} of the last item. The index can
+     * represent a bucket with multiple items and in this case the returned
+     * object will contain all items in that bucket, regardless if we exceed
+     * the requested {@code size}.
      *
-     * @param tableIndex initial table index.
-     * @param size       maximum entry set size.
-     * @return {@link CacheEntryIterationResult} which wraps entries and last tableIndex.
+     * @param pointers the pointers defining the state of iteration
+     * @param size     the minimal count of returned items
+     * @return fetched entries and the new iteration state
      */
-    CacheEntryIterationResult fetchEntries(int tableIndex, int size);
+    CacheEntriesWithCursor fetchEntries(IterationPointer[] pointers, int size);
 
     /**
      * Invokes an {@link EntryProcessor} against the {@link javax.cache.Cache.Entry} specified by
@@ -499,7 +516,7 @@ public interface ICacheRecordStore {
      */
     boolean evictIfRequired();
 
-    boolean evictOneEntry();
+    void sampleAndForceRemoveEntries(int count);
 
     /**
      * Determines whether wan replication is enabled or not for this record store.
@@ -509,7 +526,7 @@ public interface ICacheRecordStore {
     boolean isWanReplicationEnabled();
 
     /**
-     * Returns {@link com.hazelcast.spi.ObjectNamespace} associated with this record store.
+     * Returns {@link ObjectNamespace} associated with this record store.
      *
      * @return ObjectNamespace associated with this record store.
      */
@@ -518,28 +535,14 @@ public interface ICacheRecordStore {
     /**
      * Merges the given {@link CacheMergeTypes} via the given {@link SplitBrainMergePolicy}.
      *
-     * @param mergingEntry the {@link CacheMergeTypes} instance to merge
-     * @param mergePolicy  the {@link SplitBrainMergePolicy} instance to apply
+     * @param mergingEntry     the {@link CacheMergeTypes} instance to merge
+     * @param mergePolicy      the {@link SplitBrainMergePolicy} instance to apply
      * @param callerProvenance
      * @return the used {@link CacheRecord} if merge is applied, otherwise {@code null}
      */
-    CacheRecord merge(CacheMergeTypes mergingEntry,
-                      SplitBrainMergePolicy<Data, CacheMergeTypes> mergePolicy, CallerProvenance callerProvenance);
-
-    /**
-     * Merges the given {@link CacheEntryView} via the given {@link CacheMergePolicy}.
-     *
-     * @param cacheEntryView the {@link CacheEntryView} instance to merge
-     * @param mergePolicy    the {@link CacheMergePolicy} instance to apply
-     * @param caller         the UUID of the caller
-     * @param origin         source of the call
-     * @param completionId   User generated id which shall be received as a field of the cache event upon completion of
-     *                       the request in the cluster.
-     * @param callerProvenance
-     * @return the used {@link CacheRecord} if merge is applied, otherwise {@code null}
-     */
-    CacheRecord merge(CacheEntryView<Data, Data> cacheEntryView, CacheMergePolicy mergePolicy,
-                      String caller, String origin, int completionId, CallerProvenance callerProvenance);
+    CacheRecord merge(CacheMergeTypes<Object, Object> mergingEntry,
+                      SplitBrainMergePolicy<Object, CacheMergeTypes<Object, Object>, Object> mergePolicy,
+                      CallerProvenance callerProvenance);
 
     /**
      * @return partition ID of this store
@@ -553,5 +556,7 @@ public interface ICacheRecordStore {
      */
     void evictExpiredEntries(int percentage);
 
-    InvalidationQueue<ExpiredKey> getExpiredKeys();
+    InvalidationQueue<ExpiredKey> getExpiredKeysQueue();
+
+    void disposeDeferredBlocks();
 }

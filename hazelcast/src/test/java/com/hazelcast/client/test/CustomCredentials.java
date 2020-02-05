@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2008-2018, Hazelcast, Inc. All Rights Reserved.
+ * Copyright (c) 2008-2020, Hazelcast, Inc. All Rights Reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -23,6 +23,8 @@ import com.hazelcast.security.UsernamePasswordCredentials;
  */
 public class CustomCredentials extends UsernamePasswordCredentials {
 
+    public static final int CLASS_ID = 15;
+
     @Override
     public int getFactoryId() {
         return PortableFactory.FACTORY_ID;
@@ -30,7 +32,7 @@ public class CustomCredentials extends UsernamePasswordCredentials {
 
     @Override
     public int getClassId() {
-        return 7;
+        return CLASS_ID;
     }
 
 }

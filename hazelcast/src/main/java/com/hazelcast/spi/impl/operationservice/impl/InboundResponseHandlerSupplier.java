@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2008-2018, Hazelcast, Inc. All Rights Reserved.
+ * Copyright (c) 2008-2020, Hazelcast, Inc. All Rights Reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -16,32 +16,40 @@
 
 package com.hazelcast.spi.impl.operationservice.impl;
 
-import com.hazelcast.internal.metrics.MetricsProvider;
 import com.hazelcast.internal.metrics.MetricsRegistry;
 import com.hazelcast.internal.metrics.Probe;
+import com.hazelcast.internal.metrics.StaticMetricsProvider;
+import com.hazelcast.internal.nio.Packet;
+import com.hazelcast.internal.util.MutableInteger;
+import com.hazelcast.internal.util.concurrent.BackoffIdleStrategy;
+import com.hazelcast.internal.util.concurrent.BusySpinIdleStrategy;
+import com.hazelcast.internal.util.concurrent.IdleStrategy;
 import com.hazelcast.internal.util.concurrent.MPSCQueue;
 import com.hazelcast.logging.ILogger;
-import com.hazelcast.nio.Packet;
-import com.hazelcast.spi.NodeEngine;
+import com.hazelcast.spi.impl.NodeEngine;
 import com.hazelcast.spi.impl.operationexecutor.OperationHostileThread;
+import com.hazelcast.spi.properties.ClusterProperty;
 import com.hazelcast.spi.properties.HazelcastProperties;
 import com.hazelcast.spi.properties.HazelcastProperty;
-import com.hazelcast.util.MutableInteger;
-import com.hazelcast.util.concurrent.BackoffIdleStrategy;
-import com.hazelcast.util.concurrent.BusySpinIdleStrategy;
-import com.hazelcast.util.concurrent.IdleStrategy;
-import com.hazelcast.util.function.Consumer;
-import com.hazelcast.util.function.Supplier;
 
 import java.util.concurrent.BlockingQueue;
+import java.util.function.Consumer;
+import java.util.function.Supplier;
 
-import static com.hazelcast.instance.OutOfMemoryErrorDispatcher.inspectOutOfMemoryError;
+import static com.hazelcast.instance.impl.OutOfMemoryErrorDispatcher.inspectOutOfMemoryError;
+import static com.hazelcast.internal.metrics.MetricDescriptorConstants.OPERATION_METRIC_INBOUND_RESPONSE_HANDLER_RESPONSES_BACKUP_COUNT;
+import static com.hazelcast.internal.metrics.MetricDescriptorConstants.OPERATION_METRIC_INBOUND_RESPONSE_HANDLER_RESPONSES_ERROR_COUNT;
+import static com.hazelcast.internal.metrics.MetricDescriptorConstants.OPERATION_METRIC_INBOUND_RESPONSE_HANDLER_RESPONSES_MISSING_COUNT;
+import static com.hazelcast.internal.metrics.MetricDescriptorConstants.OPERATION_METRIC_INBOUND_RESPONSE_HANDLER_RESPONSES_NORMAL_COUNT;
+import static com.hazelcast.internal.metrics.MetricDescriptorConstants.OPERATION_METRIC_INBOUND_RESPONSE_HANDLER_RESPONSES_TIMEOUT_COUNT;
+import static com.hazelcast.internal.metrics.MetricDescriptorConstants.OPERATION_METRIC_INBOUND_RESPONSE_HANDLER_RESPONSE_QUEUE_SIZE;
+import static com.hazelcast.internal.metrics.MetricDescriptorConstants.OPERATION_PREFIX;
 import static com.hazelcast.internal.metrics.ProbeLevel.MANDATORY;
-import static com.hazelcast.spi.properties.GroupProperty.RESPONSE_THREAD_COUNT;
-import static com.hazelcast.util.EmptyStatement.ignore;
-import static com.hazelcast.util.HashUtil.hashToIndex;
-import static com.hazelcast.util.ThreadUtil.createThreadName;
-import static com.hazelcast.util.concurrent.BackoffIdleStrategy.createBackoffIdleStrategy;
+import static com.hazelcast.internal.util.EmptyStatement.ignore;
+import static com.hazelcast.internal.util.HashUtil.hashToIndex;
+import static com.hazelcast.internal.util.ThreadUtil.createThreadName;
+import static com.hazelcast.internal.util.concurrent.BackoffIdleStrategy.createBackoffIdleStrategy;
+import static com.hazelcast.spi.properties.ClusterProperty.RESPONSE_THREAD_COUNT;
 import static java.util.concurrent.TimeUnit.MICROSECONDS;
 import static java.util.concurrent.TimeUnit.NANOSECONDS;
 
@@ -49,13 +57,13 @@ import static java.util.concurrent.TimeUnit.NANOSECONDS;
  * A {@link Supplier} responsible for providing a {@link Consumer} that
  * processes inbound responses.
  *
- * Depending on the {@link com.hazelcast.spi.properties.GroupProperty#RESPONSE_THREAD_COUNT}
+ * Depending on the {@link ClusterProperty#RESPONSE_THREAD_COUNT}
  * it will return the appropriate response handler:
  * <ol>
  * <li>a 'sync' response handler that doesn't offload to a different thread and
  * processes the response on the calling (IO) thread.</li>
  * <li>a single threaded Packet Consumer that offloads the response processing a
- * ResponseThread/li>
+ * ResponseThread</li>
  * <li>a multi threaded Packet Consumer that offloads the response processing
  * to a pool of ResponseThreads.</li>
  * </ol>
@@ -70,17 +78,12 @@ import static java.util.concurrent.TimeUnit.NANOSECONDS;
  * dealing with the response and especially notifying the invocation future can be
  * very expensive.
  */
-public class InboundResponseHandlerSupplier implements MetricsProvider, Supplier<Consumer<Packet>> {
+public class InboundResponseHandlerSupplier implements StaticMetricsProvider, Supplier<Consumer<Packet>> {
 
     public static final HazelcastProperty IDLE_STRATEGY
             = new HazelcastProperty("hazelcast.operation.responsequeue.idlestrategy", "block");
 
-    private static final ThreadLocal<MutableInteger> INT_HOLDER = new ThreadLocal<MutableInteger>() {
-        @Override
-        protected MutableInteger initialValue() {
-            return new MutableInteger();
-        }
-    };
+    private static final ThreadLocal<MutableInteger> INT_HOLDER = ThreadLocal.withInitial(MutableInteger::new);
 
     private static final long IDLE_MAX_SPINS = 20;
     private static final long IDLE_MAX_YIELDS = 50;
@@ -109,7 +112,9 @@ public class InboundResponseHandlerSupplier implements MetricsProvider, Supplier
             throw new IllegalArgumentException(RESPONSE_THREAD_COUNT.getName() + " can't be smaller than 0");
         }
 
-        logger.info("Running with " + responseThreadCount + " response threads");
+        if (logger.isFineEnabled()) {
+            logger.fine("Running with " + responseThreadCount + " response threads");
+        }
 
         this.responseThreads = new ResponseThread[responseThreadCount];
         if (responseThreadCount == 0) {
@@ -135,7 +140,7 @@ public class InboundResponseHandlerSupplier implements MetricsProvider, Supplier
         return inboundResponseHandlers[0];
     }
 
-    @Probe(level = MANDATORY)
+    @Probe(name = OPERATION_METRIC_INBOUND_RESPONSE_HANDLER_RESPONSE_QUEUE_SIZE, level = MANDATORY)
     public int responseQueueSize() {
         int result = 0;
         for (ResponseThread responseThread : responseThreads) {
@@ -144,7 +149,7 @@ public class InboundResponseHandlerSupplier implements MetricsProvider, Supplier
         return result;
     }
 
-    @Probe(name = "responses[normal]", level = MANDATORY)
+    @Probe(name = OPERATION_METRIC_INBOUND_RESPONSE_HANDLER_RESPONSES_NORMAL_COUNT, level = MANDATORY)
     long responsesNormal() {
         long result = 0;
         for (InboundResponseHandler handler : inboundResponseHandlers) {
@@ -153,7 +158,7 @@ public class InboundResponseHandlerSupplier implements MetricsProvider, Supplier
         return result;
     }
 
-    @Probe(name = "responses[timeout]", level = MANDATORY)
+    @Probe(name = OPERATION_METRIC_INBOUND_RESPONSE_HANDLER_RESPONSES_TIMEOUT_COUNT, level = MANDATORY)
     long responsesTimeout() {
         long result = 0;
         for (InboundResponseHandler handler : inboundResponseHandlers) {
@@ -162,7 +167,7 @@ public class InboundResponseHandlerSupplier implements MetricsProvider, Supplier
         return result;
     }
 
-    @Probe(name = "responses[backup]", level = MANDATORY)
+    @Probe(name = OPERATION_METRIC_INBOUND_RESPONSE_HANDLER_RESPONSES_BACKUP_COUNT, level = MANDATORY)
     long responsesBackup() {
         long result = 0;
         for (InboundResponseHandler handler : inboundResponseHandlers) {
@@ -171,7 +176,7 @@ public class InboundResponseHandlerSupplier implements MetricsProvider, Supplier
         return result;
     }
 
-    @Probe(name = "responses[error]", level = MANDATORY)
+    @Probe(name = OPERATION_METRIC_INBOUND_RESPONSE_HANDLER_RESPONSES_ERROR_COUNT, level = MANDATORY)
     long responsesError() {
         long result = 0;
         for (InboundResponseHandler handler : inboundResponseHandlers) {
@@ -180,7 +185,7 @@ public class InboundResponseHandlerSupplier implements MetricsProvider, Supplier
         return result;
     }
 
-    @Probe(name = "responses[missing]", level = MANDATORY)
+    @Probe(name = OPERATION_METRIC_INBOUND_RESPONSE_HANDLER_RESPONSES_MISSING_COUNT, level = MANDATORY)
     long responsesMissing() {
         long result = 0;
         for (InboundResponseHandler handler : inboundResponseHandlers) {
@@ -190,8 +195,8 @@ public class InboundResponseHandlerSupplier implements MetricsProvider, Supplier
     }
 
     @Override
-    public void provideMetrics(MetricsRegistry registry) {
-        registry.scanAndRegister(this, "operation");
+    public void provideStaticMetrics(MetricsRegistry registry) {
+        registry.registerStaticMetrics(this, OPERATION_PREFIX);
     }
 
     @Override
@@ -261,7 +266,7 @@ public class InboundResponseHandlerSupplier implements MetricsProvider, Supplier
         private ResponseThread(String hzName, int threadIndex) {
             super(createThreadName(hzName, "response-" + threadIndex));
             this.inboundResponseHandler = new InboundResponseHandler(invocationRegistry, nodeEngine);
-            this.responseQueue = new MPSCQueue<Packet>(this, getIdleStrategy(properties, IDLE_STRATEGY));
+            this.responseQueue = new MPSCQueue<>(this, getIdleStrategy(properties, IDLE_STRATEGY));
         }
 
         @Override

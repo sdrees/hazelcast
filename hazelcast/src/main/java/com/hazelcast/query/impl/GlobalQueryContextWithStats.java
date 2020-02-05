@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2008-2018, Hazelcast, Inc. All Rights Reserved.
+ * Copyright (c) 2008-2020, Hazelcast, Inc. All Rights Reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -16,9 +16,11 @@
 
 package com.hazelcast.query.impl;
 
+import com.hazelcast.config.IndexConfig;
 import com.hazelcast.core.TypeConverter;
-import com.hazelcast.monitor.impl.PerIndexStats;
-import com.hazelcast.nio.serialization.Data;
+import com.hazelcast.internal.monitor.impl.PerIndexStats;
+import com.hazelcast.internal.serialization.Data;
+import com.hazelcast.query.Predicate;
 
 import java.util.HashMap;
 import java.util.HashSet;
@@ -30,13 +32,13 @@ import java.util.Set;
  */
 public class GlobalQueryContextWithStats extends QueryContext {
 
-    private final HashMap<String, QueryTrackingIndex> knownIndexes = new HashMap<String, QueryTrackingIndex>();
+    private final HashMap<String, QueryTrackingIndex> knownIndexes = new HashMap<>();
 
-    private final HashSet<QueryTrackingIndex> trackedIndexes = new HashSet<QueryTrackingIndex>(8);
+    private final HashSet<QueryTrackingIndex> trackedIndexes = new HashSet<>(8);
 
     @Override
-    void attachTo(Indexes indexes) {
-        super.attachTo(indexes);
+    void attachTo(Indexes indexes, int ownedPartitionCount) {
+        super.attachTo(indexes, ownedPartitionCount);
         for (QueryTrackingIndex trackedIndex : trackedIndexes) {
             trackedIndex.resetPerQueryStats();
         }
@@ -44,33 +46,29 @@ public class GlobalQueryContextWithStats extends QueryContext {
     }
 
     @Override
-    public Index getIndex(String attributeName) {
-        if (indexes == null) {
-            return null;
+    void applyPerQueryStats() {
+        for (QueryTrackingIndex trackedIndex : trackedIndexes) {
+            trackedIndex.incrementQueryCount();
         }
+    }
 
-        InternalIndex delegate = indexes.getIndex(attributeName);
+    @Override
+    public Index matchIndex(String pattern, IndexMatchHint matchHint) {
+        InternalIndex delegate = indexes.matchIndex(pattern, matchHint, ownedPartitionCount);
         if (delegate == null) {
             return null;
         }
 
-        QueryTrackingIndex trackingIndex = knownIndexes.get(attributeName);
+        QueryTrackingIndex trackingIndex = knownIndexes.get(pattern);
         if (trackingIndex == null) {
             trackingIndex = new QueryTrackingIndex();
-            knownIndexes.put(attributeName, trackingIndex);
+            knownIndexes.put(pattern, trackingIndex);
         }
 
         trackingIndex.attachTo(delegate);
         trackedIndexes.add(trackingIndex);
 
         return trackingIndex;
-    }
-
-    @Override
-    void applyPerQueryStats() {
-        for (QueryTrackingIndex trackedIndex : trackedIndexes) {
-            trackedIndex.incrementQueryCount();
-        }
     }
 
     private static class QueryTrackingIndex implements InternalIndex {
@@ -94,8 +92,18 @@ public class GlobalQueryContextWithStats extends QueryContext {
         }
 
         @Override
-        public String getAttributeName() {
-            return delegate.getAttributeName();
+        public String getName() {
+            return delegate.getName();
+        }
+
+        @Override
+        public String[] getComponents() {
+            return delegate.getComponents();
+        }
+
+        @Override
+        public IndexConfig getConfig() {
+            return delegate.getConfig();
         }
 
         @Override
@@ -104,18 +112,35 @@ public class GlobalQueryContextWithStats extends QueryContext {
         }
 
         @Override
-        public void saveEntryIndex(QueryableEntry entry, Object oldValue, OperationSource operationSource) {
-            delegate.saveEntryIndex(entry, oldValue, operationSource);
-        }
-
-        @Override
-        public void removeEntryIndex(Data key, Object value, OperationSource operationSource) {
-            delegate.removeEntryIndex(key, value, operationSource);
-        }
-
-        @Override
         public TypeConverter getConverter() {
             return delegate.getConverter();
+        }
+
+        @Override
+        public void putEntry(QueryableEntry entry, Object oldValue, OperationSource operationSource) {
+            delegate.putEntry(entry, oldValue, operationSource);
+        }
+
+        @Override
+        public void removeEntry(Data key, Object value, OperationSource operationSource) {
+            delegate.removeEntry(key, value, operationSource);
+        }
+
+        @Override
+        public boolean isEvaluateOnly() {
+            return delegate.isEvaluateOnly();
+        }
+
+        @Override
+        public boolean canEvaluate(Class<? extends Predicate> predicateClass) {
+            return delegate.canEvaluate(predicateClass);
+        }
+
+        @Override
+        public Set<QueryableEntry> evaluate(Predicate predicate) {
+            Set<QueryableEntry> result = delegate.evaluate(predicate);
+            hasQueries = true;
+            return result;
         }
 
         @Override
@@ -133,15 +158,15 @@ public class GlobalQueryContextWithStats extends QueryContext {
         }
 
         @Override
-        public Set<QueryableEntry> getSubRecordsBetween(Comparable from, Comparable to) {
-            Set<QueryableEntry> result = delegate.getSubRecordsBetween(from, to);
+        public Set<QueryableEntry> getRecords(Comparable from, boolean fromInclusive, Comparable to, boolean toInclusive) {
+            Set<QueryableEntry> result = delegate.getRecords(from, fromInclusive, to, toInclusive);
             hasQueries = true;
             return result;
         }
 
         @Override
-        public Set<QueryableEntry> getSubRecords(ComparisonType comparisonType, Comparable searchedValue) {
-            Set<QueryableEntry> result = delegate.getSubRecords(comparisonType, searchedValue);
+        public Set<QueryableEntry> getRecords(Comparison comparison, Comparable value) {
+            Set<QueryableEntry> result = delegate.getRecords(comparison, value);
             hasQueries = true;
             return result;
         }
@@ -154,6 +179,31 @@ public class GlobalQueryContextWithStats extends QueryContext {
         @Override
         public void destroy() {
             delegate.destroy();
+        }
+
+        @Override
+        public Comparable canonicalizeQueryArgumentScalar(Comparable value) {
+            return delegate.canonicalizeQueryArgumentScalar(value);
+        }
+
+        @Override
+        public boolean hasPartitionIndexed(int partitionId) {
+            return delegate.hasPartitionIndexed(partitionId);
+        }
+
+        @Override
+        public boolean allPartitionsIndexed(int ownedPartitionCount) {
+            return delegate.allPartitionsIndexed(ownedPartitionCount);
+        }
+
+        @Override
+        public void markPartitionAsIndexed(int partitionId) {
+            delegate.markPartitionAsIndexed(partitionId);
+        }
+
+        @Override
+        public void markPartitionAsUnindexed(int partitionId) {
+            delegate.markPartitionAsUnindexed(partitionId);
         }
 
         @Override

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2008-2018, Hazelcast, Inc. All Rights Reserved.
+ * Copyright (c) 2008-2020, Hazelcast, Inc. All Rights Reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -16,11 +16,10 @@
 
 package com.hazelcast.internal.nearcache.impl.invalidation;
 
-import com.hazelcast.core.HazelcastInstanceNotActiveException;
-import com.hazelcast.core.Member;
+import com.hazelcast.cluster.Member;
 import com.hazelcast.logging.ILogger;
-import com.hazelcast.nio.Address;
-import com.hazelcast.spi.InternalCompletableFuture;
+import com.hazelcast.cluster.Address;
+import com.hazelcast.spi.impl.InternalCompletableFuture;
 
 import java.util.ArrayList;
 import java.util.Collection;
@@ -29,8 +28,9 @@ import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentMap;
+import java.util.concurrent.ExecutionException;
 
-import static com.hazelcast.util.MapUtil.createHashMap;
+import static com.hazelcast.internal.util.MapUtil.createHashMap;
 import static java.lang.String.format;
 
 /**
@@ -49,7 +49,8 @@ public abstract class InvalidationMetaDataFetcher {
         this.logger = logger;
     }
 
-    public final void init(RepairingHandler handler) throws Exception {
+    // returns true if handler is initialized properly, otherwise false
+    public final boolean init(RepairingHandler handler) {
         MetadataHolder resultHolder = new MetadataHolder();
         List<String> dataStructureNames = Collections.singletonList(handler.getName());
         Map<Member, InternalCompletableFuture> futureByMember = fetchMembersMetadataFor(dataStructureNames);
@@ -57,11 +58,17 @@ public abstract class InvalidationMetaDataFetcher {
             Member member = entry.getKey();
             InternalCompletableFuture future = entry.getValue();
 
-            extractMemberMetadata(member, future, resultHolder);
+            try {
+                extractMemberMetadata(member, future, resultHolder);
+            } catch (Exception e) {
+                handleExceptionWhileProcessingMetadata(member, e);
+                return false;
+            }
 
             initUuid(resultHolder.partitionUuidList, handler);
             initSequence(resultHolder.namePartitionSequenceList, handler);
         }
+        return true;
     }
 
     public final void fetchMetadata(ConcurrentMap<String, RepairingHandler> handlers) {
@@ -84,7 +91,7 @@ public abstract class InvalidationMetaDataFetcher {
                                                   InternalCompletableFuture future,
                                                   MetadataHolder metadataHolder) throws Exception;
 
-    protected abstract InternalCompletableFuture fetchMetadataOf(Address address, List<String> names);
+    protected abstract InternalCompletableFuture fetchMetadataOf(Member member, List<String> names);
 
     private Map<Member, InternalCompletableFuture> fetchMembersMetadataFor(List<String> names) {
         Collection<Member> members = getDataMembers();
@@ -96,13 +103,9 @@ public abstract class InvalidationMetaDataFetcher {
         for (Member member : members) {
             Address address = member.getAddress();
             try {
-                futureByMember.put(member, fetchMetadataOf(address, names));
-            } catch (HazelcastInstanceNotActiveException e) {
-                logger.finest(e);
+                futureByMember.put(member, fetchMetadataOf(member, names));
             } catch (Exception e) {
-                if (logger.isWarningEnabled()) {
-                    logger.warning(format("Can't fetch invalidation meta-data of %s", member), e);
-                }
+                handleExceptionWhileProcessingMetadata(member, e);
             }
         }
 
@@ -115,16 +118,24 @@ public abstract class InvalidationMetaDataFetcher {
         MetadataHolder resultHolder = new MetadataHolder();
         try {
             extractMemberMetadata(member, future, resultHolder);
-        } catch (HazelcastInstanceNotActiveException e) {
-            logger.finest(e);
         } catch (Exception e) {
-            if (logger.isWarningEnabled()) {
-                logger.warning(format("Can't extract invalidation meta-data of %s", member), e);
-            }
+            handleExceptionWhileProcessingMetadata(member, e);
+            return;
         }
 
-        repairUuids(resultHolder.partitionUuidList, handlers);
-        repairSequences(resultHolder.namePartitionSequenceList, handlers);
+        repairUuids(resultHolder.getPartitionUuidList(), handlers);
+        repairSequences(resultHolder.getNamePartitionSequenceList(), handlers);
+    }
+
+    protected void handleExceptionWhileProcessingMetadata(Member member, Exception e) {
+        if (e instanceof IllegalStateException
+            || (e instanceof ExecutionException && e.getCause() instanceof IllegalStateException)) {
+            // log at finest when
+            // HazelcastInstanceNotActive, HazelcastClientNotActive or HazelcastClientOffline exception
+            logger.finest(e);
+        } else if (logger.isWarningEnabled()) {
+            logger.warning(format("Can't fetch or extract invalidation meta-data of %s", member), e);
+        }
     }
 
     private List<String> getDataStructureNames(ConcurrentMap<String, RepairingHandler> handlers) {

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2008-2018, Hazelcast, Inc. All Rights Reserved.
+ * Copyright (c) 2008-2020, Hazelcast, Inc. All Rights Reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -20,24 +20,24 @@ import com.hazelcast.cache.HazelcastCacheManager;
 import com.hazelcast.cache.ICache;
 import com.hazelcast.cache.impl.CacheService;
 import com.hazelcast.cache.impl.HazelcastServerCacheManager;
-import com.hazelcast.cache.impl.HazelcastServerCachingProvider;
 import com.hazelcast.cache.impl.ICacheRecordStore;
 import com.hazelcast.cache.impl.record.CacheRecord;
+import com.hazelcast.cluster.Address;
 import com.hazelcast.core.HazelcastInstance;
-import com.hazelcast.instance.HazelcastInstanceImpl;
-import com.hazelcast.instance.Node;
+import com.hazelcast.instance.impl.HazelcastInstanceImpl;
+import com.hazelcast.instance.impl.Node;
+import com.hazelcast.internal.partition.IPartition;
 import com.hazelcast.internal.partition.InternalPartition;
 import com.hazelcast.internal.partition.InternalPartitionService;
-import com.hazelcast.nio.Address;
-import com.hazelcast.nio.serialization.Data;
+import com.hazelcast.internal.serialization.Data;
+import com.hazelcast.internal.serialization.SerializationService;
 import com.hazelcast.spi.impl.NodeEngineImpl;
-import com.hazelcast.spi.partition.IPartition;
-import com.hazelcast.spi.serialization.SerializationService;
 
 import javax.cache.expiry.ExpiryPolicy;
 import javax.cache.spi.CachingProvider;
 import java.util.Map;
 
+import static com.hazelcast.cache.CacheTestSupport.createServerCachingProvider;
 import static com.hazelcast.test.HazelcastTestSupport.getHazelcastInstanceImpl;
 import static com.hazelcast.test.HazelcastTestSupport.getNode;
 import static com.hazelcast.test.HazelcastTestSupport.getNodeEngineImpl;
@@ -50,6 +50,8 @@ import static com.hazelcast.test.TestTaskExecutorUtil.runOnPartitionThread;
  * @param <V> type of values
  */
 class CacheBackupAccessor<K, V> extends AbstractBackupAccessor<K, V> implements BackupAccessor<K, V> {
+
+    static final long NON_EXISTENT_KEY = -2;
 
     private final String cacheName;
 
@@ -71,7 +73,7 @@ class CacheBackupAccessor<K, V> extends AbstractBackupAccessor<K, V> implements 
 
             HazelcastInstance hz = getInstanceWithAddress(replicaAddress);
             HazelcastInstanceImpl hazelcastInstanceImpl = getHazelcastInstanceImpl(hz);
-            CachingProvider provider = HazelcastServerCachingProvider.createCachingProvider(hazelcastInstanceImpl);
+            CachingProvider provider = createServerCachingProvider(hazelcastInstanceImpl);
             HazelcastCacheManager cacheManager = (HazelcastServerCacheManager) provider.getCacheManager();
 
             NodeEngineImpl nodeEngine = getNodeEngineImpl(hz);
@@ -100,6 +102,26 @@ class CacheBackupAccessor<K, V> extends AbstractBackupAccessor<K, V> implements 
     }
 
     ExpiryPolicy getExpiryPolicy(K key) {
+        CacheRecord cacheRecord = getCacheRecord(key);
+        InternalPartition partition = getPartitionForKey(key);
+        HazelcastInstance hz = getHazelcastInstance(partition);
+        Node node = getNode(hz);
+        SerializationService serializationService = node.getSerializationService();
+
+        return cacheRecord == null ? null : (ExpiryPolicy) serializationService.toObject(cacheRecord.getExpiryPolicy());
+    }
+
+    /**
+     * @return expiration time when key exists,
+     * otherwise when there is no key it returns {@value
+     * NON_EXISTENT_KEY} to indicate this situation
+     */
+    long getExpirationTime(K key) {
+        CacheRecord cacheRecord = getCacheRecord(key);
+        return cacheRecord != null ? cacheRecord.getExpirationTime() : NON_EXISTENT_KEY;
+    }
+
+    private CacheRecord getCacheRecord(K key) {
         InternalPartition partition = getPartitionForKey(key);
         HazelcastInstance hz = getHazelcastInstance(partition);
 
@@ -109,13 +131,13 @@ class CacheBackupAccessor<K, V> extends AbstractBackupAccessor<K, V> implements 
         String cacheNameWithPrefix = getCacheNameWithPrefix(hz, cacheName);
         int partitionId = partition.getPartitionId();
 
-        return runOnPartitionThread(hz, new GetExpiryPolicyCallable(serializationService, cacheService, cacheNameWithPrefix,
+        return runOnPartitionThread(hz, new GetCacheRecordCallable(serializationService, cacheService, cacheNameWithPrefix,
                 partitionId, key), partitionId);
     }
 
     private static String getCacheNameWithPrefix(HazelcastInstance hz, String cacheName) {
         HazelcastInstanceImpl hazelcastInstanceImpl = getHazelcastInstanceImpl(hz);
-        CachingProvider provider = HazelcastServerCachingProvider.createCachingProvider(hazelcastInstanceImpl);
+        CachingProvider provider = createServerCachingProvider(hazelcastInstanceImpl);
         HazelcastCacheManager cacheManager = (HazelcastServerCacheManager) provider.getCacheManager();
         return cacheManager.getCacheNameWithPrefix(cacheName);
     }
@@ -176,7 +198,7 @@ class CacheBackupAccessor<K, V> extends AbstractBackupAccessor<K, V> implements 
         }
     }
 
-    private class GetExpiryPolicyCallable extends AbstractClassLoaderAwareCallable<ExpiryPolicy> {
+    private class GetCacheRecordCallable extends AbstractClassLoaderAwareCallable<CacheRecord> {
 
         private final SerializationService serializationService;
         private final CacheService cacheService;
@@ -184,8 +206,8 @@ class CacheBackupAccessor<K, V> extends AbstractBackupAccessor<K, V> implements 
         private final int partitionId;
         private final K key;
 
-        GetExpiryPolicyCallable(SerializationService serializationService, CacheService cacheService, String cacheNameWithPrefix,
-                                int partitionId, K key) {
+        GetCacheRecordCallable(SerializationService serializationService, CacheService cacheService, String cacheNameWithPrefix,
+                               int partitionId, K key) {
             this.serializationService = serializationService;
             this.cacheService = cacheService;
             this.cacheNameWithPrefix = cacheNameWithPrefix;
@@ -194,18 +216,19 @@ class CacheBackupAccessor<K, V> extends AbstractBackupAccessor<K, V> implements 
         }
 
         @Override
-        public ExpiryPolicy callInternal() {
+        CacheRecord callInternal() throws Exception {
             ICacheRecordStore recordStore = cacheService.getRecordStore(cacheNameWithPrefix, partitionId);
             if (recordStore == null) {
                 return null;
             }
             Data keyData = serializationService.toData(key);
-            CacheRecord cacheRecord = recordStore.getReadOnlyRecords().get(keyData);
-            if (cacheRecord == null) {
-                return null;
-            }
-            Object expiryPolicy = cacheRecord.getExpiryPolicy();
-            return serializationService.toObject(expiryPolicy);
+            return recordStore.getReadOnlyRecords().get(keyData);
         }
+    }
+
+    @Override
+    public String toString() {
+        return "CacheBackupAccessor{cacheName='"
+                + cacheName + '\'' + "} " + super.toString();
     }
 }

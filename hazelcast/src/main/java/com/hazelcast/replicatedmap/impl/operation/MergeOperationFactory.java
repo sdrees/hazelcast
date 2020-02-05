@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2008-2018, Hazelcast, Inc. All Rights Reserved.
+ * Copyright (c) 2008-2020, Hazelcast, Inc. All Rights Reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -18,7 +18,7 @@ package com.hazelcast.replicatedmap.impl.operation;
 
 import com.hazelcast.nio.ObjectDataInput;
 import com.hazelcast.nio.ObjectDataOutput;
-import com.hazelcast.spi.Operation;
+import com.hazelcast.spi.impl.operationservice.Operation;
 import com.hazelcast.spi.impl.operationservice.impl.operations.PartitionAwareOperationFactory;
 import com.hazelcast.spi.merge.SplitBrainMergePolicy;
 import com.hazelcast.spi.merge.SplitBrainMergeTypes.ReplicatedMapMergeTypes;
@@ -37,15 +37,15 @@ import java.util.List;
 public class MergeOperationFactory extends PartitionAwareOperationFactory {
 
     private String name;
-    private List<ReplicatedMapMergeTypes>[] mergingEntries;
-    private SplitBrainMergePolicy<Object, ReplicatedMapMergeTypes> mergePolicy;
+    private List<ReplicatedMapMergeTypes<Object, Object>>[] mergingEntries;
+    private SplitBrainMergePolicy<Object, ReplicatedMapMergeTypes<Object, Object>, Object> mergePolicy;
 
     public MergeOperationFactory() {
     }
 
     @SuppressFBWarnings("EI_EXPOSE_REP2")
-    public MergeOperationFactory(String name, int[] partitions, List<ReplicatedMapMergeTypes>[] mergingEntries,
-                                 SplitBrainMergePolicy<Object, ReplicatedMapMergeTypes> mergePolicy) {
+    public MergeOperationFactory(String name, int[] partitions, List<ReplicatedMapMergeTypes<Object, Object>>[] mergingEntries,
+                                 SplitBrainMergePolicy<Object, ReplicatedMapMergeTypes<Object, Object>, Object> mergePolicy) {
         this.name = name;
         this.partitions = partitions;
         this.mergingEntries = mergingEntries;
@@ -66,9 +66,9 @@ public class MergeOperationFactory extends PartitionAwareOperationFactory {
     public void writeData(ObjectDataOutput out) throws IOException {
         out.writeUTF(name);
         out.writeIntArray(partitions);
-        for (List<ReplicatedMapMergeTypes> list : mergingEntries) {
+        for (List<ReplicatedMapMergeTypes<Object, Object>> list : mergingEntries) {
             out.writeInt(list.size());
-            for (ReplicatedMapMergeTypes mergingEntry : list) {
+            for (ReplicatedMapMergeTypes<Object, Object> mergingEntry : list) {
                 out.writeObject(mergingEntry);
             }
         }
@@ -83,9 +83,9 @@ public class MergeOperationFactory extends PartitionAwareOperationFactory {
         mergingEntries = new List[partitions.length];
         for (int partitionIndex = 0; partitionIndex < partitions.length; partitionIndex++) {
             int size = in.readInt();
-            List<ReplicatedMapMergeTypes> list = new ArrayList<ReplicatedMapMergeTypes>(size);
+            List<ReplicatedMapMergeTypes<Object, Object>> list = new ArrayList<>(size);
             for (int i = 0; i < size; i++) {
-                ReplicatedMapMergeTypes mergingEntry = in.readObject();
+                ReplicatedMapMergeTypes<Object, Object> mergingEntry = in.readObject();
                 list.add(mergingEntry);
             }
             mergingEntries[partitionIndex] = list;
@@ -99,7 +99,7 @@ public class MergeOperationFactory extends PartitionAwareOperationFactory {
     }
 
     @Override
-    public int getId() {
+    public int getClassId() {
         return ReplicatedMapDataSerializerHook.MERGE_FACTORY;
     }
 }

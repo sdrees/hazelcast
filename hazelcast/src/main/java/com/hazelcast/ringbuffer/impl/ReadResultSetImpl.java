@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2008-2018, Hazelcast, Inc. All Rights Reserved.
+ * Copyright (c) 2008-2020, Hazelcast, Inc. All Rights Reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -19,21 +19,21 @@ package com.hazelcast.ringbuffer.impl;
 import com.hazelcast.core.HazelcastInstance;
 import com.hazelcast.core.HazelcastInstanceAware;
 import com.hazelcast.core.IFunction;
-import com.hazelcast.internal.cluster.Versions;
+import com.hazelcast.internal.nio.IOUtil;
 import com.hazelcast.nio.ObjectDataInput;
 import com.hazelcast.nio.ObjectDataOutput;
-import com.hazelcast.nio.serialization.Data;
+import com.hazelcast.internal.serialization.Data;
 import com.hazelcast.nio.serialization.IdentifiedDataSerializable;
-import com.hazelcast.nio.serialization.impl.Versioned;
 import com.hazelcast.projection.Projection;
 import com.hazelcast.ringbuffer.ReadResultSet;
 import com.hazelcast.spi.impl.SerializationServiceSupport;
-import com.hazelcast.spi.serialization.SerializationService;
-import com.hazelcast.util.function.Predicate;
+import com.hazelcast.internal.serialization.SerializationService;
 import edu.umd.cs.findbugs.annotations.SuppressFBWarnings;
 
 import java.io.IOException;
 import java.util.AbstractList;
+import java.util.List;
+import java.util.function.Predicate;
 
 import static com.hazelcast.ringbuffer.impl.RingbufferDataSerializerHook.F_ID;
 import static com.hazelcast.ringbuffer.impl.RingbufferDataSerializerHook.READ_RESULT_SET;
@@ -53,7 +53,7 @@ import static com.hazelcast.ringbuffer.impl.RingbufferDataSerializerHook.READ_RE
  *            is {@code null} or returns the same type as the parameter
  */
 public class ReadResultSetImpl<O, E> extends AbstractList<E>
-        implements IdentifiedDataSerializable, HazelcastInstanceAware, ReadResultSet<E>, Versioned {
+        implements IdentifiedDataSerializable, HazelcastInstanceAware, ReadResultSet<E> {
 
     protected transient SerializationService serializationService;
     private transient int minSize;
@@ -80,6 +80,15 @@ public class ReadResultSetImpl<O, E> extends AbstractList<E>
         this.seqs = new long[maxSize];
         this.serializationService = serializationService;
         this.filter = filter;
+    }
+
+    @SuppressFBWarnings("EI_EXPOSE_REP2")
+    public ReadResultSetImpl(int readCount, List<Data> items, long[] seqs, long nextSeq) {
+        this.readCount = readCount;
+        this.items = items.toArray(new Data[0]);
+        this.size = items.size();
+        this.seqs = seqs;
+        this.nextSeq = nextSeq;
     }
 
     public ReadResultSetImpl(int minSize, int maxSize,
@@ -192,7 +201,7 @@ public class ReadResultSetImpl<O, E> extends AbstractList<E>
     }
 
     @Override
-    public int getId() {
+    public int getClassId() {
         return READ_RESULT_SET;
     }
 
@@ -210,13 +219,10 @@ public class ReadResultSetImpl<O, E> extends AbstractList<E>
         out.writeInt(readCount);
         out.writeInt(size);
         for (int k = 0; k < size; k++) {
-            out.writeData(items[k]);
+            IOUtil.writeData(out, items[k]);
         }
         out.writeLongArray(seqs);
-        // RU_COMPAT_3_9
-        if (out.getVersion().isGreaterOrEqual(Versions.V3_10)) {
-            out.writeLong(nextSeq);
-        }
+        out.writeLong(nextSeq);
     }
 
     @Override
@@ -225,14 +231,9 @@ public class ReadResultSetImpl<O, E> extends AbstractList<E>
         size = in.readInt();
         items = new Data[size];
         for (int k = 0; k < size; k++) {
-            items[k] = in.readData();
+            items[k] = IOUtil.readData(in);
         }
         seqs = in.readLongArray();
-        // RU_COMPAT_3_9
-        if (in.getVersion().isGreaterOrEqual(Versions.V3_10)) {
-            nextSeq = in.readLong();
-        } else {
-            nextSeq = ReadResultSet.SEQUENCE_UNAVAILABLE;
-        }
+        nextSeq = in.readLong();
     }
 }

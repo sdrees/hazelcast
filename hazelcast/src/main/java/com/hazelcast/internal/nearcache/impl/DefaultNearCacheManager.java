@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2008-2018, Hazelcast, Inc. All Rights Reserved.
+ * Copyright (c) 2008-2020, Hazelcast, Inc. All Rights Reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -21,9 +21,10 @@ import com.hazelcast.config.NearCachePreloaderConfig;
 import com.hazelcast.internal.adapter.DataStructureAdapter;
 import com.hazelcast.internal.nearcache.NearCache;
 import com.hazelcast.internal.nearcache.NearCacheManager;
-import com.hazelcast.monitor.NearCacheStats;
-import com.hazelcast.spi.TaskScheduler;
-import com.hazelcast.spi.serialization.SerializationService;
+import com.hazelcast.internal.serialization.SerializationService;
+import com.hazelcast.nearcache.NearCacheStats;
+import com.hazelcast.spi.impl.executionservice.TaskScheduler;
+import com.hazelcast.spi.properties.HazelcastProperties;
 
 import java.util.Collection;
 import java.util.HashSet;
@@ -32,29 +33,32 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.ScheduledFuture;
+import java.util.concurrent.atomic.AtomicReference;
 
 import static java.util.concurrent.TimeUnit.MILLISECONDS;
 import static java.util.concurrent.TimeUnit.SECONDS;
 
 public class DefaultNearCacheManager implements NearCacheManager {
 
-    protected final SerializationService serializationService;
     protected final TaskScheduler scheduler;
     protected final ClassLoader classLoader;
+    protected final HazelcastProperties properties;
+    protected final SerializationService serializationService;
 
-    private final Queue<ScheduledFuture> preloadTaskFutures = new ConcurrentLinkedQueue<ScheduledFuture>();
-    private final ConcurrentMap<String, NearCache> nearCacheMap = new ConcurrentHashMap<String, NearCache>();
     private final Object mutex = new Object();
+    private final Queue<ScheduledFuture> preloadTaskFutures = new ConcurrentLinkedQueue<>();
+    private final ConcurrentMap<String, NearCache> nearCacheMap = new ConcurrentHashMap<>();
+    private final AtomicReference<Object> storageTaskFutureRef = new AtomicReference<>();
 
-    private volatile ScheduledFuture storageTaskFuture;
-
-    public DefaultNearCacheManager(SerializationService ss, TaskScheduler es, ClassLoader classLoader) {
+    public DefaultNearCacheManager(SerializationService ss, TaskScheduler es,
+                                   ClassLoader classLoader, HazelcastProperties properties) {
         assert ss != null;
         assert es != null;
 
         this.serializationService = ss;
         this.scheduler = es;
         this.classLoader = classLoader;
+        this.properties = properties;
     }
 
     @Override
@@ -64,37 +68,39 @@ public class DefaultNearCacheManager implements NearCacheManager {
     }
 
     @Override
-    public <K, V> NearCache<K, V> getOrCreateNearCache(String name, NearCacheConfig nearCacheConfig) {
-        return getOrCreateNearCache(name, nearCacheConfig, null);
-    }
-
-    @Override
     @SuppressWarnings("unchecked")
     public <K, V> NearCache<K, V> getOrCreateNearCache(String name,
-                                                       NearCacheConfig nearCacheConfig,
-                                                       DataStructureAdapter dataStructureAdapter) {
+                                                       NearCacheConfig nearCacheConfig) {
         NearCache<K, V> nearCache = nearCacheMap.get(name);
-        if (nearCache == null) {
-            synchronized (mutex) {
-                nearCache = nearCacheMap.get(name);
-                if (nearCache == null) {
-                    nearCache = createNearCache(name, nearCacheConfig);
-                    nearCache.initialize();
+        if (nearCache != null) {
+            return nearCache;
+        }
 
-                    nearCacheMap.put(name, nearCache);
+        synchronized (mutex) {
+            nearCache = nearCacheMap.get(name);
+            if (nearCache == null) {
+                nearCache = createNearCache(name, nearCacheConfig);
+                nearCache.initialize();
 
-                    if (nearCache.getPreloaderConfig().isEnabled()) {
-                        createAndSchedulePreloadTask(nearCache, dataStructureAdapter);
-                        createAndScheduleStorageTask();
-                    }
-                }
+                nearCacheMap.put(name, nearCache);
             }
         }
         return nearCache;
     }
 
     protected <K, V> NearCache<K, V> createNearCache(String name, NearCacheConfig nearCacheConfig) {
-        return new DefaultNearCache<K, V>(name, nearCacheConfig, serializationService, scheduler, classLoader);
+        return new DefaultNearCache<>(name, nearCacheConfig, serializationService,
+                scheduler, classLoader, properties);
+    }
+
+    @Override
+    public void startPreloading(NearCache nearCache, DataStructureAdapter dataStructureAdapter) {
+        NearCacheConfig nearCacheConfig = nearCache.getNearCacheConfig();
+        NearCachePreloaderConfig preloaderConfig = nearCacheConfig.getPreloaderConfig();
+        if (preloaderConfig.isEnabled()) {
+            createAndSchedulePreloadTask(nearCache, dataStructureAdapter);
+            createAndScheduleStorageTask();
+        }
     }
 
     @Override
@@ -134,18 +140,19 @@ public class DefaultNearCacheManager implements NearCacheManager {
         return false;
     }
 
-
     @Override
     public void destroyAllNearCaches() {
-        for (NearCache nearCache : new HashSet<NearCache>(nearCacheMap.values())) {
+        for (NearCache nearCache : new HashSet<>(nearCacheMap.values())) {
             destroyNearCache(nearCache.getName());
         }
+
         for (ScheduledFuture preloadTaskFuture : preloadTaskFutures) {
             preloadTaskFuture.cancel(true);
         }
 
-        if (storageTaskFuture != null) {
-            storageTaskFuture.cancel(true);
+        Object future = storageTaskFutureRef.get();
+        if (future != null) {
+            ((ScheduledFuture) future).cancel(true);
         }
     }
 
@@ -160,9 +167,9 @@ public class DefaultNearCacheManager implements NearCacheManager {
     }
 
     private void createAndScheduleStorageTask() {
-        if (storageTaskFuture == null) {
-            StorageTask storageTask = new StorageTask();
-            storageTaskFuture = scheduler.scheduleWithRepetition(storageTask, 0, 1, SECONDS);
+        if (storageTaskFutureRef.compareAndSet(null, this)) {
+            storageTaskFutureRef.set(scheduler.scheduleWithRepetition(new StorageTask(),
+                    0, 1, SECONDS));
         }
     }
 
@@ -205,22 +212,18 @@ public class DefaultNearCacheManager implements NearCacheManager {
         }
 
         private boolean isScheduled(NearCache nearCache, long now) {
+            NearCachePreloaderConfig preloaderConfig = nearCache.getNearCacheConfig().getPreloaderConfig();
             NearCacheStats nearCacheStats = nearCache.getNearCacheStats();
-            NearCachePreloaderConfig preloaderConfig = nearCache.getPreloaderConfig();
+
             if (nearCacheStats.getLastPersistenceTime() == 0) {
                 // check initial delay seconds for first persistence
                 long runningSeconds = MILLISECONDS.toSeconds(now - started);
-                if (runningSeconds < preloaderConfig.getStoreInitialDelaySeconds()) {
-                    return false;
-                }
+                return runningSeconds >= preloaderConfig.getStoreInitialDelaySeconds();
             } else {
-                // check interval seconds for all other persistences
+                // check interval seconds for all other persistence
                 long elapsedSeconds = MILLISECONDS.toSeconds(now - nearCacheStats.getLastPersistenceTime());
-                if (elapsedSeconds < preloaderConfig.getStoreIntervalSeconds()) {
-                    return false;
-                }
+                return elapsedSeconds >= preloaderConfig.getStoreIntervalSeconds();
             }
-            return true;
         }
     }
 

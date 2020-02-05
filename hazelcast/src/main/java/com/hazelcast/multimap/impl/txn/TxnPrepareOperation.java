@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2008-2018, Hazelcast, Inc. All Rights Reserved.
+ * Copyright (c) 2008-2020, Hazelcast, Inc. All Rights Reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -16,21 +16,16 @@
 
 package com.hazelcast.multimap.impl.txn;
 
-import com.hazelcast.internal.cluster.Versions;
 import com.hazelcast.multimap.impl.MultiMapContainer;
 import com.hazelcast.multimap.impl.MultiMapDataSerializerHook;
 import com.hazelcast.multimap.impl.operations.AbstractBackupAwareMultiMapOperation;
-import com.hazelcast.nio.ObjectDataInput;
-import com.hazelcast.nio.ObjectDataOutput;
-import com.hazelcast.nio.serialization.Data;
-import com.hazelcast.nio.serialization.impl.Versioned;
-import com.hazelcast.spi.Operation;
+import com.hazelcast.internal.serialization.Data;
+import com.hazelcast.spi.impl.operationservice.Operation;
 import com.hazelcast.transaction.TransactionException;
 
-import java.io.IOException;
 import java.util.concurrent.TimeUnit;
 
-public class TxnPrepareOperation extends AbstractBackupAwareMultiMapOperation implements Versioned {
+public class TxnPrepareOperation extends AbstractBackupAwareMultiMapOperation {
 
     static final long LOCK_EXTENSION_TIME_IN_MILLIS = TimeUnit.SECONDS.toMillis(10);
 
@@ -70,25 +65,7 @@ public class TxnPrepareOperation extends AbstractBackupAwareMultiMapOperation im
     }
 
     @Override
-    public int getId() {
+    public int getClassId() {
         return MultiMapDataSerializerHook.TXN_PREPARE;
-    }
-
-    @Override
-    protected void writeInternal(ObjectDataOutput out) throws IOException {
-        super.writeInternal(out);
-        // RU_COMPAT_3_9
-        if (out.getVersion().isUnknownOrLessThan(Versions.V3_10)) {
-            out.writeLong(0);
-        }
-    }
-
-    @Override
-    protected void readInternal(ObjectDataInput in) throws IOException {
-        super.readInternal(in);
-        // RU_COMPAT_3_9
-        if (in.getVersion().isUnknownOrLessThan(Versions.V3_10)) {
-            in.readLong();
-        }
     }
 }

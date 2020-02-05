@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2008-2018, Hazelcast, Inc. All Rights Reserved.
+ * Copyright (c) 2008-2020, Hazelcast, Inc. All Rights Reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -16,35 +16,35 @@
 
 package com.hazelcast.collection.impl.collection;
 
+import com.hazelcast.cluster.impl.MemberImpl;
+import com.hazelcast.collection.ItemEvent;
+import com.hazelcast.collection.ItemListener;
 import com.hazelcast.collection.impl.collection.operations.CollectionMergeOperation;
 import com.hazelcast.collection.impl.collection.operations.CollectionOperation;
 import com.hazelcast.collection.impl.common.DataAwareItemEvent;
 import com.hazelcast.collection.impl.txncollection.operations.CollectionTransactionRollbackOperation;
-import com.hazelcast.core.ItemEvent;
 import com.hazelcast.core.ItemEventType;
-import com.hazelcast.core.ItemListener;
-import com.hazelcast.instance.MemberImpl;
+import com.hazelcast.internal.serialization.SerializationService;
+import com.hazelcast.internal.services.ManagedService;
+import com.hazelcast.internal.services.RemoteService;
+import com.hazelcast.internal.services.SplitBrainHandlerService;
+import com.hazelcast.internal.services.TransactionalService;
 import com.hazelcast.logging.ILogger;
-import com.hazelcast.nio.serialization.Data;
+import com.hazelcast.internal.serialization.Data;
 import com.hazelcast.partition.strategy.StringPartitioningStrategy;
-import com.hazelcast.spi.EventPublishingService;
-import com.hazelcast.spi.ManagedService;
-import com.hazelcast.spi.MigrationAwareService;
-import com.hazelcast.spi.NodeEngine;
-import com.hazelcast.spi.Operation;
-import com.hazelcast.spi.OperationService;
-import com.hazelcast.spi.PartitionMigrationEvent;
-import com.hazelcast.spi.PartitionReplicationEvent;
-import com.hazelcast.spi.QuorumAwareService;
-import com.hazelcast.spi.RemoteService;
-import com.hazelcast.spi.SplitBrainHandlerService;
-import com.hazelcast.spi.TransactionalService;
+import com.hazelcast.internal.services.SplitBrainProtectionAwareService;
+import com.hazelcast.spi.impl.NodeEngine;
+import com.hazelcast.spi.impl.eventservice.EventPublishingService;
 import com.hazelcast.spi.impl.merge.AbstractContainerMerger;
+import com.hazelcast.spi.impl.operationservice.Operation;
+import com.hazelcast.spi.impl.operationservice.OperationService;
 import com.hazelcast.spi.merge.SplitBrainMergePolicy;
 import com.hazelcast.spi.merge.SplitBrainMergeTypes.CollectionMergeTypes;
-import com.hazelcast.spi.partition.IPartitionService;
-import com.hazelcast.spi.partition.MigrationEndpoint;
-import com.hazelcast.spi.serialization.SerializationService;
+import com.hazelcast.internal.partition.IPartitionService;
+import com.hazelcast.internal.partition.MigrationAwareService;
+import com.hazelcast.internal.partition.MigrationEndpoint;
+import com.hazelcast.internal.partition.PartitionMigrationEvent;
+import com.hazelcast.internal.partition.PartitionReplicationEvent;
 
 import java.util.Collection;
 import java.util.HashMap;
@@ -52,12 +52,14 @@ import java.util.Iterator;
 import java.util.Map;
 import java.util.Properties;
 import java.util.Set;
+import java.util.UUID;
 import java.util.concurrent.ConcurrentMap;
 
 import static com.hazelcast.spi.impl.merge.MergingValueFactory.createMergingValue;
 
 public abstract class CollectionService implements ManagedService, RemoteService, EventPublishingService<CollectionEvent,
-        ItemListener<Data>>, TransactionalService, MigrationAwareService, QuorumAwareService, SplitBrainHandlerService {
+        ItemListener<Data>>, TransactionalService, MigrationAwareService, SplitBrainProtectionAwareService,
+        SplitBrainHandlerService {
 
     protected final NodeEngine nodeEngine;
     protected final SerializationService serializationService;
@@ -87,7 +89,7 @@ public abstract class CollectionService implements ManagedService, RemoteService
     }
 
     @Override
-    public void destroyDistributedObject(String name) {
+    public void destroyDistributedObject(String name, boolean local) {
         CollectionContainer container = getContainerMap().remove(name);
         if (container != null) {
             container.destroy();
@@ -120,7 +122,7 @@ public abstract class CollectionService implements ManagedService, RemoteService
     }
 
     @Override
-    public void rollbackTransaction(String transactionId) {
+    public void rollbackTransaction(UUID transactionId) {
         final Set<String> collectionNames = getContainerMap().keySet();
         OperationService operationService = nodeEngine.getOperationService();
         for (String name : collectionNames) {
@@ -200,7 +202,7 @@ public abstract class CollectionService implements ManagedService, RemoteService
         return new Merger(collector);
     }
 
-    private class Merger extends AbstractContainerMerger<CollectionContainer, Collection<Object>, CollectionMergeTypes> {
+    private class Merger extends AbstractContainerMerger<CollectionContainer, Collection<Object>, CollectionMergeTypes<Object>> {
 
         Merger(CollectionContainerCollector collector) {
             super(collector, nodeEngine);
@@ -221,10 +223,10 @@ public abstract class CollectionService implements ManagedService, RemoteService
                     Collection<CollectionItem> items = container.getCollection();
 
                     String name = container.getName();
-                    SplitBrainMergePolicy<Collection<Object>, CollectionMergeTypes> mergePolicy
+                    SplitBrainMergePolicy<Collection<Object>, CollectionMergeTypes<Object>, Collection<Object>> mergePolicy
                             = getMergePolicy(container.getConfig().getMergePolicyConfig());
 
-                    CollectionMergeTypes mergingValue = createMergingValue(serializationService, items);
+                    CollectionMergeTypes<Object> mergingValue = createMergingValue(serializationService, items);
                     sendBatch(partitionId, name, mergePolicy, mergingValue);
 
                     items.clear();
@@ -233,8 +235,9 @@ public abstract class CollectionService implements ManagedService, RemoteService
         }
 
         private void sendBatch(int partitionId, String name,
-                               SplitBrainMergePolicy<Collection<Object>, CollectionMergeTypes> mergePolicy,
-                               CollectionMergeTypes mergingValue) {
+                               SplitBrainMergePolicy<Collection<Object>,
+                                       CollectionMergeTypes<Object>, Collection<Object>> mergePolicy,
+                               CollectionMergeTypes<Object> mergingValue) {
             CollectionOperation operation = new CollectionMergeOperation(name, mergePolicy, mergingValue);
             invoke(getServiceName(), operation, partitionId);
         }

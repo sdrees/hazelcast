@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2008-2018, Hazelcast, Inc. All Rights Reserved.
+ * Copyright (c) 2008-2020, Hazelcast, Inc. All Rights Reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -16,15 +16,13 @@
 
 package com.hazelcast.topic;
 
+import com.hazelcast.cluster.Member;
+import com.hazelcast.cluster.impl.MemberImpl;
 import com.hazelcast.config.Config;
 import com.hazelcast.config.ListenerConfig;
 import com.hazelcast.core.HazelcastInstance;
-import com.hazelcast.core.ITopic;
-import com.hazelcast.core.Member;
-import com.hazelcast.core.Message;
-import com.hazelcast.core.MessageListener;
-import com.hazelcast.instance.MemberImpl;
-import com.hazelcast.monitor.impl.LocalTopicStatsImpl;
+import com.hazelcast.internal.monitor.impl.LocalTopicStatsImpl;
+import com.hazelcast.internal.util.UuidUtil;
 import com.hazelcast.nio.ObjectDataInput;
 import com.hazelcast.nio.ObjectDataOutput;
 import com.hazelcast.nio.serialization.DataSerializable;
@@ -33,11 +31,9 @@ import com.hazelcast.test.HazelcastParallelClassRunner;
 import com.hazelcast.test.HazelcastTestSupport;
 import com.hazelcast.test.TestHazelcastInstanceFactory;
 import com.hazelcast.test.annotation.NightlyTest;
-import com.hazelcast.test.annotation.ParallelTest;
+import com.hazelcast.test.annotation.ParallelJVMTest;
 import com.hazelcast.test.annotation.QuickTest;
-import com.hazelcast.test.annotation.Repeat;
 import com.hazelcast.topic.impl.TopicService;
-import com.hazelcast.util.UuidUtil;
 import org.junit.Test;
 import org.junit.experimental.categories.Category;
 import org.junit.runner.RunWith;
@@ -63,7 +59,7 @@ import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
 
 @RunWith(HazelcastParallelClassRunner.class)
-@Category({QuickTest.class, ParallelTest.class})
+@Category({QuickTest.class, ParallelJVMTest.class})
 public class TopicTest extends HazelcastTestSupport {
 
     @Test
@@ -410,7 +406,6 @@ public class TopicTest extends HazelcastTestSupport {
     }
 
     @Test
-    @Repeat(10)
     public void removeMessageListener() throws InterruptedException {
         String topicName = "removeMessageListener" + generateRandomString(5);
 
@@ -429,7 +424,7 @@ public class TopicTest extends HazelcastTestSupport {
             };
 
             final String message = "message_" + messageListener.hashCode() + "_";
-            final String id = topic.addMessageListener(messageListener);
+            final UUID id = topic.addMessageListener(messageListener);
             topic.publish(message + "1");
             onMessageInvoked.await();
             assertTrue(topic.removeMessageListener(id));
@@ -497,7 +492,7 @@ public class TopicTest extends HazelcastTestSupport {
             }
         };
 
-        String messageListenerId = topic.addMessageListener(messageListener1);
+        UUID messageListenerId = topic.addMessageListener(messageListener1);
         topic.addMessageListener(messageListener2);
         topic.publish(message);
         assertOpenEventually(cp);

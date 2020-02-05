@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2008-2018, Hazelcast, Inc. All Rights Reserved.
+ * Copyright (c) 2008-2020, Hazelcast, Inc. All Rights Reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -16,34 +16,28 @@
 
 package com.hazelcast.cache.impl;
 
-import com.hazelcast.cache.CacheEntryView;
-import com.hazelcast.cache.CacheMergePolicy;
-import com.hazelcast.cache.impl.merge.entry.DefaultCacheEntryView;
-import com.hazelcast.cache.impl.operation.CacheLegacyMergeOperation;
 import com.hazelcast.cache.impl.record.CacheRecord;
 import com.hazelcast.config.CacheConfig;
 import com.hazelcast.config.InMemoryFormat;
-import com.hazelcast.nio.serialization.Data;
-import com.hazelcast.spi.NodeEngine;
-import com.hazelcast.spi.Operation;
-import com.hazelcast.spi.OperationFactory;
+import com.hazelcast.internal.serialization.Data;
+import com.hazelcast.spi.impl.NodeEngine;
 import com.hazelcast.spi.impl.merge.AbstractMergeRunnable;
+import com.hazelcast.spi.impl.operationservice.OperationFactory;
 import com.hazelcast.spi.merge.SplitBrainMergePolicy;
 import com.hazelcast.spi.merge.SplitBrainMergeTypes.CacheMergeTypes;
-import com.hazelcast.util.function.BiConsumer;
 
 import java.util.Collection;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
+import java.util.function.BiConsumer;
 
 import static com.hazelcast.cache.impl.AbstractCacheRecordStore.SOURCE_NOT_AVAILABLE;
 import static com.hazelcast.cache.impl.ICacheService.SERVICE_NAME;
-import static com.hazelcast.config.MergePolicyConfig.DEFAULT_BATCH_SIZE;
 import static com.hazelcast.spi.impl.merge.MergingValueFactory.createMergingEntry;
 
-class CacheMergeRunnable extends AbstractMergeRunnable<Data, Data, ICacheRecordStore, CacheMergeTypes> {
+class CacheMergeRunnable extends AbstractMergeRunnable<Object, Object, ICacheRecordStore, CacheMergeTypes<Object, Object>> {
 
     private final CacheService cacheService;
     private final ConcurrentMap<String, CacheConfig> configs;
@@ -54,7 +48,7 @@ class CacheMergeRunnable extends AbstractMergeRunnable<Data, Data, ICacheRecordS
         super(CacheService.SERVICE_NAME, mergingStores, splitBrainHandlerService, nodeEngine);
 
         this.cacheService = nodeEngine.getService(SERVICE_NAME);
-        this.configs = new ConcurrentHashMap<String, CacheConfig>(cacheService.getConfigs());
+        this.configs = new ConcurrentHashMap<>(cacheService.getConfigs());
     }
 
     @Override
@@ -72,7 +66,7 @@ class CacheMergeRunnable extends AbstractMergeRunnable<Data, Data, ICacheRecordS
     }
 
     @Override
-    protected void mergeStore(ICacheRecordStore store, BiConsumer<Integer, CacheMergeTypes> consumer) {
+    protected void mergeStore(ICacheRecordStore store, BiConsumer<Integer, CacheMergeTypes<Object, Object>> consumer) {
         int partitionId = store.getPartitionId();
 
         for (Map.Entry<Data, CacheRecord> entry : store.getReadOnlyRecords().entrySet()) {
@@ -85,42 +79,18 @@ class CacheMergeRunnable extends AbstractMergeRunnable<Data, Data, ICacheRecordS
     }
 
     @Override
-    protected void mergeStoreLegacy(ICacheRecordStore recordStore, BiConsumer<Integer, Operation> consumer) {
-        int partitionId = recordStore.getPartitionId();
-        String name = recordStore.getName();
-        CacheMergePolicy mergePolicy = ((CacheMergePolicy) getMergePolicy(name));
-
-        for (Map.Entry<Data, CacheRecord> entry : recordStore.getReadOnlyRecords().entrySet()) {
-            Data key = entry.getKey();
-            CacheRecord record = entry.getValue();
-            CacheEntryView<Data, Data> entryView = new DefaultCacheEntryView(
-                    key,
-                    toData(record.getValue()),
-                    record.getCreationTime(),
-                    record.getExpirationTime(),
-                    record.getLastAccessTime(),
-                    record.getAccessHit(),
-                    toData(record.getExpiryPolicy()));
-
-            consumer.accept(partitionId, new CacheLegacyMergeOperation(name, key, entryView, mergePolicy));
-        }
-    }
-
-    @Override
     protected InMemoryFormat getInMemoryFormat(String dataStructureName) {
         return cacheService.getConfigs().get(dataStructureName).getInMemoryFormat();
     }
 
     @Override
     protected int getBatchSize(String dataStructureName) {
-        // the batch size cannot be retrieved from the MergePolicyConfig,
-        // because there is no MergePolicyConfig in CacheConfig
-        // (adding it breaks backward compatibility)
-        return DEFAULT_BATCH_SIZE;
+        return cacheService.getConfigs().get(dataStructureName)
+                           .getMergePolicyConfig().getBatchSize();
     }
 
     @Override
-    protected Object getMergePolicy(String dataStructureName) {
+    protected SplitBrainMergePolicy getMergePolicy(String dataStructureName) {
         return cacheService.getMergePolicy(dataStructureName);
     }
 
@@ -136,8 +106,9 @@ class CacheMergeRunnable extends AbstractMergeRunnable<Data, Data, ICacheRecordS
 
     @Override
     protected OperationFactory createMergeOperationFactory(String dataStructureName,
-                                                           SplitBrainMergePolicy<Data, CacheMergeTypes> mergePolicy,
-                                                           int[] partitions, List<CacheMergeTypes>[] entries) {
+                                                           SplitBrainMergePolicy<Object, CacheMergeTypes<Object, Object>,
+                                                                   Object> mergePolicy,
+                                                           int[] partitions, List<CacheMergeTypes<Object, Object>>[] entries) {
         CacheConfig cacheConfig = cacheService.getCacheConfig(dataStructureName);
         CacheOperationProvider operationProvider
                 = cacheService.getCacheOperationProvider(dataStructureName, cacheConfig.getInMemoryFormat());

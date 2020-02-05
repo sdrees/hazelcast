@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2008-2018, Hazelcast, Inc. All Rights Reserved.
+ * Copyright (c) 2008-2020, Hazelcast, Inc. All Rights Reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -16,75 +16,54 @@
 
 package com.hazelcast.map.impl.operation;
 
+import com.hazelcast.config.IndexConfig;
 import com.hazelcast.config.MapConfig;
-import com.hazelcast.core.Member;
-import com.hazelcast.internal.cluster.ClusterService;
+import com.hazelcast.internal.nio.IOUtil;
+import com.hazelcast.internal.serialization.SerializationService;
+import com.hazelcast.internal.services.ObjectNamespace;
+import com.hazelcast.internal.services.ServiceNamespace;
+import com.hazelcast.internal.util.Clock;
+import com.hazelcast.internal.util.ExceptionUtil;
+import com.hazelcast.internal.util.ThreadUtil;
 import com.hazelcast.map.impl.MapContainer;
 import com.hazelcast.map.impl.MapDataSerializerHook;
 import com.hazelcast.map.impl.PartitionContainer;
+import com.hazelcast.map.impl.StoreAdapter;
 import com.hazelcast.map.impl.record.Record;
-import com.hazelcast.map.impl.record.RecordReplicationInfo;
+import com.hazelcast.map.impl.record.Records;
 import com.hazelcast.map.impl.recordstore.RecordStore;
-import com.hazelcast.nio.Address;
+import com.hazelcast.map.impl.recordstore.RecordStoreAdapter;
 import com.hazelcast.nio.ObjectDataInput;
 import com.hazelcast.nio.ObjectDataOutput;
-import com.hazelcast.nio.serialization.Data;
+import com.hazelcast.internal.serialization.Data;
 import com.hazelcast.nio.serialization.IdentifiedDataSerializable;
-import com.hazelcast.nio.serialization.impl.Versioned;
 import com.hazelcast.query.impl.Index;
-import com.hazelcast.query.impl.IndexInfo;
 import com.hazelcast.query.impl.Indexes;
+import com.hazelcast.query.impl.InternalIndex;
 import com.hazelcast.query.impl.MapIndexInfo;
-import com.hazelcast.query.impl.QueryableEntry;
-import com.hazelcast.spi.ObjectNamespace;
-import com.hazelcast.spi.ServiceNamespace;
-import com.hazelcast.spi.impl.operationservice.TargetAware;
-import com.hazelcast.spi.serialization.SerializationService;
-import com.hazelcast.util.Clock;
-import com.hazelcast.util.ThreadUtil;
-import com.hazelcast.version.Version;
 
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.HashSet;
-import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
-import static com.hazelcast.instance.BuildInfoProvider.getBuildInfo;
-import static com.hazelcast.internal.cluster.Versions.V3_10;
-import static com.hazelcast.internal.cluster.Versions.V3_9;
-import static com.hazelcast.map.impl.record.Records.applyRecordInfo;
-import static com.hazelcast.map.impl.record.Records.getValueOrCachedValue;
-import static com.hazelcast.map.impl.recordstore.RecordStore.DEFAULT_MAX_IDLE;
-import static com.hazelcast.map.impl.recordstore.RecordStore.DEFAULT_TTL;
-import static com.hazelcast.util.MapUtil.createHashMap;
+import static com.hazelcast.internal.util.MapUtil.createHashMap;
+import static com.hazelcast.internal.util.MapUtil.isNullOrEmpty;
 
 /**
  * Holder for raw IMap key-value pairs and their metadata.
  */
 // keep this `protected`, extended in another context.
-public class MapReplicationStateHolder implements IdentifiedDataSerializable, Versioned, TargetAware {
-
-    // RU_COMPAT_3_9
-    // When cluster version is 3.9, 3.9 EE members:
-    //    Never write index info
-    //    Don't read index info when coming from 3.9 member
-    //    Read index info when coming from 3.10
-    // When cluster version is 3.9, 3.10 EE members:
-    //    Write index info when target is 3.9
-    //    Don't write index info when target member is 3.10
-    //    Never read index info
-    // When cluster version is 3.10:
-    //    Always read and write index info
+public class MapReplicationStateHolder implements IdentifiedDataSerializable {
 
     // holds recordStore-references of this partitions' maps
     protected transient Map<String, RecordStore<Record>> storesByMapName;
 
     // data for each map
-    protected transient Map<String, Collection<RecordReplicationInfo>> data;
+    protected transient Map<String, List> data;
 
     // propagates the information if the given record store has been already loaded with map-loaded
     // if so, the loading won't be triggered again after a migration to avoid duplicate loading.
@@ -97,8 +76,6 @@ public class MapReplicationStateHolder implements IdentifiedDataSerializable, Ve
     // operations, which meant that the index did not include some data.
     protected transient List<MapIndexInfo> mapIndexInfos;
 
-    private transient Address target;
-
     private MapReplicationOperation operation;
 
     /**
@@ -108,16 +85,15 @@ public class MapReplicationStateHolder implements IdentifiedDataSerializable, Ve
     public MapReplicationStateHolder() {
     }
 
-    public MapReplicationStateHolder(MapReplicationOperation operation) {
+    public void setOperation(MapReplicationOperation operation) {
         this.operation = operation;
     }
 
     void prepare(PartitionContainer container, Collection<ServiceNamespace> namespaces, int replicaIndex) {
         storesByMapName = createHashMap(namespaces.size());
 
-        data = createHashMap(namespaces.size());
         loaded = createHashMap(namespaces.size());
-        mapIndexInfos = new ArrayList<MapIndexInfo>(namespaces.size());
+        mapIndexInfos = new ArrayList<>(namespaces.size());
         for (ServiceNamespace namespace : namespaces) {
             ObjectNamespace mapNamespace = (ObjectNamespace) namespace;
             String mapName = mapNamespace.getObjectName();
@@ -135,79 +111,79 @@ public class MapReplicationStateHolder implements IdentifiedDataSerializable, Ve
             loaded.put(mapName, recordStore.isLoaded());
             storesByMapName.put(mapName, recordStore);
 
-            Set<IndexInfo> indexInfos = new HashSet<IndexInfo>();
+            Set<IndexConfig> indexConfigs = new HashSet<>();
             if (mapContainer.isGlobalIndexEnabled()) {
                 // global-index
-                for (Index index : mapContainer.getIndexes().getIndexes()) {
-                    indexInfos.add(new IndexInfo(index.getAttributeName(), index.isOrdered()));
+                final Indexes indexes = mapContainer.getIndexes();
+                for (Index index : indexes.getIndexes()) {
+                    indexConfigs.add(index.getConfig());
                 }
+                indexConfigs.addAll(indexes.getIndexDefinitions());
             } else {
                 // partitioned-index
                 final Indexes indexes = mapContainer.getIndexes(container.getPartitionId());
-                if (indexes != null && indexes.hasIndex()) {
+                if (indexes != null && indexes.haveAtLeastOneIndexOrDefinition()) {
                     for (Index index : indexes.getIndexes()) {
-                        indexInfos.add(new IndexInfo(index.getAttributeName(), index.isOrdered()));
+                        indexConfigs.add(index.getConfig());
                     }
+                    indexConfigs.addAll(indexes.getIndexDefinitions());
                 }
             }
             MapIndexInfo mapIndexInfo = new MapIndexInfo(mapName);
-            mapIndexInfo.addIndexInfos(indexInfos);
+            mapIndexInfo.addIndexCofigs(indexConfigs);
             mapIndexInfos.add(mapIndexInfo);
         }
     }
 
+    @SuppressWarnings("checkstyle:npathcomplexity")
     void applyState() {
         ThreadUtil.assertRunningOnPartitionThread();
 
         applyIndexesState();
 
-        if (data != null) {
-            for (Map.Entry<String, Collection<RecordReplicationInfo>> dataEntry : data.entrySet()) {
-                Collection<RecordReplicationInfo> recordReplicationInfos = dataEntry.getValue();
-                final String mapName = dataEntry.getKey();
+        if (!isNullOrEmpty(data)) {
+            for (Map.Entry<String, List> dataEntry : data.entrySet()) {
+                String mapName = dataEntry.getKey();
+                List keyRecord = dataEntry.getValue();
                 RecordStore recordStore = operation.getRecordStore(mapName);
                 recordStore.reset();
                 recordStore.setPreMigrationLoadedStatus(loaded.get(mapName));
+                StoreAdapter storeAdapter = new RecordStoreAdapter(recordStore);
 
                 MapContainer mapContainer = recordStore.getMapContainer();
                 PartitionContainer partitionContainer = recordStore.getMapContainer().getMapServiceContext()
                         .getPartitionContainer(operation.getPartitionId());
-                for (Map.Entry<String, Boolean> indexDefinition : mapContainer.getIndexDefinitions().entrySet()) {
+                for (Map.Entry<String, IndexConfig> indexDefinition : mapContainer.getIndexDefinitions().entrySet()) {
                     Indexes indexes = mapContainer.getIndexes(partitionContainer.getPartitionId());
-                    indexes.addOrGetIndex(indexDefinition.getKey(), indexDefinition.getValue());
+                    indexes.addOrGetIndex(indexDefinition.getValue(), indexes.isGlobal() ? null : storeAdapter);
                 }
 
                 final Indexes indexes = mapContainer.getIndexes(partitionContainer.getPartitionId());
-                final SerializationService serializationService = mapContainer.getMapServiceContext().getNodeEngine()
-                        .getSerializationService();
-                final boolean indexesMustBePopulated = indexesMustBePopulated(indexes, operation);
-                if (indexesMustBePopulated) {
+                final boolean populateIndexes = indexesMustBePopulated(indexes, operation);
+                if (populateIndexes) {
                     // defensively clear possible stale leftovers in non-global indexes from the previous failed promotion attempt
                     indexes.clearAll();
                 }
 
-                for (RecordReplicationInfo recordReplicationInfo : recordReplicationInfos) {
-                    Data key = recordReplicationInfo.getKey();
-                    final Data value = recordReplicationInfo.getValue();
-                    Record newRecord = recordStore.createRecord(value, DEFAULT_TTL, DEFAULT_MAX_IDLE, Clock.currentTimeMillis());
-                    applyRecordInfo(newRecord, recordReplicationInfo);
-                    recordStore.putRecord(key, newRecord);
+                long nowInMillis = Clock.currentTimeMillis();
+                final InternalIndex[] indexesSnapshot = indexes.getIndexes();
+                for (int i = 0; i < keyRecord.size(); i += 2) {
+                    Data dataKey = (Data) keyRecord.get(i);
+                    Record record = (Record) keyRecord.get(i + 1);
 
-                    if (indexesMustBePopulated) {
-                        final Object valueToIndex = getValueOrCachedValue(newRecord, serializationService);
-                        if (valueToIndex != null) {
-                            final QueryableEntry queryableEntry = mapContainer.newQueryEntry(newRecord.getKey(), valueToIndex);
-                            indexes.saveEntryIndex(queryableEntry, null, Index.OperationSource.SYSTEM);
-                        }
-                    }
+                    recordStore.putReplicatedRecord(dataKey, record, nowInMillis, populateIndexes);
 
                     if (recordStore.shouldEvict()) {
                         // No need to continue replicating records anymore.
                         // We are already over eviction threshold, each put record will cause another eviction.
-                        recordStore.evictEntries(key);
+                        recordStore.evictEntries(dataKey);
                         break;
                     }
                     recordStore.disposeDeferredBlocks();
+                }
+
+                if (populateIndexes) {
+                    Indexes.markPartitionAsIndexed(partitionContainer.getPartitionId(), indexesSnapshot);
                 }
             }
         }
@@ -216,40 +192,34 @@ public class MapReplicationStateHolder implements IdentifiedDataSerializable, Ve
     private void applyIndexesState() {
         if (mapIndexInfos != null) {
             for (MapIndexInfo mapIndexInfo : mapIndexInfos) {
-                addIndexes(mapIndexInfo.getMapName(), mapIndexInfo.getIndexInfos());
+                addIndexes(mapIndexInfo.getMapName(), mapIndexInfo.getIndexConfigs());
             }
-        }
-
-        // RU_COMPAT_3_9
-        // Old nodes (3.9-) won't send mapIndexInfos to new nodes (3.9+) in the map-replication operation.
-        // This is the reason why we pick up the mapContainer.getIndexesToAdd() that were added by the PostJoinMapOperation
-        // and we add them to the map, before we add data
-        for (String mapName : data.keySet()) {
-            RecordStore recordStore = operation.getRecordStore(mapName);
-            MapContainer mapContainer = recordStore.getMapContainer();
-            addIndexes(mapName, mapContainer.getPartitionIndexesToAdd());
         }
     }
 
-    private void addIndexes(String mapName, Collection<IndexInfo> indexInfos) {
-        if (indexInfos == null) {
+    private void addIndexes(String mapName, Collection<IndexConfig> indexConfigs) {
+        if (indexConfigs == null) {
             return;
         }
         RecordStore recordStore = operation.getRecordStore(mapName);
         MapContainer mapContainer = recordStore.getMapContainer();
         if (mapContainer.isGlobalIndexEnabled()) {
             // creating global indexes on partition thread in case they do not exist
-            for (IndexInfo indexInfo : indexInfos) {
+            for (IndexConfig indexConfig : indexConfigs) {
                 Indexes indexes = mapContainer.getIndexes();
+                StoreAdapter recordStoreAdapter = indexes.isGlobal() ? null : new RecordStoreAdapter(recordStore);
+
                 // optimisation not to synchronize each partition thread on the addOrGetIndex method
-                if (indexes.getIndex(indexInfo.getAttributeName()) == null) {
-                    indexes.addOrGetIndex(indexInfo.getAttributeName(), indexInfo.isOrdered());
+                if (indexes.getIndex(indexConfig.getName()) == null) {
+                    indexes.addOrGetIndex(indexConfig, recordStoreAdapter);
                 }
             }
         } else {
             Indexes indexes = mapContainer.getIndexes(operation.getPartitionId());
-            for (IndexInfo indexInfo : indexInfos) {
-                indexes.addOrGetIndex(indexInfo.getAttributeName(), indexInfo.isOrdered());
+            StoreAdapter recordStoreAdapter = indexes.isGlobal() ? null : new RecordStoreAdapter(recordStore);
+            indexes.createIndexesFromRecordedDefinitions(recordStoreAdapter);
+            for (IndexConfig indexConfig : indexConfigs) {
+                indexes.addOrGetIndex(indexConfig, recordStoreAdapter);
             }
         }
     }
@@ -260,19 +230,20 @@ public class MapReplicationStateHolder implements IdentifiedDataSerializable, Ve
 
         for (Map.Entry<String, RecordStore<Record>> entry : storesByMapName.entrySet()) {
             String mapName = entry.getKey();
-            RecordStore recordStore = entry.getValue();
-
-            SerializationService ss = getSerializationService(recordStore);
-
             out.writeUTF(mapName);
-            out.writeInt(recordStore.size());
 
-            Iterator<Record> iterator = recordStore.iterator();
-            while (iterator.hasNext()) {
-                Record record = iterator.next();
-                RecordReplicationInfo replicationInfo = operation.toReplicationInfo(record, ss);
-                out.writeObject(replicationInfo);
-            }
+            SerializationService ss = getSerializationService(operation.getRecordStore(mapName).getMapContainer());
+            RecordStore<Record> recordStore = entry.getValue();
+            out.writeInt(recordStore.size());
+            // No expiration should be done in forEach, since we have serialized size before.
+            recordStore.forEach((dataKey, record) -> {
+                try {
+                    IOUtil.writeData(out, dataKey);
+                    Records.writeRecord(out, record, ss.toData(record.getValue()));
+                } catch (IOException e) {
+                    throw ExceptionUtil.rethrow(e);
+                }
+            }, operation.getReplicaIndex() != 0, true);
         }
 
         out.writeInt(loaded.size());
@@ -281,17 +252,15 @@ public class MapReplicationStateHolder implements IdentifiedDataSerializable, Ve
             out.writeBoolean(loadedEntry.getValue());
         }
 
-        // RU_COMPAT_3_9
-        if (mustWriteIndexInfos(out.getVersion())) {
-            out.writeInt(mapIndexInfos.size());
-            for (MapIndexInfo mapIndexInfo : mapIndexInfos) {
-                out.writeObject(mapIndexInfo);
-            }
+        out.writeInt(mapIndexInfos.size());
+        for (MapIndexInfo mapIndexInfo : mapIndexInfos) {
+            out.writeObject(mapIndexInfo);
         }
     }
 
-    private static SerializationService getSerializationService(RecordStore recordStore) {
-        return recordStore.getMapContainer().getMapServiceContext().getNodeEngine().getSerializationService();
+    private static SerializationService getSerializationService(MapContainer mapContainer) {
+        return mapContainer.getMapServiceContext()
+                .getNodeEngine().getSerializationService();
     }
 
     @Override
@@ -301,14 +270,16 @@ public class MapReplicationStateHolder implements IdentifiedDataSerializable, Ve
 
         for (int i = 0; i < size; i++) {
             String name = in.readUTF();
-            int recordStoreSize = in.readInt();
-            Collection<RecordReplicationInfo> recordReplicationInfos
-                    = new ArrayList<RecordReplicationInfo>(recordStoreSize);
-            for (int j = 0; j < recordStoreSize; j++) {
-                RecordReplicationInfo recordReplicationInfo = in.readObject();
-                recordReplicationInfos.add(recordReplicationInfo);
+            int numOfRecords = in.readInt();
+            List keyRecord = new ArrayList<>(numOfRecords * 2);
+            for (int j = 0; j < numOfRecords; j++) {
+                Data dataKey = IOUtil.readData(in);
+                Record record = Records.readRecord(in);
+
+                keyRecord.add(dataKey);
+                keyRecord.add(record);
             }
-            data.put(name, recordReplicationInfos);
+            data.put(name, keyRecord);
         }
 
         int loadedSize = in.readInt();
@@ -317,14 +288,11 @@ public class MapReplicationStateHolder implements IdentifiedDataSerializable, Ve
             loaded.put(in.readUTF(), in.readBoolean());
         }
 
-        // RU_COMPAT_3_9
-        if (mustReadMapIndexInfos(in.getVersion())) {
-            int mapIndexInfosSize = in.readInt();
-            mapIndexInfos = new ArrayList<MapIndexInfo>(mapIndexInfosSize);
-            for (int i = 0; i < mapIndexInfosSize; i++) {
-                MapIndexInfo mapIndexInfo = in.readObject();
-                mapIndexInfos.add(mapIndexInfo);
-            }
+        int mapIndexInfoSize = in.readInt();
+        mapIndexInfos = new ArrayList<>(mapIndexInfoSize);
+        for (int i = 0; i < mapIndexInfoSize; i++) {
+            MapIndexInfo mapIndexInfo = in.readObject();
+            mapIndexInfos.add(mapIndexInfo);
         }
     }
 
@@ -334,41 +302,12 @@ public class MapReplicationStateHolder implements IdentifiedDataSerializable, Ve
     }
 
     @Override
-    public int getId() {
+    public int getClassId() {
         return MapDataSerializerHook.MAP_REPLICATION_STATE_HOLDER;
     }
 
-    @Override
-    public void setTarget(Address address) {
-        this.target = address;
-    }
-
-    private boolean mustWriteIndexInfos(Version clusterVersion) {
-        // 3.10 OS always writes mapIndexInfos
-        // 3.10 EE on cluster version 3.10 must write index info
-        if (!getBuildInfo().isEnterprise() || clusterVersion.isGreaterOrEqual(V3_10)) {
-            return true;
-        }
-
-        ClusterService clusterService = operation.getNodeEngine().getClusterService();
-        Member targetMember = clusterService.getMember(target);
-        // When cluster version is 3.9, only write mapIndexInfo if target member is 3.9 EE. Reasoning:
-        // 3.9 EE expects to read mapIndexInfos when object data input comes with 3.9+ version. This is
-        // the case when the object stream originates from a versioned 3.10 member.
-        return targetMember.getVersion().asVersion().isEqualTo(V3_9) && clusterVersion.isEqualTo(V3_9);
-    }
-
-    private boolean mustReadMapIndexInfos(Version version) {
-        // 3.10 OS always reads mapIndexInfos
-        // 3.10 EE always read mapIndexInfos when cluster version >= 3.10
-        // When cluster version is 3.9:
-        //  - an object input from 3.9 EE does not contain mapIndexInfo and arrives with UNKNOWN version
-        //  - an object input from 3.10 EE comes with version 3.9 and contains mapIndexInfo
-        return !getBuildInfo().isEnterprise() || version.isGreaterOrEqual(V3_10);
-    }
-
     private static boolean indexesMustBePopulated(Indexes indexes, MapReplicationOperation operation) {
-        if (!indexes.hasIndex()) {
+        if (!indexes.haveAtLeastOneIndex()) {
             // no indexes to populate
             return false;
         }

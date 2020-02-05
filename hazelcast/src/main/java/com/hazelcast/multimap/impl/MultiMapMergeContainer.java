@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2008-2018, Hazelcast, Inc. All Rights Reserved.
+ * Copyright (c) 2008-2020, Hazelcast, Inc. All Rights Reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -16,9 +16,11 @@
 
 package com.hazelcast.multimap.impl;
 
+import com.hazelcast.internal.nio.IOUtil;
+import com.hazelcast.multimap.MultiMap;
 import com.hazelcast.nio.ObjectDataInput;
 import com.hazelcast.nio.ObjectDataOutput;
-import com.hazelcast.nio.serialization.Data;
+import com.hazelcast.internal.serialization.Data;
 import com.hazelcast.nio.serialization.IdentifiedDataSerializable;
 
 import java.io.IOException;
@@ -26,7 +28,7 @@ import java.util.ArrayList;
 import java.util.Collection;
 
 /**
- * Container for the merge operation of a {@link com.hazelcast.core.MultiMap}.
+ * Container for the merge operation of a {@link MultiMap}.
  *
  * @since 3.10
  */
@@ -82,13 +84,13 @@ public class MultiMapMergeContainer implements IdentifiedDataSerializable {
     }
 
     @Override
-    public int getId() {
+    public int getClassId() {
         return MultiMapDataSerializerHook.MERGE_CONTAINER;
     }
 
     @Override
     public void writeData(ObjectDataOutput out) throws IOException {
-        out.writeData(key);
+        IOUtil.writeData(out, key);
         out.writeInt(records.size());
         for (MultiMapRecord record : records) {
             out.writeObject(record);
@@ -101,7 +103,7 @@ public class MultiMapMergeContainer implements IdentifiedDataSerializable {
 
     @Override
     public void readData(ObjectDataInput in) throws IOException {
-        key = in.readData();
+        key = IOUtil.readData(in);
         int size = in.readInt();
         records = new ArrayList<MultiMapRecord>(size);
         for (int i = 0; i < size; i++) {

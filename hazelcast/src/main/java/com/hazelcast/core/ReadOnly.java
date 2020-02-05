@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2008-2018, Hazelcast, Inc. All Rights Reserved.
+ * Copyright (c) 2008-2020, Hazelcast, Inc. All Rights Reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -17,6 +17,7 @@
 package com.hazelcast.core;
 
 import com.hazelcast.map.EntryProcessor;
+import com.hazelcast.map.IMap;
 
 /**
  * Allows notifying Hazelcast that the processing unit implementing this interface will not do any modifications.
@@ -28,7 +29,6 @@ import com.hazelcast.map.EntryProcessor;
  * <ul>
  * <li>{@link EntryProcessor} passed to {@link IMap#executeOnKey(Object, EntryProcessor)}</li>
  * <li>{@link EntryProcessor} passed to {@link IMap#submitToKey(Object, EntryProcessor)} </li>
- * <li>{@link EntryProcessor} passed to {@link IMap#submitToKey(Object, EntryProcessor, ExecutionCallback)} </li>
  * </ul>
  *
  * @see Offloadable

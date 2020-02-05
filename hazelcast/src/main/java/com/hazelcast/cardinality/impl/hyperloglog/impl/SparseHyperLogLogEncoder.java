@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2008-2018, Hazelcast, Inc. All Rights Reserved.
+ * Copyright (c) 2008-2020, Hazelcast, Inc. All Rights Reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -17,15 +17,12 @@
 package com.hazelcast.cardinality.impl.hyperloglog.impl;
 
 import com.hazelcast.cardinality.impl.CardinalityEstimatorDataSerializerHook;
-import com.hazelcast.nio.Bits;
+import com.hazelcast.internal.nio.Bits;
 import com.hazelcast.nio.ObjectDataInput;
 import com.hazelcast.nio.ObjectDataOutput;
-import com.hazelcast.nio.serialization.impl.Versioned;
 
 import java.io.IOException;
 import java.util.Arrays;
-
-import static com.hazelcast.internal.cluster.Versions.V3_10;
 
 /**
  * 1. http://static.googleusercontent.com/media/research.google.com/en//pubs/archive/40671.pdf
@@ -34,7 +31,7 @@ import static com.hazelcast.internal.cluster.Versions.V3_10;
  */
 @SuppressWarnings("checkstyle:magicnumber")
 public class SparseHyperLogLogEncoder
-        implements HyperLogLogEncoder, Versioned {
+        implements HyperLogLogEncoder {
 
     private static final int P_PRIME = 25;
     private static final int P_PRIME_MASK = 0x1ffffff;
@@ -100,7 +97,7 @@ public class SparseHyperLogLogEncoder
     }
 
     @Override
-    public int getId() {
+    public int getClassId() {
         return CardinalityEstimatorDataSerializerHook.HLL_SPARSE_ENC;
     }
 
@@ -108,10 +105,6 @@ public class SparseHyperLogLogEncoder
     public void writeData(ObjectDataOutput out) throws IOException {
         mergeAndResetTmp();
         out.writeInt(p);
-        // RU_COMPAT_3_9
-        if (out.getVersion().isLessThan(V3_10)) {
-            out.writeInt(P_PRIME);
-        }
         out.writeInt(register.total);
         out.writeInt(register.mark);
         out.writeInt(register.prev);
@@ -121,10 +114,6 @@ public class SparseHyperLogLogEncoder
     @Override
     public void readData(ObjectDataInput in) throws IOException {
         int p = in.readInt();
-        // RU_COMPAT_3_9
-        if (in.getVersion().isUnknownOrLessThan(V3_10)) {
-            in.readInt();
-        }
         int total = in.readInt();
         int mark = in.readInt();
         int prev = in.readInt();

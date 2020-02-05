@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2008-2018, Hazelcast, Inc. All Rights Reserved.
+ * Copyright (c) 2008-2020, Hazelcast, Inc. All Rights Reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -21,11 +21,12 @@ import com.hazelcast.cache.impl.operation.CacheListenerRegistrationOperation;
 import com.hazelcast.client.impl.protocol.ClientMessage;
 import com.hazelcast.client.impl.protocol.codec.CacheListenerRegistrationCodec;
 import com.hazelcast.client.impl.protocol.task.AbstractInvocationMessageTask;
-import com.hazelcast.instance.Node;
-import com.hazelcast.nio.Connection;
-import com.hazelcast.spi.InvocationBuilder;
-import com.hazelcast.spi.Operation;
-import com.hazelcast.spi.impl.operationservice.InternalOperationService;
+import com.hazelcast.cluster.Member;
+import com.hazelcast.instance.impl.Node;
+import com.hazelcast.internal.nio.Connection;
+import com.hazelcast.spi.impl.operationservice.InvocationBuilder;
+import com.hazelcast.spi.impl.operationservice.Operation;
+import com.hazelcast.spi.impl.operationservice.impl.OperationServiceImpl;
 
 import javax.cache.configuration.CacheEntryListenerConfiguration;
 import java.security.Permission;
@@ -44,7 +45,7 @@ public class CacheListenerRegistrationMessageTask
 
     @Override
     protected Operation prepareOperation() {
-        CacheEntryListenerConfiguration conf = (CacheEntryListenerConfiguration) nodeEngine.toObject(parameters.listenerConfig);
+        CacheEntryListenerConfiguration conf = nodeEngine.toObject(parameters.listenerConfig);
         return new CacheListenerRegistrationOperation(parameters.name, conf, parameters.shouldRegister);
     }
 
@@ -60,8 +61,9 @@ public class CacheListenerRegistrationMessageTask
 
     @Override
     protected InvocationBuilder getInvocationBuilder(Operation op) {
-        final InternalOperationService operationService = nodeEngine.getOperationService();
-        return operationService.createInvocationBuilder(getServiceName(), op, parameters.address);
+        final OperationServiceImpl operationService = nodeEngine.getOperationService();
+        Member member = nodeEngine.getClusterService().getMember(parameters.uuid);
+        return operationService.createInvocationBuilder(getServiceName(), op, member.getAddress());
     }
 
     @Override

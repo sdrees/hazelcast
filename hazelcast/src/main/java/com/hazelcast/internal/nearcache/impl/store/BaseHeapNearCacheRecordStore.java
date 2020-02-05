@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2008-2018, Hazelcast, Inc. All Rights Reserved.
+ * Copyright (c) 2008-2020, Hazelcast, Inc. All Rights Reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -17,21 +17,22 @@
 package com.hazelcast.internal.nearcache.impl.store;
 
 import com.hazelcast.config.EvictionConfig;
-import com.hazelcast.config.EvictionConfig.MaxSizePolicy;
+import com.hazelcast.config.MaxSizePolicy;
 import com.hazelcast.config.NearCacheConfig;
 import com.hazelcast.config.NearCachePreloaderConfig;
-import com.hazelcast.core.IBiFunction;
 import com.hazelcast.internal.adapter.DataStructureAdapter;
 import com.hazelcast.internal.eviction.EvictionChecker;
 import com.hazelcast.internal.nearcache.NearCacheRecord;
 import com.hazelcast.internal.nearcache.impl.maxsize.EntryCountNearCacheEvictionChecker;
 import com.hazelcast.internal.nearcache.impl.preloader.NearCachePreloader;
-import com.hazelcast.nio.serialization.Data;
-import com.hazelcast.spi.serialization.SerializationService;
+import com.hazelcast.internal.serialization.Data;
+import com.hazelcast.internal.serialization.SerializationService;
 
+import javax.annotation.Nullable;
 import java.util.Map;
+import java.util.function.BiFunction;
+import java.util.function.Function;
 
-import static com.hazelcast.internal.nearcache.NearCacheRecord.READ_PERMITTED;
 import static java.lang.String.format;
 
 /**
@@ -47,29 +48,32 @@ public abstract class BaseHeapNearCacheRecordStore<K, V, R extends NearCacheReco
     private static final int DEFAULT_INITIAL_CAPACITY = 1000;
 
     private final NearCachePreloader<K> nearCachePreloader;
+    private final BiFunction<? super K, ? super R, ? extends R> invalidatorFunction = createInvalidatorFunction();
 
     BaseHeapNearCacheRecordStore(String name, NearCacheConfig nearCacheConfig, SerializationService serializationService,
                                  ClassLoader classLoader) {
         super(nearCacheConfig, serializationService, classLoader);
 
         NearCachePreloaderConfig preloaderConfig = nearCacheConfig.getPreloaderConfig();
-        this.nearCachePreloader = preloaderConfig.isEnabled() ? new NearCachePreloader<K>(name, preloaderConfig, nearCacheStats,
-                serializationService) : null;
+        this.nearCachePreloader = preloaderConfig.isEnabled()
+                ? new NearCachePreloader<>(name, preloaderConfig, nearCacheStats, serializationService) : null;
     }
 
     @Override
-    protected EvictionChecker createNearCacheEvictionChecker(EvictionConfig evictionConfig, NearCacheConfig nearCacheConfig) {
-        MaxSizePolicy maxSizePolicy = evictionConfig.getMaximumSizePolicy();
-        if (maxSizePolicy != MaxSizePolicy.ENTRY_COUNT) {
-            throw new IllegalArgumentException(format("Invalid max-size policy (%s) for %s! Only %s is supported.",
-                    maxSizePolicy, getClass().getName(), MaxSizePolicy.ENTRY_COUNT));
+    protected EvictionChecker createNearCacheEvictionChecker(EvictionConfig evictionConfig,
+                                                             NearCacheConfig nearCacheConfig) {
+        MaxSizePolicy maxSizePolicy = evictionConfig.getMaxSizePolicy();
+        if (maxSizePolicy == MaxSizePolicy.ENTRY_COUNT) {
+            return new EntryCountNearCacheEvictionChecker(evictionConfig.getSize(), records);
         }
-        return new EntryCountNearCacheEvictionChecker(evictionConfig.getSize(), records);
+
+        throw new IllegalArgumentException(format("Invalid max-size policy (%s) for %s! Only %s is supported.",
+                maxSizePolicy, getClass().getName(), MaxSizePolicy.ENTRY_COUNT));
     }
 
     @Override
     protected HeapNearCacheRecordMap<K, R> createNearCacheRecordMap(NearCacheConfig nearCacheConfig) {
-        return new HeapNearCacheRecordMap<K, R>(serializationService, DEFAULT_INITIAL_CAPACITY);
+        return new HeapNearCacheRecordMap<>(serializationService, DEFAULT_INITIAL_CAPACITY);
     }
 
     @Override
@@ -85,15 +89,6 @@ public abstract class BaseHeapNearCacheRecordStore<K, V, R extends NearCacheReco
             nearCacheStats.decrementOwnedEntryMemoryCost(getTotalStorageMemoryCost(key, oldRecord));
         }
         return oldRecord;
-    }
-
-    @Override
-    protected R removeRecord(K key) {
-        R removedRecord = records.remove(key);
-        if (removedRecord != null && removedRecord.getRecordState() == READ_PERMITTED) {
-            nearCacheStats.decrementOwnedEntryMemoryCost(getTotalStorageMemoryCost(key, removedRecord));
-        }
-        return removedRecord;
     }
 
     @Override
@@ -113,7 +108,7 @@ public abstract class BaseHeapNearCacheRecordStore<K, V, R extends NearCacheReco
             K key = entry.getKey();
             R value = entry.getValue();
             if (isRecordExpired(value)) {
-                remove(key);
+                invalidate(key);
                 onExpire(key, value);
             }
         }
@@ -141,26 +136,76 @@ public abstract class BaseHeapNearCacheRecordStore<K, V, R extends NearCacheReco
         }
     }
 
+    @Nullable
     @Override
-    protected R getOrCreateToReserve(K key, Data keyData) {
-        return records.applyIfAbsent(key, new ReserveForUpdateFunction(keyData));
-    }
-
-    @Override
-    @SuppressWarnings("unchecked")
-    protected V updateAndGetReserved(K key, final V value, final long reservationId, boolean deserialize) {
-        R existingRecord = records.applyIfPresent(key, new IBiFunction<K, R, R>() {
-            @Override
-            public R apply(K key, R reservedRecord) {
-                return updateReservedRecordInternal(key, value, reservedRecord, reservationId);
-            }
-        });
+    public V tryPublishReserved(K key, V value, long reservationId, boolean deserialize) {
+        R existingRecord = records.applyIfPresent(key,
+                (key1, reservedRecord) -> publishReservedRecord(key1, value, reservedRecord, reservationId));
 
         if (existingRecord == null || !deserialize) {
             return null;
         }
-
         Object cachedValue = existingRecord.getValue();
         return cachedValue instanceof Data ? toValue(cachedValue) : (V) cachedValue;
     }
+
+    @Override
+    protected R reserveForReadUpdate(K key, Data keyData, long reservationId) {
+        return records.applyIfAbsent(key, new ReadUpdateReservation(keyData, reservationId));
+    }
+
+    @SuppressWarnings("WeakerAccess")
+    private class ReadUpdateReservation implements Function<K, R> {
+        private final Data keyData;
+        private final long reservationId;
+
+        ReadUpdateReservation(Data keyData, long reservationId) {
+            this.keyData = keyData;
+            this.reservationId = reservationId;
+        }
+
+        @Override
+        public R apply(K key) {
+            return newReservationRecord(key, keyData, reservationId);
+        }
+    }
+
+    @Override
+    protected R reserveForWriteUpdate(K key, Data keyData, long reservationId) {
+        return records.apply(key, new WriteUpdateReservation(keyData, reservationId));
+    }
+
+    private class WriteUpdateReservation implements BiFunction<K, R, R> {
+        private final Data keyData;
+        private final long reservationId;
+
+        WriteUpdateReservation(Data keyData, long reservationId) {
+            this.keyData = keyData;
+            this.reservationId = reservationId;
+        }
+
+        @Override
+        public R apply(K key, R existingRecord) {
+            return reserveForWriteUpdate(key, keyData, existingRecord, reservationId);
+        }
+    }
+
+    @Override
+    public void invalidate(K key) {
+        records.applyIfPresent(key, invalidatorFunction);
+
+        nearCacheStats.incrementInvalidationRequests();
+    }
+
+    private BiFunction<K, R, R> createInvalidatorFunction() {
+        return (key, record) -> {
+            if (canUpdateStats(record)) {
+                nearCacheStats.decrementOwnedEntryCount();
+                nearCacheStats.decrementOwnedEntryMemoryCost(getTotalStorageMemoryCost(key, record));
+                nearCacheStats.incrementInvalidations();
+            }
+            return null;
+        };
+    }
+
 }

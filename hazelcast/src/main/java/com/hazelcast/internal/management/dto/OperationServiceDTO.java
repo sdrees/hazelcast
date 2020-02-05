@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2008-2018, Hazelcast, Inc. All Rights Reserved.
+ * Copyright (c) 2008-2020, Hazelcast, Inc. All Rights Reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -16,15 +16,15 @@
 
 package com.hazelcast.internal.management.dto;
 
-import com.hazelcast.internal.management.JsonSerializable;
 import com.hazelcast.internal.json.JsonObject;
-import com.hazelcast.spi.impl.operationservice.InternalOperationService;
+import com.hazelcast.json.internal.JsonSerializable;
+import com.hazelcast.spi.impl.operationservice.impl.OperationServiceImpl;
 
-import static com.hazelcast.util.JsonUtil.getInt;
-import static com.hazelcast.util.JsonUtil.getLong;
+import static com.hazelcast.internal.util.JsonUtil.getInt;
+import static com.hazelcast.internal.util.JsonUtil.getLong;
 
 /**
- * A Serializable DTO for {@link com.hazelcast.internal.jmx.OperationServiceMBean}.
+ * A Serializable DTO for {@link OperationServiceImpl}.
  */
 public class OperationServiceDTO implements JsonSerializable {
 
@@ -38,7 +38,7 @@ public class OperationServiceDTO implements JsonSerializable {
     public OperationServiceDTO() {
     }
 
-    public OperationServiceDTO(InternalOperationService os) {
+    public OperationServiceDTO(OperationServiceImpl os) {
         responseQueueSize = os.getResponseQueueSize();
         operationExecutorQueueSize = os.getOperationExecutorQueueSize();
         runningOperationsCount = os.getRunningOperationsCount();

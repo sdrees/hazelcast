@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2008-2018, Hazelcast, Inc. All Rights Reserved.
+ * Copyright (c) 2008-2020, Hazelcast, Inc. All Rights Reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -19,8 +19,11 @@ package com.hazelcast.multimap;
 import com.hazelcast.config.Config;
 import com.hazelcast.config.MergePolicyConfig;
 import com.hazelcast.config.MultiMapConfig;
+import com.hazelcast.core.EntryAdapter;
+import com.hazelcast.core.EntryEvent;
+import com.hazelcast.core.EntryListener;
 import com.hazelcast.core.HazelcastInstance;
-import com.hazelcast.core.MultiMap;
+import com.hazelcast.map.MapEvent;
 import com.hazelcast.spi.merge.DiscardMergePolicy;
 import com.hazelcast.spi.merge.HigherHitsMergePolicy;
 import com.hazelcast.spi.merge.LatestAccessMergePolicy;
@@ -30,7 +33,7 @@ import com.hazelcast.spi.merge.PutIfAbsentMergePolicy;
 import com.hazelcast.spi.merge.SplitBrainMergePolicy;
 import com.hazelcast.test.HazelcastParallelParametersRunnerFactory;
 import com.hazelcast.test.SplitBrainTestSupport;
-import com.hazelcast.test.annotation.ParallelTest;
+import com.hazelcast.test.annotation.ParallelJVMTest;
 import com.hazelcast.test.annotation.QuickTest;
 import org.junit.experimental.categories.Category;
 import org.junit.runner.RunWith;
@@ -63,20 +66,26 @@ import static org.junit.Assert.fail;
  */
 @RunWith(Parameterized.class)
 @UseParametersRunnerFactory(HazelcastParallelParametersRunnerFactory.class)
-@Category({QuickTest.class, ParallelTest.class})
+@Category({QuickTest.class, ParallelJVMTest.class})
 public class MultiMapSplitBrainTest extends SplitBrainTestSupport {
 
     @Parameters(name = "mergePolicy:{0}, isBinary:{1}")
     public static Collection<Object[]> parameters() {
         return asList(new Object[][]{
                 {DiscardMergePolicy.class, true},
+                {DiscardMergePolicy.class, false},
                 {HigherHitsMergePolicy.class, true},
+                {HigherHitsMergePolicy.class, false},
                 {LatestAccessMergePolicy.class, true},
+                {LatestAccessMergePolicy.class, false},
                 {LatestUpdateMergePolicy.class, true},
+                {LatestUpdateMergePolicy.class, false},
                 {PassThroughMergePolicy.class, true},
+                {PassThroughMergePolicy.class, false},
                 {PutIfAbsentMergePolicy.class, true},
+                {PutIfAbsentMergePolicy.class, false},
                 {RemoveValuesMergePolicy.class, true},
-
+                {RemoveValuesMergePolicy.class, false},
                 {ReturnPiCollectionMergePolicy.class, true},
                 {ReturnPiCollectionMergePolicy.class, false},
                 {MergeCollectionOfIntegerValuesMergePolicy.class, true},
@@ -119,6 +128,7 @@ public class MultiMapSplitBrainTest extends SplitBrainTestSupport {
                 .setStatisticsEnabled(true)
                 .setBackupCount(1)
                 .setAsyncBackupCount(0);
+
         return config;
     }
 
@@ -132,6 +142,11 @@ public class MultiMapSplitBrainTest extends SplitBrainTestSupport {
         multiMapA1 = firstBrain[0].getMultiMap(multiMapNameA);
         multiMapA2 = secondBrain[0].getMultiMap(multiMapNameA);
         multiMapB2 = secondBrain[0].getMultiMap(multiMapNameB);
+
+        EntryListener<Object, Object> listener = new EmptyEntryListener<Object, Object>();
+        multiMapA1.addEntryListener(listener, true);
+        multiMapA2.addEntryListener(listener, true);
+        multiMapB2.addEntryListener(listener, true);
 
         if (mergePolicyClass == DiscardMergePolicy.class) {
             afterSplitDiscardMergePolicy();
@@ -457,5 +472,17 @@ public class MultiMapSplitBrainTest extends SplitBrainTestSupport {
             actualBackupSize += values.size();
         }
         assertEqualsStringFormat("backupMultiMap should have size %d, but was %d", expectedSize, actualBackupSize);
+    }
+
+    private static class EmptyEntryListener<K, V> extends EntryAdapter<K, V> {
+        @Override
+        public void onEntryEvent(EntryEvent<K, V> event) {
+
+        }
+
+        @Override
+        public void onMapEvent(MapEvent event) {
+
+        }
     }
 }

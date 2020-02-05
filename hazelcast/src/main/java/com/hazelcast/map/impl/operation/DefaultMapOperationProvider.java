@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2008-2018, Hazelcast, Inc. All Rights Reserved.
+ * Copyright (c) 2008-2020, Hazelcast, Inc. All Rights Reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -16,25 +16,27 @@
 
 package com.hazelcast.map.impl.operation;
 
-import com.hazelcast.core.EntryView;
 import com.hazelcast.map.EntryProcessor;
 import com.hazelcast.map.impl.MapEntries;
+import com.hazelcast.internal.iteration.IterationPointer;
 import com.hazelcast.map.impl.query.Query;
 import com.hazelcast.map.impl.query.QueryOperation;
 import com.hazelcast.map.impl.query.QueryPartitionOperation;
 import com.hazelcast.map.impl.tx.TxnDeleteOperation;
 import com.hazelcast.map.impl.tx.TxnLockAndGetOperation;
 import com.hazelcast.map.impl.tx.TxnSetOperation;
-import com.hazelcast.map.merge.MapMergePolicy;
-import com.hazelcast.nio.serialization.Data;
+import com.hazelcast.internal.serialization.Data;
 import com.hazelcast.query.Predicate;
-import com.hazelcast.spi.OperationFactory;
+import com.hazelcast.spi.impl.operationservice.Operation;
+import com.hazelcast.spi.impl.operationservice.OperationFactory;
 import com.hazelcast.spi.merge.SplitBrainMergePolicy;
 import com.hazelcast.spi.merge.SplitBrainMergeTypes.MapMergeTypes;
 
 import java.util.List;
 import java.util.Set;
+import java.util.UUID;
 
+import static com.hazelcast.map.impl.record.Record.UNSET;
 import static java.util.Collections.singletonList;
 
 /**
@@ -51,38 +53,58 @@ public class DefaultMapOperationProvider implements MapOperationProvider {
     }
 
     @Override
-    public MapOperation createPutOperation(String name, Data key, Data value, long ttl, long maxIdle) {
-        return new PutOperation(name, key, value, ttl, maxIdle);
-    }
-
-    @Override
     public MapOperation createTryPutOperation(String name, Data dataKey, Data value, long timeout) {
         return new TryPutOperation(name, dataKey, value, timeout);
     }
 
     @Override
+    public MapOperation createPutOperation(String name, Data key, Data value, long ttl, long maxIdle) {
+        if (hasNoExpiry(ttl, maxIdle)) {
+            return new PutOperation(name, key, value);
+        } else {
+            return new PutWithExpiryOperation(name, key, value, ttl, maxIdle);
+        }
+    }
+
+    private static boolean hasNoExpiry(long ttl, long maxIdle) {
+        return ttl == UNSET && maxIdle == UNSET;
+    }
+
+    @Override
     public MapOperation createSetOperation(String name, Data dataKey, Data value, long ttl, long maxIdle) {
-        return new SetOperation(name, dataKey, value, ttl, maxIdle);
+        if (hasNoExpiry(ttl, maxIdle)) {
+            return new SetOperation(name, dataKey, value);
+        } else {
+            return new SetWithExpiryOperation(name, dataKey, value, ttl, maxIdle);
+        }
     }
 
     @Override
     public MapOperation createPutIfAbsentOperation(String name, Data key, Data value, long ttl, long maxIdle) {
-        return new PutIfAbsentOperation(name, key, value, ttl, maxIdle);
+        if (hasNoExpiry(ttl, maxIdle)) {
+            return new PutIfAbsentOperation(name, key, value);
+        } else {
+            return new PutIfAbsentWithExpiryOperation(name, key, value, ttl, maxIdle);
+        }
     }
 
     @Override
-    public MapOperation createPutTransientOperation(String name, Data key, Data value, long ttl, long maxIdle) {
-        return new PutTransientOperation(name, key, value, ttl, maxIdle);
+    public MapOperation createPutTransientOperation(String name, Data keyData, Data valueData, long ttl, long maxIdle) {
+        if (hasNoExpiry(ttl, maxIdle)) {
+            return new PutTransientOperation(name, keyData, valueData);
+        } else {
+            return new PutTransientWithExpiryOperation(name, keyData, valueData, ttl, maxIdle);
+        }
     }
 
     @Override
-    public MapOperation createRemoveOperation(String name, Data key, boolean disableWanReplicationEvent) {
-        return new RemoveOperation(name, key, disableWanReplicationEvent);
+    public MapOperation createRemoveOperation(String name, Data key) {
+        return new RemoveOperation(name, key);
     }
 
     @Override
-    public MapOperation createSetTTLOperation(String name, Data key, long ttl) {
-        return new SetTTLOperation(name, key, ttl);
+    public MapOperation createSetTtlOperation(String name, Data key, long ttl) {
+        return new SetTtlOperation(name, key, ttl);
     }
 
     @Override
@@ -182,7 +204,7 @@ public class DefaultMapOperationProvider implements MapOperationProvider {
     }
 
     @Override
-    public MapOperation createTxnLockAndGetOperation(String name, Data dataKey, long timeout, long ttl, String
+    public MapOperation createTxnLockAndGetOperation(String name, Data dataKey, long timeout, long ttl, UUID
             ownerUuid, boolean shouldLoad, boolean blockReads) {
         return new TxnLockAndGetOperation(name, dataKey, timeout, ttl, ownerUuid, shouldLoad, blockReads);
     }
@@ -193,14 +215,8 @@ public class DefaultMapOperationProvider implements MapOperationProvider {
     }
 
     @Override
-    public MapOperation createLegacyMergeOperation(String name, EntryView<Data, Data> mergingEntry,
-                                                   MapMergePolicy policy, boolean disableWanReplicationEvent) {
-        return new LegacyMergeOperation(name, mergingEntry, policy, disableWanReplicationEvent);
-    }
-
-    @Override
-    public MapOperation createMergeOperation(String name, MapMergeTypes mergingValue,
-                                             SplitBrainMergePolicy<Data, MapMergeTypes> mergePolicy,
+    public MapOperation createMergeOperation(String name, MapMergeTypes<Object, Object> mergingValue,
+                                             SplitBrainMergePolicy<Object, MapMergeTypes<Object, Object>, Object> mergePolicy,
                                              boolean disableWanReplicationEvent) {
         return new MergeOperation(name, singletonList(mergingValue), mergePolicy, disableWanReplicationEvent);
     }
@@ -234,7 +250,7 @@ public class DefaultMapOperationProvider implements MapOperationProvider {
     }
 
     @Override
-    public MapOperation createQueryOperation(Query query) {
+    public Operation createQueryOperation(Query query) {
         return new QueryOperation(query);
     }
 
@@ -259,28 +275,31 @@ public class DefaultMapOperationProvider implements MapOperationProvider {
     }
 
     @Override
-    public OperationFactory createMergeOperationFactory(String name, int[] partitions, List<MapMergeTypes>[] mergingEntries,
-                                                        SplitBrainMergePolicy<Data, MapMergeTypes> mergePolicy) {
+    public OperationFactory createMergeOperationFactory(String name, int[] partitions,
+                                                        List<MapMergeTypes<Object, Object>>[] mergingEntries,
+                                                        SplitBrainMergePolicy<Object, MapMergeTypes<Object, Object>,
+                                                                Object> mergePolicy) {
         return new MergeOperationFactory(name, partitions, mergingEntries, mergePolicy);
     }
 
     @Override
-    public MapOperation createPutFromLoadAllOperation(String name, List<Data> keyValueSequence) {
-        return new PutFromLoadAllOperation(name, keyValueSequence);
+    public MapOperation createPutFromLoadAllOperation(String name, List<Data> keyValueSequence, boolean includesExpirationTime) {
+        return new PutFromLoadAllOperation(name, keyValueSequence, includesExpirationTime);
     }
 
     @Override
-    public MapOperation createFetchKeysOperation(String name, int lastTableIndex, int fetchSize) {
-        return new MapFetchKeysOperation(name, lastTableIndex, fetchSize);
+    public MapOperation createFetchKeysOperation(String name, IterationPointer[] pointers, int fetchSize) {
+        return new MapFetchKeysOperation(name, pointers, fetchSize);
     }
 
     @Override
-    public MapOperation createFetchEntriesOperation(String name, int lastTableIndex, int fetchSize) {
-        return new MapFetchEntriesOperation(name, lastTableIndex, fetchSize);
+    public MapOperation createFetchEntriesOperation(String name, IterationPointer[] pointers, int fetchSize) {
+        return new MapFetchEntriesOperation(name, pointers, fetchSize);
     }
 
     @Override
-    public MapOperation createFetchWithQueryOperation(String name, int lastTableIndex, int fetchSize, Query query) {
-        return new MapFetchWithQueryOperation(name, lastTableIndex, fetchSize, query);
+    public MapOperation createFetchWithQueryOperation(String name, IterationPointer[] pointers, int fetchSize,
+                                                      Query query) {
+        return new MapFetchWithQueryOperation(name, pointers, fetchSize, query);
     }
 }

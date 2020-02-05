@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2008-2018, Hazelcast, Inc. All Rights Reserved.
+ * Copyright (c) 2008-2020, Hazelcast, Inc. All Rights Reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -16,11 +16,10 @@
 
 package com.hazelcast.multimap.impl;
 
-import com.hazelcast.concurrent.lock.LockProxySupport;
-import com.hazelcast.concurrent.lock.LockServiceImpl;
+import com.hazelcast.internal.locksupport.LockProxySupport;
+import com.hazelcast.internal.locksupport.LockSupportServiceImpl;
 import com.hazelcast.config.MultiMapConfig;
 import com.hazelcast.core.EntryEventType;
-import com.hazelcast.internal.cluster.Versions;
 import com.hazelcast.multimap.impl.operations.CountOperation;
 import com.hazelcast.multimap.impl.operations.DeleteOperation;
 import com.hazelcast.multimap.impl.operations.GetAllOperation;
@@ -30,13 +29,13 @@ import com.hazelcast.multimap.impl.operations.MultiMapResponse;
 import com.hazelcast.multimap.impl.operations.PutOperation;
 import com.hazelcast.multimap.impl.operations.RemoveAllOperation;
 import com.hazelcast.multimap.impl.operations.RemoveOperation;
-import com.hazelcast.nio.serialization.Data;
-import com.hazelcast.spi.AbstractDistributedObject;
-import com.hazelcast.spi.DistributedObjectNamespace;
-import com.hazelcast.spi.NodeEngine;
-import com.hazelcast.spi.Operation;
-import com.hazelcast.util.ExceptionUtil;
-import com.hazelcast.util.ThreadUtil;
+import com.hazelcast.internal.serialization.Data;
+import com.hazelcast.spi.impl.AbstractDistributedObject;
+import com.hazelcast.internal.services.DistributedObjectNamespace;
+import com.hazelcast.spi.impl.NodeEngine;
+import com.hazelcast.spi.impl.operationservice.Operation;
+import com.hazelcast.internal.util.ExceptionUtil;
+import com.hazelcast.internal.util.ThreadUtil;
 
 import java.util.HashSet;
 import java.util.Map;
@@ -55,7 +54,7 @@ public abstract class MultiMapProxySupport extends AbstractDistributedObject<Mul
         this.name = name;
 
         lockSupport = new LockProxySupport(new DistributedObjectNamespace(MultiMapService.SERVICE_NAME, name),
-                LockServiceImpl.getMaxLeaseTimeInMillis(nodeEngine.getProperties()));
+                LockSupportServiceImpl.getMaxLeaseTimeInMillis(nodeEngine.getProperties()));
     }
 
     @Override
@@ -101,16 +100,11 @@ public abstract class MultiMapProxySupport extends AbstractDistributedObject<Mul
     }
 
     protected void deleteInternal(Data dataKey) {
-        if (getNodeEngine().getClusterService().getClusterVersion().isGreaterThan(Versions.V3_9)) {
-            try {
-                DeleteOperation operation = new DeleteOperation(name, dataKey, getThreadId());
-                invoke(operation, dataKey);
-            } catch (Throwable throwable) {
-                  throw ExceptionUtil.rethrow(throwable);
-            }
-        } else {
-            // RU_COMPAT_3_9
-            throw new UnsupportedOperationException("Delete not supported when cluster version less than 3.10");
+        try {
+            DeleteOperation operation = new DeleteOperation(name, dataKey, getThreadId());
+            invoke(operation, dataKey);
+        } catch (Throwable throwable) {
+              throw ExceptionUtil.rethrow(throwable);
         }
     }
 

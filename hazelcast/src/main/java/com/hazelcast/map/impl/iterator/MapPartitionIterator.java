@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2008-2018, Hazelcast, Inc. All Rights Reserved.
+ * Copyright (c) 2008-2020, Hazelcast, Inc. All Rights Reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -16,22 +16,26 @@
 
 package com.hazelcast.map.impl.iterator;
 
-import com.hazelcast.core.IMap;
+import com.hazelcast.internal.serialization.SerializationService;
 import com.hazelcast.map.impl.operation.MapOperation;
 import com.hazelcast.map.impl.operation.MapOperationProvider;
 import com.hazelcast.map.impl.proxy.MapProxyImpl;
-import com.hazelcast.spi.InternalCompletableFuture;
-import com.hazelcast.spi.Operation;
-import com.hazelcast.spi.serialization.SerializationService;
+import com.hazelcast.spi.impl.operationservice.Operation;
+import com.hazelcast.spi.impl.operationservice.impl.InvocationFuture;
 
 import java.util.List;
 
 /**
- * Iterator for iterating map entries in the {@code partitionId}. The values are not fetched one-by-one but rather in batches.
+ * Iterator for iterating map entries in a single partition.
+ * The values are fetched in batches.
  * <b>NOTE</b>
- * Iterating the map should be done only when the {@link IMap} is not being
- * mutated and the cluster is stable (there are no migrations or membership changes).
- * In other cases, the iterator may not return some entries or may return an entry twice.
+ * The iteration may be done when the map is being mutated or when there are
+ * membership changes. The iterator does not reflect the state when it has
+ * been constructed - it may return some entries that were added after the
+ * iteration has started and may not return some entries that were removed
+ * after iteration has started.
+ * The iterator will not, however, skip an entry if it has not been changed
+ * and will not return an entry twice.
  */
 public class MapPartitionIterator<K, V> extends AbstractMapPartitionIterator<K, V> {
 
@@ -44,21 +48,21 @@ public class MapPartitionIterator<K, V> extends AbstractMapPartitionIterator<K, 
     }
 
     protected List fetch() {
-        final String name = mapProxy.getName();
-        final MapOperationProvider operationProvider = mapProxy.getOperationProvider();
-        final MapOperation operation = prefetchValues
-                    ? operationProvider.createFetchEntriesOperation(name, lastTableIndex, fetchSize)
-                    : operationProvider.createFetchKeysOperation(name, lastTableIndex, fetchSize);
+        String name = mapProxy.getName();
+        MapOperationProvider operationProvider = mapProxy.getOperationProvider();
+        MapOperation operation = prefetchValues
+                ? operationProvider.createFetchEntriesOperation(name, pointers, fetchSize)
+                : operationProvider.createFetchKeysOperation(name, pointers, fetchSize);
 
-        final AbstractCursor cursor = invoke(operation);
-        setLastTableIndex(cursor.getBatch(), cursor.getNextTableIndexToReadFrom());
+        AbstractCursor cursor = invoke(operation);
+        setIterationPointers(cursor.getBatch(), cursor.getIterationPointers());
         return cursor.getBatch();
     }
 
     private <T extends AbstractCursor> T invoke(Operation operation) {
-        final InternalCompletableFuture<T> future =
+        final InvocationFuture<T> future =
                 mapProxy.getOperationService().invokeOnPartition(mapProxy.getServiceName(), operation, partitionId);
-        return future.join();
+        return future.joinInternal();
     }
 
     @Override

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2008-2018, Hazelcast, Inc. All Rights Reserved.
+ * Copyright (c) 2008-2020, Hazelcast, Inc. All Rights Reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -16,21 +16,18 @@
 
 package com.hazelcast.map;
 
-import com.hazelcast.core.EntryView;
-import com.hazelcast.map.merge.MapMergePolicy;
 import com.hazelcast.nio.ObjectDataInput;
 import com.hazelcast.nio.ObjectDataOutput;
+import com.hazelcast.spi.merge.MergingValue;
+import com.hazelcast.spi.merge.SplitBrainMergePolicy;
 
 import java.io.IOException;
 
-class TestCustomMapMergePolicy implements MapMergePolicy {
+class TestCustomMapMergePolicy implements SplitBrainMergePolicy<Integer, MergingValue<Integer>, Integer> {
 
     @Override
-    public Object merge(String mapName, EntryView mergingEntry, EntryView existingEntry) {
-        if (mergingEntry.getValue() instanceof Integer) {
-            return mergingEntry.getValue();
-        }
-        return null;
+    public Integer merge(MergingValue<Integer> mergingEntry, MergingValue<Integer> existingEntry) {
+        return mergingEntry.getValue();
     }
 
     @Override

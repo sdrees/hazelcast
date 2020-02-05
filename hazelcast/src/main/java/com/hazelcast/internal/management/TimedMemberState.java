@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2008-2018, Hazelcast, Inc. All Rights Reserved.
+ * Copyright (c) 2008-2020, Hazelcast, Inc. All Rights Reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -19,18 +19,19 @@ package com.hazelcast.internal.management;
 import com.hazelcast.internal.json.JsonArray;
 import com.hazelcast.internal.json.JsonObject;
 import com.hazelcast.internal.json.JsonValue;
-import com.hazelcast.monitor.MemberState;
-import com.hazelcast.monitor.impl.MemberStateImpl;
+import com.hazelcast.internal.monitor.MemberState;
+import com.hazelcast.internal.monitor.impl.MemberStateImpl;
+import com.hazelcast.json.internal.JsonSerializable;
 
 import java.util.ArrayList;
 import java.util.List;
 
-import static com.hazelcast.util.JsonUtil.getArray;
-import static com.hazelcast.util.JsonUtil.getBoolean;
-import static com.hazelcast.util.JsonUtil.getLong;
-import static com.hazelcast.util.JsonUtil.getObject;
-import static com.hazelcast.util.JsonUtil.getString;
-import static com.hazelcast.util.StringUtil.LINE_SEPARATOR;
+import static com.hazelcast.internal.util.JsonUtil.getArray;
+import static com.hazelcast.internal.util.JsonUtil.getBoolean;
+import static com.hazelcast.internal.util.JsonUtil.getLong;
+import static com.hazelcast.internal.util.JsonUtil.getObject;
+import static com.hazelcast.internal.util.JsonUtil.getString;
+import static com.hazelcast.internal.util.StringUtil.LINE_SEPARATOR;
 
 /**
  * Container for a {@link MemberState} with a timestamp.
@@ -45,6 +46,7 @@ public final class TimedMemberState implements Cloneable, JsonSerializable {
     boolean sslEnabled;
     boolean lite;
     boolean socketInterceptorEnabled;
+    boolean scriptingEnabled;
 
     public List<String> getMemberList() {
         return memberList;
@@ -110,6 +112,14 @@ public final class TimedMemberState implements Cloneable, JsonSerializable {
         this.socketInterceptorEnabled = socketInterceptorEnabled;
     }
 
+    public boolean isScriptingEnabled() {
+        return scriptingEnabled;
+    }
+
+    public void setScriptingEnabled(boolean scriptingEnabled) {
+        this.scriptingEnabled = scriptingEnabled;
+    }
+
     @Override
     public TimedMemberState clone() throws CloneNotSupportedException {
         TimedMemberState state = (TimedMemberState) super.clone();
@@ -121,6 +131,7 @@ public final class TimedMemberState implements Cloneable, JsonSerializable {
         state.setSslEnabled(sslEnabled);
         state.setLite(lite);
         state.setSocketInterceptorEnabled(socketInterceptorEnabled);
+        state.setScriptingEnabled(scriptingEnabled);
         return state;
     }
 
@@ -141,6 +152,7 @@ public final class TimedMemberState implements Cloneable, JsonSerializable {
         root.add("sslEnabled", sslEnabled);
         root.add("lite", lite);
         root.add("socketInterceptorEnabled", socketInterceptorEnabled);
+        root.add("scriptingEnabled", scriptingEnabled);
         return root;
     }
 
@@ -160,6 +172,7 @@ public final class TimedMemberState implements Cloneable, JsonSerializable {
         sslEnabled = getBoolean(json, "sslEnabled", false);
         lite = getBoolean(json, "lite");
         socketInterceptorEnabled = getBoolean(json, "socketInterceptorEnabled");
+        scriptingEnabled = getBoolean(json, "scriptingEnabled");
     }
 
     @Override

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2008-2018, Hazelcast, Inc. All Rights Reserved.
+ * Copyright (c) 2008-2020, Hazelcast, Inc. All Rights Reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -16,14 +16,14 @@
 
 package com.hazelcast.multimap.impl;
 
-import com.hazelcast.concurrent.lock.LockService;
-import com.hazelcast.concurrent.lock.LockStore;
-import com.hazelcast.nio.serialization.Data;
-import com.hazelcast.spi.DistributedObjectNamespace;
-import com.hazelcast.spi.ObjectNamespace;
+import com.hazelcast.internal.locksupport.LockStore;
+import com.hazelcast.internal.locksupport.LockSupportService;
+import com.hazelcast.internal.serialization.Data;
+import com.hazelcast.internal.serialization.SerializationService;
+import com.hazelcast.internal.services.DistributedObjectNamespace;
+import com.hazelcast.internal.services.ObjectNamespace;
 import com.hazelcast.spi.merge.SplitBrainMergePolicy;
 import com.hazelcast.spi.merge.SplitBrainMergeTypes.MultiMapMergeTypes;
-import com.hazelcast.spi.serialization.SerializationService;
 
 import java.util.Collection;
 import java.util.Collections;
@@ -31,10 +31,11 @@ import java.util.HashSet;
 import java.util.LinkedList;
 import java.util.Map;
 import java.util.Set;
+import java.util.UUID;
 
+import static com.hazelcast.internal.util.Clock.currentTimeMillis;
+import static com.hazelcast.internal.util.MapUtil.createHashMap;
 import static com.hazelcast.spi.impl.merge.MergingValueFactory.createMergingEntry;
-import static com.hazelcast.util.Clock.currentTimeMillis;
-import static com.hazelcast.util.MapUtil.createHashMap;
 
 /**
  * MultiMap container which holds a map of {@link MultiMapValue}.
@@ -60,13 +61,13 @@ public class MultiMapContainer extends MultiMapContainerSupport {
         super(name, service.getNodeEngine());
         this.partitionId = partitionId;
         this.lockNamespace = new DistributedObjectNamespace(MultiMapService.SERVICE_NAME, name);
-        LockService lockService = nodeEngine.getSharedService(LockService.SERVICE_NAME);
+        LockSupportService lockService = nodeEngine.getServiceOrNull(LockSupportService.SERVICE_NAME);
         this.lockStore = lockService == null ? null : lockService.createLockStore(partitionId, lockNamespace);
         this.creationTime = currentTimeMillis();
         this.objectNamespace = new DistributedObjectNamespace(MultiMapService.SERVICE_NAME, name);
     }
 
-    public boolean canAcquireLock(Data dataKey, String caller, long threadId) {
+    public boolean canAcquireLock(Data dataKey, UUID caller, long threadId) {
         return lockStore != null && lockStore.canAcquireLock(dataKey, caller, threadId);
     }
 
@@ -78,11 +79,11 @@ public class MultiMapContainer extends MultiMapContainerSupport {
         return lockStore != null && lockStore.shouldBlockReads(key);
     }
 
-    public boolean txnLock(Data key, String caller, long threadId, long referenceId, long ttl, boolean blockReads) {
+    public boolean txnLock(Data key, UUID caller, long threadId, long referenceId, long ttl, boolean blockReads) {
         return lockStore != null && lockStore.txnLock(key, caller, threadId, referenceId, ttl, blockReads);
     }
 
-    public boolean unlock(Data key, String caller, long threadId, long referenceId) {
+    public boolean unlock(Data key, UUID caller, long threadId, long referenceId) {
         return lockStore != null && lockStore.unlock(key, caller, threadId, referenceId);
     }
 
@@ -90,7 +91,7 @@ public class MultiMapContainer extends MultiMapContainerSupport {
         return lockStore != null && lockStore.forceUnlock(key);
     }
 
-    public boolean extendLock(Data key, String caller, long threadId, long ttl) {
+    public boolean extendLock(Data key, UUID caller, long threadId, long ttl) {
         return lockStore != null && lockStore.extendLeaseTime(key, caller, threadId, ttl);
     }
 
@@ -117,11 +118,11 @@ public class MultiMapContainer extends MultiMapContainerSupport {
 
     public Set<Data> keySet() {
         Set<Data> keySet = multiMapValues.keySet();
-        return new HashSet<Data>(keySet);
+        return new HashSet<>(keySet);
     }
 
     public Collection<MultiMapRecord> values() {
-        Collection<MultiMapRecord> valueCollection = new LinkedList<MultiMapRecord>();
+        Collection<MultiMapRecord> valueCollection = new LinkedList<>();
         for (MultiMapValue multiMapValue : multiMapValues.values()) {
             valueCollection.addAll(multiMapValue.getCollection(false));
         }
@@ -169,7 +170,7 @@ public class MultiMapContainer extends MultiMapContainerSupport {
     }
 
     public int clear() {
-        Collection<Data> locks = lockStore != null ? lockStore.getLockedKeys() : Collections.<Data>emptySet();
+        Collection<Data> locks = lockStore != null ? lockStore.getLockedKeys() : Collections.emptySet();
         Map<Data, MultiMapValue> lockedKeys = createHashMap(locks.size());
         for (Data key : locks) {
             MultiMapValue multiMapValue = multiMapValues.get(key);
@@ -184,7 +185,7 @@ public class MultiMapContainer extends MultiMapContainerSupport {
     }
 
     public void destroy() {
-        LockService lockService = nodeEngine.getSharedService(LockService.SERVICE_NAME);
+        LockSupportService lockService = nodeEngine.getServiceOrNull(LockSupportService.SERVICE_NAME);
         if (lockService != null) {
             lockService.clearLockStore(partitionId, lockNamespace);
         }
@@ -231,11 +232,12 @@ public class MultiMapContainer extends MultiMapContainerSupport {
      * @return the used {@link MultiMapValue} if merge is applied, otherwise {@code null}
      */
     public MultiMapValue merge(MultiMapMergeContainer mergeContainer,
-                               SplitBrainMergePolicy<Collection<Object>, MultiMapMergeTypes> mergePolicy) {
+                               SplitBrainMergePolicy<Collection<Object>, MultiMapMergeTypes<Object, Object>,
+                                       Collection<Object>> mergePolicy) {
         SerializationService serializationService = nodeEngine.getSerializationService();
         serializationService.getManagedContext().initialize(mergePolicy);
 
-        MultiMapMergeTypes mergingEntry = createMergingEntry(serializationService, mergeContainer);
+        MultiMapMergeTypes<Object, Object> mergingEntry = createMergingEntry(serializationService, mergeContainer);
         MultiMapValue existingValue = getMultiMapValueOrNull(mergeContainer.getKey());
         if (existingValue == null) {
             return mergeNewValue(mergePolicy, mergingEntry);
@@ -243,14 +245,16 @@ public class MultiMapContainer extends MultiMapContainerSupport {
         return mergeExistingValue(mergePolicy, mergingEntry, existingValue, serializationService);
     }
 
-    private MultiMapValue mergeNewValue(SplitBrainMergePolicy<Collection<Object>, MultiMapMergeTypes> mergePolicy,
-                                        MultiMapMergeTypes mergingEntry) {
+    private MultiMapValue mergeNewValue(
+            SplitBrainMergePolicy<Collection<Object>, MultiMapMergeTypes<Object, Object>, Collection<Object>> mergePolicy,
+            MultiMapMergeTypes<Object, Object> mergingEntry) {
         Collection<Object> newValues = mergePolicy.merge(mergingEntry, null);
         if (newValues != null && !newValues.isEmpty()) {
-            MultiMapValue mergedValue = getOrCreateMultiMapValue(mergingEntry.getKey());
+            SerializationService serializationService = nodeEngine.getSerializationService();
+            MultiMapValue mergedValue = getOrCreateMultiMapValue(serializationService.toData(mergingEntry.getRawKey()));
             Collection<MultiMapRecord> records = mergedValue.getCollection(false);
             createNewMultiMapRecords(records, newValues);
-            if (newValues.equals(mergingEntry.getValue())) {
+            if (newValues.equals(mergingEntry.getRawValue())) {
                 setMergedStatistics(mergingEntry, mergedValue);
             }
             return mergedValue;
@@ -258,13 +262,15 @@ public class MultiMapContainer extends MultiMapContainerSupport {
         return null;
     }
 
-    private MultiMapValue mergeExistingValue(SplitBrainMergePolicy<Collection<Object>, MultiMapMergeTypes> mergePolicy,
-                                             MultiMapMergeTypes mergingEntry, MultiMapValue existingValue,
-                                             SerializationService ss) {
+    private MultiMapValue mergeExistingValue(
+            SplitBrainMergePolicy<Collection<Object>, MultiMapMergeTypes<Object, Object>, Collection<Object>> mergePolicy,
+            MultiMapMergeTypes<Object, Object> mergingEntry, MultiMapValue existingValue, SerializationService ss) {
         Collection<MultiMapRecord> existingRecords = existingValue.getCollection(false);
 
-        Data dataKey = mergingEntry.getKey();
-        MultiMapMergeTypes existingEntry = createMergingEntry(ss, this, dataKey, existingRecords, existingValue.getHits());
+        SerializationService serializationService = nodeEngine.getSerializationService();
+        Data dataKey = serializationService.toData(mergingEntry.getRawKey());
+        MultiMapMergeTypes<Object, Object> existingEntry = createMergingEntry(ss, this, dataKey, existingRecords,
+                existingValue.getHits());
         Collection<Object> newValues = mergePolicy.merge(mergingEntry, existingEntry);
         if (newValues == null || newValues.isEmpty()) {
             existingRecords.clear();
@@ -272,7 +278,7 @@ public class MultiMapContainer extends MultiMapContainerSupport {
         } else if (!newValues.equals(existingRecords)) {
             existingRecords.clear();
             createNewMultiMapRecords(existingRecords, newValues);
-            if (newValues.equals(mergingEntry.getValue())) {
+            if (newValues.equals(mergingEntry.getRawValue())) {
                 setMergedStatistics(mergingEntry, existingValue);
             }
         }
@@ -291,7 +297,7 @@ public class MultiMapContainer extends MultiMapContainerSupport {
     }
 
     @SuppressWarnings("NonAtomicOperationOnVolatileField")
-    private void setMergedStatistics(MultiMapMergeTypes mergingEntry, MultiMapValue multiMapValue) {
+    private void setMergedStatistics(MultiMapMergeTypes<Object, Object> mergingEntry, MultiMapValue multiMapValue) {
         multiMapValue.setHits(mergingEntry.getHits());
         lastAccessTime = Math.max(lastAccessTime, mergingEntry.getLastAccessTime());
         lastUpdateTime = Math.max(lastUpdateTime, mergingEntry.getLastUpdateTime());

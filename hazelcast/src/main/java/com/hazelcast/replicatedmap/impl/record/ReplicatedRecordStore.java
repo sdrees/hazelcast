@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2008-2018, Hazelcast, Inc. All Rights Reserved.
+ * Copyright (c) 2008-2020, Hazelcast, Inc. All Rights Reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -16,10 +16,9 @@
 
 package com.hazelcast.replicatedmap.impl.record;
 
-import com.hazelcast.replicatedmap.merge.ReplicatedMapMergePolicy;
 import com.hazelcast.spi.merge.SplitBrainMergePolicy;
 import com.hazelcast.spi.merge.SplitBrainMergeTypes.ReplicatedMapMergeTypes;
-import com.hazelcast.util.scheduler.ScheduledEntry;
+import com.hazelcast.internal.util.scheduler.ScheduledEntry;
 
 import java.util.Collection;
 import java.util.Comparator;
@@ -106,14 +105,6 @@ public interface ReplicatedRecordStore {
      * @param mergePolicy  the {@link SplitBrainMergePolicy} instance to apply
      * @return {@code true} if merge is applied, otherwise {@code false}
      */
-    boolean merge(ReplicatedMapMergeTypes mergingEntry, SplitBrainMergePolicy<Object, ReplicatedMapMergeTypes> mergePolicy);
-
-    /**
-     * Merges the given {@link ReplicatedMapEntryView} via the given {@link ReplicatedMapMergePolicy}.
-     *
-     * @param entryView   the {@link ReplicatedMapEntryView} instance to merge
-     * @param mergePolicy the {@link ReplicatedMapMergePolicy} instance to apply
-     * @return {@code true} if merge is applied, otherwise {@code false}
-     */
-    boolean merge(Object key, ReplicatedMapEntryView entryView, ReplicatedMapMergePolicy mergePolicy);
+    boolean merge(ReplicatedMapMergeTypes<Object, Object> mergingEntry,
+                  SplitBrainMergePolicy<Object, ReplicatedMapMergeTypes<Object, Object>, Object> mergePolicy);
 }

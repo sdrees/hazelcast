@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2008-2018, Hazelcast, Inc. All Rights Reserved.
+ * Copyright (c) 2008-2020, Hazelcast, Inc. All Rights Reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -17,15 +17,15 @@
 package com.hazelcast.cache.impl.operation;
 
 import com.hazelcast.cache.impl.CacheDataSerializerHook;
-import com.hazelcast.nio.serialization.Data;
-import com.hazelcast.spi.Operation;
+import com.hazelcast.internal.serialization.Data;
+import com.hazelcast.spi.impl.operationservice.Operation;
 
 /**
  * Cache GetAndRemove Operation.
  * <p>Operation to call the record store's functionality. Backup is also triggered by this operation
  * if a record is removed.</p>
  *
- * @see com.hazelcast.cache.impl.ICacheRecordStore#getAndRemove(com.hazelcast.nio.serialization.Data, String, int)
+ * @see com.hazelcast.cache.impl.ICacheRecordStore#getAndRemove(Data, String, int)
  */
 public class CacheGetAndRemoveOperation extends MutatingCacheOperation {
 
@@ -61,7 +61,7 @@ public class CacheGetAndRemoveOperation extends MutatingCacheOperation {
     }
 
     @Override
-    public int getId() {
+    public int getClassId() {
         return CacheDataSerializerHook.GET_AND_REMOVE;
     }
 }

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2008-2018, Hazelcast, Inc. All Rights Reserved.
+ * Copyright (c) 2008-2020, Hazelcast, Inc. All Rights Reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -16,29 +16,29 @@
 
 package com.hazelcast.multimap.impl.txn;
 
-import com.hazelcast.internal.cluster.Versions;
+import com.hazelcast.internal.util.UUIDSerializationUtil;
 import com.hazelcast.multimap.impl.MultiMapContainer;
 import com.hazelcast.multimap.impl.MultiMapDataSerializerHook;
 import com.hazelcast.multimap.impl.operations.AbstractKeyBasedMultiMapOperation;
 import com.hazelcast.nio.ObjectDataInput;
 import com.hazelcast.nio.ObjectDataOutput;
-import com.hazelcast.nio.serialization.Data;
-import com.hazelcast.nio.serialization.impl.Versioned;
-import com.hazelcast.spi.BackupOperation;
+import com.hazelcast.internal.serialization.Data;
+import com.hazelcast.spi.impl.operationservice.BackupOperation;
 import com.hazelcast.transaction.TransactionException;
 
 import java.io.IOException;
+import java.util.UUID;
 
 import static com.hazelcast.multimap.impl.txn.TxnPrepareOperation.LOCK_EXTENSION_TIME_IN_MILLIS;
 
-public class TxnPrepareBackupOperation extends AbstractKeyBasedMultiMapOperation implements BackupOperation, Versioned {
+public class TxnPrepareBackupOperation extends AbstractKeyBasedMultiMapOperation implements BackupOperation {
 
-    private String caller;
+    private UUID caller;
 
     public TxnPrepareBackupOperation() {
     }
 
-    public TxnPrepareBackupOperation(String name, Data dataKey, long threadId, String caller) {
+    public TxnPrepareBackupOperation(String name, Data dataKey, long threadId, UUID caller) {
         super(name, dataKey, threadId);
         this.caller = caller;
     }
@@ -56,25 +56,17 @@ public class TxnPrepareBackupOperation extends AbstractKeyBasedMultiMapOperation
     @Override
     protected void writeInternal(ObjectDataOutput out) throws IOException {
         super.writeInternal(out);
-        out.writeUTF(caller);
-        // RU_COMPAT_3_9
-        if (out.getVersion().isUnknownOrLessThan(Versions.V3_10)) {
-            out.writeLong(0);
-        }
+        UUIDSerializationUtil.writeUUID(out, caller);
     }
 
     @Override
     protected void readInternal(ObjectDataInput in) throws IOException {
         super.readInternal(in);
-        caller = in.readUTF();
-        // RU_COMPAT_3_9
-        if (in.getVersion().isUnknownOrLessThan(Versions.V3_10)) {
-            in.readLong();
-        }
+        caller = UUIDSerializationUtil.readUUID(in);
     }
 
     @Override
-    public int getId() {
+    public int getClassId() {
         return MultiMapDataSerializerHook.TXN_PREPARE_BACKUP;
     }
 }

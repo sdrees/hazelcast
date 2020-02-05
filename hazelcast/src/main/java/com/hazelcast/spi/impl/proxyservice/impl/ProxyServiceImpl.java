@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2008-2018, Hazelcast, Inc. All Rights Reserved.
+ * Copyright (c) 2008-2020, Hazelcast, Inc. All Rights Reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -16,34 +16,35 @@
 
 package com.hazelcast.spi.impl.proxyservice.impl;
 
+import com.hazelcast.cluster.Member;
 import com.hazelcast.core.DistributedObject;
 import com.hazelcast.core.DistributedObjectListener;
 import com.hazelcast.core.HazelcastInstanceNotActiveException;
-import com.hazelcast.core.Member;
-import com.hazelcast.internal.metrics.MetricsProvider;
 import com.hazelcast.internal.metrics.MetricsRegistry;
 import com.hazelcast.internal.metrics.Probe;
+import com.hazelcast.internal.metrics.StaticMetricsProvider;
+import com.hazelcast.internal.services.PostJoinAwareService;
+import com.hazelcast.internal.services.RemoteService;
+import com.hazelcast.internal.util.ConstructorFunction;
+import com.hazelcast.internal.util.FutureUtil.ExceptionHandler;
+import com.hazelcast.internal.util.UuidUtil;
 import com.hazelcast.internal.util.counters.MwCounter;
 import com.hazelcast.logging.ILogger;
-import com.hazelcast.spi.EventPublishingService;
-import com.hazelcast.spi.Operation;
-import com.hazelcast.spi.OperationService;
-import com.hazelcast.spi.PostJoinAwareService;
-import com.hazelcast.spi.ProxyService;
-import com.hazelcast.spi.RemoteService;
 import com.hazelcast.spi.exception.DistributedObjectDestroyedException;
 import com.hazelcast.spi.impl.NodeEngineImpl;
+import com.hazelcast.spi.impl.eventservice.EventPublishingService;
+import com.hazelcast.spi.impl.operationservice.Operation;
+import com.hazelcast.spi.impl.operationservice.OperationService;
 import com.hazelcast.spi.impl.proxyservice.InternalProxyService;
+import com.hazelcast.spi.impl.proxyservice.ProxyService;
 import com.hazelcast.spi.impl.proxyservice.impl.operations.DistributedObjectDestroyOperation;
 import com.hazelcast.spi.impl.proxyservice.impl.operations.PostJoinProxyOperation;
-import com.hazelcast.util.ConstructorFunction;
-import com.hazelcast.util.FutureUtil.ExceptionHandler;
-import com.hazelcast.util.UuidUtil;
 
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.LinkedList;
+import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.Future;
@@ -51,19 +52,23 @@ import java.util.concurrent.TimeUnit;
 import java.util.logging.Level;
 
 import static com.hazelcast.core.DistributedObjectEvent.EventType.CREATED;
+import static com.hazelcast.internal.metrics.MetricDescriptorConstants.PROXY_METRIC_CREATED_COUNT;
+import static com.hazelcast.internal.metrics.MetricDescriptorConstants.PROXY_METRIC_DESTROYED_COUNT;
+import static com.hazelcast.internal.metrics.MetricDescriptorConstants.PROXY_METRIC_PROXY_COUNT;
+import static com.hazelcast.internal.metrics.MetricDescriptorConstants.PROXY_PREFIX;
 import static com.hazelcast.internal.metrics.ProbeLevel.MANDATORY;
+import static com.hazelcast.internal.util.ConcurrencyUtil.getOrPutIfAbsent;
+import static com.hazelcast.internal.util.EmptyStatement.ignore;
+import static com.hazelcast.internal.util.ExceptionUtil.peel;
+import static com.hazelcast.internal.util.FutureUtil.waitWithDeadline;
+import static com.hazelcast.internal.util.Preconditions.checkNotNull;
 import static com.hazelcast.internal.util.counters.MwCounter.newMwCounter;
-import static com.hazelcast.util.ConcurrencyUtil.getOrPutIfAbsent;
-import static com.hazelcast.util.EmptyStatement.ignore;
-import static com.hazelcast.util.ExceptionUtil.peel;
-import static com.hazelcast.util.FutureUtil.waitWithDeadline;
-import static com.hazelcast.util.Preconditions.checkNotNull;
 import static java.util.logging.Level.FINEST;
 import static java.util.logging.Level.WARNING;
 
 public class ProxyServiceImpl
         implements InternalProxyService, PostJoinAwareService,
-        EventPublishingService<DistributedObjectEventPacket, Object>, MetricsProvider {
+        EventPublishingService<DistributedObjectEventPacket, Object>, StaticMetricsProvider {
 
     public static final String SERVICE_NAME = "hz:core:proxyService";
 
@@ -72,22 +77,16 @@ public class ProxyServiceImpl
 
     final NodeEngineImpl nodeEngine;
     final ILogger logger;
-    final ConcurrentMap<String, DistributedObjectListener> listeners =
-            new ConcurrentHashMap<String, DistributedObjectListener>();
+    final ConcurrentMap<UUID, DistributedObjectListener> listeners = new ConcurrentHashMap<>();
 
     private final ConstructorFunction<String, ProxyRegistry> registryConstructor =
-            new ConstructorFunction<String, ProxyRegistry>() {
-                public ProxyRegistry createNew(String serviceName) {
-                    return new ProxyRegistry(ProxyServiceImpl.this, serviceName);
-                }
-            };
+            serviceName -> new ProxyRegistry(ProxyServiceImpl.this, serviceName);
 
-    private final ConcurrentMap<String, ProxyRegistry> registries =
-            new ConcurrentHashMap<String, ProxyRegistry>();
+    private final ConcurrentMap<String, ProxyRegistry> registries = new ConcurrentHashMap<>();
 
-    @Probe(name = "createdCount", level = MANDATORY)
+    @Probe(name = PROXY_METRIC_CREATED_COUNT, level = MANDATORY)
     private final MwCounter createdCounter = newMwCounter();
-    @Probe(name = "destroyedCount", level = MANDATORY)
+    @Probe(name = PROXY_METRIC_DESTROYED_COUNT, level = MANDATORY)
     private final MwCounter destroyedCounter = newMwCounter();
 
     private final ExceptionHandler destroyProxyExceptionHandler = new ExceptionHandler() {
@@ -105,15 +104,15 @@ public class ProxyServiceImpl
     }
 
     @Override
-    public void provideMetrics(MetricsRegistry registry) {
-        registry.scanAndRegister(this, "proxy");
+    public void provideStaticMetrics(MetricsRegistry registry) {
+        registry.registerStaticMetrics(this, PROXY_PREFIX);
     }
 
     public void init() {
         nodeEngine.getEventService().registerListener(SERVICE_NAME, SERVICE_NAME, new Object());
     }
 
-    @Probe(name = "proxyCount")
+    @Probe(name = PROXY_METRIC_PROXY_COUNT)
     @Override
     public int getProxyCount() {
         int count = 0;
@@ -124,13 +123,19 @@ public class ProxyServiceImpl
         return count;
     }
 
+    public void initializeAndPublishProxies() {
+        for (ProxyRegistry registry : registries.values()) {
+            registry.initializeAndPublishProxies();
+        }
+    }
+
     @Override
-    public void initializeDistributedObject(String serviceName, String name) {
+    public void initializeDistributedObject(String serviceName, String name, UUID source) {
         checkServiceNameNotNull(serviceName);
         checkObjectNameNotNull(name);
 
         ProxyRegistry registry = getOrCreateRegistry(serviceName);
-        registry.createProxy(name, true, true);
+        registry.createProxy(name, source, true, false);
         createdCounter.inc();
     }
 
@@ -139,42 +144,43 @@ public class ProxyServiceImpl
     }
 
     @Override
-    public DistributedObject getDistributedObject(String serviceName, String name) {
+    public DistributedObject getDistributedObject(String serviceName, String name, UUID source) {
         checkServiceNameNotNull(serviceName);
         checkObjectNameNotNull(name);
 
         ProxyRegistry registry = getOrCreateRegistry(serviceName);
-        return registry.getOrCreateProxy(name, true);
+        return registry.getOrCreateProxy(name, source, true);
     }
 
     @Override
-    public void destroyDistributedObject(String serviceName, String name) {
+    public void destroyDistributedObject(String serviceName, String name, UUID source) {
         checkServiceNameNotNull(serviceName);
         checkObjectNameNotNull(name);
 
         OperationService operationService = nodeEngine.getOperationService();
         Collection<Member> members = nodeEngine.getClusterService().getMembers();
-        Collection<Future> calls = new ArrayList<Future>(members.size());
+        Collection<Future> calls = new ArrayList<>(members.size());
         for (Member member : members) {
             if (member.localMember()) {
                 continue;
             }
 
             DistributedObjectDestroyOperation operation = new DistributedObjectDestroyOperation(serviceName, name);
+            operation.setCallerUuid(source);
             Future f = operationService.createInvocationBuilder(SERVICE_NAME, operation, member.getAddress())
                     .setTryCount(TRY_COUNT).invoke();
             calls.add(f);
         }
 
-        destroyLocalDistributedObject(serviceName, name, true);
-
+        destroyLocalDistributedObject(serviceName, name, source, true);
         waitWithDeadline(calls, DESTROY_TIMEOUT_SECONDS, TimeUnit.SECONDS, destroyProxyExceptionHandler);
     }
 
-    public void destroyLocalDistributedObject(String serviceName, String name, boolean fireEvent) {
+    @Override
+    public void destroyLocalDistributedObject(String serviceName, String name, UUID source, boolean fireEvent) {
         ProxyRegistry registry = registries.get(serviceName);
         if (registry != null) {
-            registry.destroyProxy(name, fireEvent);
+            registry.destroyProxy(name, source, fireEvent);
             destroyedCounter.inc();
         }
         RemoteService service = nodeEngine.getService(serviceName);
@@ -219,14 +225,14 @@ public class ProxyServiceImpl
     }
 
     @Override
-    public String addProxyListener(DistributedObjectListener distributedObjectListener) {
-        String id = UuidUtil.newUnsecureUuidString();
+    public UUID addProxyListener(DistributedObjectListener distributedObjectListener) {
+        UUID id = UuidUtil.newUnsecureUUID();
         listeners.put(id, distributedObjectListener);
         return id;
     }
 
     @Override
-    public boolean removeProxyListener(String registrationId) {
+    public boolean removeProxyListener(UUID registrationId) {
         return listeners.remove(registrationId) != null;
     }
 
@@ -237,7 +243,7 @@ public class ProxyServiceImpl
             try {
                 final ProxyRegistry registry = getOrCreateRegistry(serviceName);
                 if (!registry.contains(eventPacket.getName())) {
-                    registry.createProxy(eventPacket.getName(), false, true);
+                    registry.createProxy(eventPacket.getName(), eventPacket.getSource(), true, true);
                     // listeners will be called if proxy is created here.
                 }
             } catch (HazelcastInstanceNotActiveException ignored) {
@@ -246,14 +252,14 @@ public class ProxyServiceImpl
         } else {
             final ProxyRegistry registry = registries.get(serviceName);
             if (registry != null) {
-                registry.destroyProxy(eventPacket.getName(), false);
+                registry.destroyProxy(eventPacket.getName(), eventPacket.getSource(), false);
             }
         }
     }
 
     @Override
     public Operation getPostJoinOperation() {
-        Collection<ProxyInfo> proxies = new LinkedList<ProxyInfo>();
+        Collection<ProxyInfo> proxies = new LinkedList<>();
         for (ProxyRegistry registry : registries.values()) {
             registry.getProxyInfos(proxies);
         }

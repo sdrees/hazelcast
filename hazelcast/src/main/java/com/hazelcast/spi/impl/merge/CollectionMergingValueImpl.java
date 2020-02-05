@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2008-2018, Hazelcast, Inc. All Rights Reserved.
+ * Copyright (c) 2008-2020, Hazelcast, Inc. All Rights Reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -16,10 +16,8 @@
 
 package com.hazelcast.spi.impl.merge;
 
+import com.hazelcast.internal.serialization.SerializationService;
 import com.hazelcast.spi.merge.SplitBrainMergeTypes.CollectionMergeTypes;
-import com.hazelcast.spi.serialization.SerializationService;
-
-import java.util.Collection;
 
 /**
  * Implementation of {@link CollectionMergeTypes}.
@@ -27,9 +25,8 @@ import java.util.Collection;
  * @since 3.10
  */
 @SuppressWarnings("WeakerAccess")
-public class CollectionMergingValueImpl
-        extends AbstractCollectionMergingValueImpl<Collection<Object>, CollectionMergingValueImpl>
-        implements CollectionMergeTypes {
+public class CollectionMergingValueImpl<V> extends AbstractCollectionMergingValueImpl<V, CollectionMergingValueImpl<V>>
+        implements CollectionMergeTypes<V> {
 
     public CollectionMergingValueImpl() {
     }
@@ -39,7 +36,7 @@ public class CollectionMergingValueImpl
     }
 
     @Override
-    public int getId() {
+    public int getClassId() {
         return SplitBrainDataSerializerHook.COLLECTION_MERGING_VALUE;
     }
 }

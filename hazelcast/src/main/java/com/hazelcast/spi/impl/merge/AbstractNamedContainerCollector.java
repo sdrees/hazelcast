@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2008-2018, Hazelcast, Inc. All Rights Reserved.
+ * Copyright (c) 2008-2020, Hazelcast, Inc. All Rights Reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -17,8 +17,8 @@
 package com.hazelcast.spi.impl.merge;
 
 import com.hazelcast.partition.strategy.StringPartitioningStrategy;
-import com.hazelcast.spi.NodeEngine;
-import com.hazelcast.spi.partition.IPartitionService;
+import com.hazelcast.spi.impl.NodeEngine;
+import com.hazelcast.internal.partition.IPartitionService;
 
 import java.util.Iterator;
 import java.util.Map;

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2008-2018, Hazelcast, Inc. All Rights Reserved.
+ * Copyright (c) 2008-2020, Hazelcast, Inc. All Rights Reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -16,16 +16,15 @@
 
 package com.hazelcast.map.impl.nearcache.invalidation;
 
-import com.hazelcast.core.Member;
+import com.hazelcast.cluster.Member;
 import com.hazelcast.internal.cluster.ClusterService;
 import com.hazelcast.internal.nearcache.impl.invalidation.InvalidationMetaDataFetcher;
 import com.hazelcast.logging.ILogger;
 import com.hazelcast.map.impl.operation.MapGetInvalidationMetaDataOperation;
 import com.hazelcast.map.impl.operation.MapGetInvalidationMetaDataOperation.MetaDataResponse;
-import com.hazelcast.nio.Address;
-import com.hazelcast.spi.InternalCompletableFuture;
-import com.hazelcast.spi.Operation;
-import com.hazelcast.spi.OperationService;
+import com.hazelcast.spi.impl.InternalCompletableFuture;
+import com.hazelcast.spi.impl.operationservice.Operation;
+import com.hazelcast.spi.impl.operationservice.OperationService;
 
 import java.util.Collection;
 import java.util.List;
@@ -55,9 +54,9 @@ public class MemberMapInvalidationMetaDataFetcher extends InvalidationMetaDataFe
     }
 
     @Override
-    protected InternalCompletableFuture fetchMetadataOf(Address address, List<String> names) {
+    protected InternalCompletableFuture fetchMetadataOf(Member member, List<String> names) {
         Operation operation = new MapGetInvalidationMetaDataOperation(names);
-        return operationService.invokeOnTarget(SERVICE_NAME, operation, address);
+        return operationService.invokeOnTarget(SERVICE_NAME, operation, member.getAddress());
     }
 
     @Override

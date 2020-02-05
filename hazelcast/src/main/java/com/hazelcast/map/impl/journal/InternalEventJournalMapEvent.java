@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2008-2018, Hazelcast, Inc. All Rights Reserved.
+ * Copyright (c) 2008-2020, Hazelcast, Inc. All Rights Reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -16,10 +16,11 @@
 
 package com.hazelcast.map.impl.journal;
 
+import com.hazelcast.internal.nio.IOUtil;
 import com.hazelcast.map.impl.MapDataSerializerHook;
 import com.hazelcast.nio.ObjectDataInput;
 import com.hazelcast.nio.ObjectDataOutput;
-import com.hazelcast.nio.serialization.Data;
+import com.hazelcast.internal.serialization.Data;
 import com.hazelcast.nio.serialization.IdentifiedDataSerializable;
 
 import java.io.IOException;
@@ -73,24 +74,24 @@ public class InternalEventJournalMapEvent implements IdentifiedDataSerializable 
     }
 
     @Override
-    public int getId() {
+    public int getClassId() {
         return MapDataSerializerHook.EVENT_JOURNAL_INTERNAL_MAP_EVENT;
     }
 
     @Override
     public void writeData(ObjectDataOutput out) throws IOException {
         out.writeInt(eventType);
-        out.writeData(dataKey);
-        out.writeData(dataNewValue);
-        out.writeData(dataOldValue);
+        IOUtil.writeData(out, dataKey);
+        IOUtil.writeData(out, dataNewValue);
+        IOUtil.writeData(out, dataOldValue);
     }
 
     @Override
     public void readData(ObjectDataInput in) throws IOException {
         eventType = in.readInt();
-        dataKey = in.readData();
-        dataNewValue = in.readData();
-        dataOldValue = in.readData();
+        dataKey = IOUtil.readData(in);
+        dataNewValue = IOUtil.readData(in);
+        dataOldValue = IOUtil.readData(in);
     }
 
     @Override
@@ -128,6 +129,6 @@ public class InternalEventJournalMapEvent implements IdentifiedDataSerializable 
 
     @Override
     public String toString() {
-        return "InternalEventJournalMapEvent{eventType=" + eventType + '}';
+        return getClass().getSimpleName() + "{eventType=" + eventType + '}';
     }
 }
