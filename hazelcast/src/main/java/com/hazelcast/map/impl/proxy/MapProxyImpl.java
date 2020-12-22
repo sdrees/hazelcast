@@ -20,16 +20,26 @@ import com.hazelcast.aggregation.Aggregator;
 import com.hazelcast.config.MapConfig;
 import com.hazelcast.core.EntryView;
 import com.hazelcast.core.ManagedContext;
+import com.hazelcast.internal.cluster.Versions;
 import com.hazelcast.internal.journal.EventJournalInitialSubscriberState;
 import com.hazelcast.internal.journal.EventJournalReader;
+import com.hazelcast.internal.serialization.Data;
+import com.hazelcast.internal.serialization.impl.SerializationUtil;
 import com.hazelcast.internal.util.CollectionUtil;
 import com.hazelcast.internal.util.IterationType;
+import com.hazelcast.internal.util.collection.PartitionIdSet;
 import com.hazelcast.map.EntryProcessor;
 import com.hazelcast.map.EventJournalMapEvent;
 import com.hazelcast.map.IMap;
 import com.hazelcast.map.MapInterceptor;
 import com.hazelcast.map.QueryCache;
+import com.hazelcast.map.impl.ComputeEntryProcessor;
+import com.hazelcast.map.impl.ComputeIfAbsentEntryProcessor;
+import com.hazelcast.map.impl.ComputeIfPresentEntryProcessor;
+import com.hazelcast.map.impl.KeyValueConsumingEntryProcessor;
+import com.hazelcast.map.impl.MapEntryReplacingEntryProcessor;
 import com.hazelcast.map.impl.MapService;
+import com.hazelcast.map.impl.MergeEntryProcessor;
 import com.hazelcast.map.impl.SimpleEntryView;
 import com.hazelcast.map.impl.iterator.MapPartitionIterator;
 import com.hazelcast.map.impl.iterator.MapQueryPartitionIterator;
@@ -44,7 +54,6 @@ import com.hazelcast.map.impl.querycache.subscriber.QueryCacheRequest;
 import com.hazelcast.map.impl.querycache.subscriber.SubscriberContext;
 import com.hazelcast.map.listener.MapListener;
 import com.hazelcast.map.listener.MapPartitionLostListener;
-import com.hazelcast.internal.serialization.Data;
 import com.hazelcast.projection.Projection;
 import com.hazelcast.query.PagingPredicate;
 import com.hazelcast.query.Predicate;
@@ -68,6 +77,9 @@ import java.util.UUID;
 import java.util.concurrent.CompletionStage;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
+import java.util.function.BiConsumer;
+import java.util.function.BiFunction;
+import java.util.function.Function;
 
 import static com.hazelcast.internal.util.ExceptionUtil.rethrow;
 import static com.hazelcast.internal.util.MapUtil.createHashMap;
@@ -306,7 +318,7 @@ public class MapProxyImpl<K, V> extends MapProxySupport<K, V> implements EventJo
     @Override
     public void lock(@Nonnull Object key, long leaseTime, @Nullable TimeUnit timeUnit) {
         checkNotNull(key, NULL_KEY_IS_NOT_ALLOWED);
-        checkPositive(leaseTime, "leaseTime should be positive");
+        checkPositive("leaseTime", leaseTime);
 
         Data keyData = toDataWithStrategy(key);
         lockSupport.lock(getNodeEngine(), keyData, timeInMsOrTimeIfNullUnit(leaseTime, timeUnit));
@@ -448,18 +460,28 @@ public class MapProxyImpl<K, V> extends MapProxySupport<K, V> implements EventJo
     @Override
     public void putAll(@Nonnull Map<? extends K, ? extends V> map) {
         checkNotNull(map, "Null argument map is not allowed");
-        putAllInternal(map, null);
+        putAllInternal(map, null, true);
     }
 
-    /**
-     * This version does not support batching. Don't mutate the given map until the
-     * future completes.
-     */
-    // used by jet
+    @Override
     public InternalCompletableFuture<Void> putAllAsync(@Nonnull Map<? extends K, ? extends V> map) {
         checkNotNull(map, "Null argument map is not allowed");
         InternalCompletableFuture<Void> future = new InternalCompletableFuture<>();
-        putAllInternal(map, future);
+        putAllInternal(map, future, true);
+        return future;
+    }
+
+    @Override
+    public void setAll(@Nonnull Map<? extends K, ? extends V> map) {
+        checkNotNull(map, "Null argument map is not allowed");
+        putAllInternal(map, null, false);
+    }
+
+    @Override
+    public InternalCompletableFuture<Void> setAllAsync(@Nonnull Map<? extends K, ? extends V> map) {
+        checkNotNull(map, "Null argument map is not allowed");
+        InternalCompletableFuture<Void> future = new InternalCompletableFuture<>();
+        putAllInternal(map, future, false);
         return future;
     }
 
@@ -663,7 +685,18 @@ public class MapProxyImpl<K, V> extends MapProxySupport<K, V> implements EventJo
     @Override
     @SuppressWarnings("unchecked")
     public Set<K> keySet(@Nonnull Predicate<K, V> predicate) {
-        return executePredicate(predicate, IterationType.KEY, true);
+        return executePredicate(predicate, IterationType.KEY, true, Target.ALL_NODES);
+    }
+
+    /**
+     * Execute the {@code keySet} operation only on the given {@code
+     * partitions}.
+     * <p>
+     * <b>Warning:</b> {@code partitions} is mutated during the call.
+     */
+    @SuppressWarnings("unchecked")
+    public Set<K> keySet(@Nonnull Predicate<K, V> predicate, PartitionIdSet partitions) {
+        return executePredicate(predicate, IterationType.KEY, true, Target.createPartitionTarget(partitions));
     }
 
     @Nonnull
@@ -673,8 +706,20 @@ public class MapProxyImpl<K, V> extends MapProxySupport<K, V> implements EventJo
     }
 
     @Override
+    @SuppressWarnings("unchecked")
     public Set<Map.Entry<K, V>> entrySet(@Nonnull Predicate predicate) {
-        return executePredicate(predicate, IterationType.ENTRY, true);
+        return executePredicate(predicate, IterationType.ENTRY, true, Target.ALL_NODES);
+    }
+
+    /**
+     * Execute the {@code entrySet} operation only on the given {@code
+     * partitions}.
+     * <p>
+     * <b>Warning:</b> {@code partitions} is mutated during the call.
+     */
+    @SuppressWarnings("unchecked")
+    public Set<Map.Entry<K, V>> entrySet(@Nonnull Predicate predicate, PartitionIdSet partitions) {
+        return executePredicate(predicate, IterationType.ENTRY, true, Target.createPartitionTarget(partitions));
     }
 
     @Nonnull
@@ -686,12 +731,23 @@ public class MapProxyImpl<K, V> extends MapProxySupport<K, V> implements EventJo
     @Override
     @SuppressWarnings("unchecked")
     public Collection<V> values(@Nonnull Predicate predicate) {
-        return executePredicate(predicate, IterationType.VALUE, false);
+        return executePredicate(predicate, IterationType.VALUE, false, Target.ALL_NODES);
     }
 
-    private Set executePredicate(Predicate predicate, IterationType iterationType, boolean uniqueResult) {
+    /**
+     * Execute the {@code values} operation only on the given {@code
+     * partitions}.
+     * <p>
+     * <b>Warning:</b> {@code partitions} is mutated during the call.
+     */
+    @SuppressWarnings("unchecked")
+    public Collection<V> values(@Nonnull Predicate predicate, PartitionIdSet partitions) {
+        return executePredicate(predicate, IterationType.VALUE, false, Target.createPartitionTarget(partitions));
+    }
+
+    private Set executePredicate(Predicate predicate, IterationType iterationType, boolean uniqueResult, Target target) {
         checkNotNull(predicate, NULL_PREDICATE_IS_NOT_ALLOWED);
-        QueryResult result = executeQueryInternal(predicate, iterationType, Target.ALL_NODES);
+        QueryResult result = executeQueryInternal(predicate, iterationType, target);
         incrementOtherOperationsStat();
         return transformToSet(serializationService, result, predicate, iterationType, uniqueResult, false);
     }
@@ -730,9 +786,7 @@ public class MapProxyImpl<K, V> extends MapProxySupport<K, V> implements EventJo
         }
     }
 
-    /**
-     * Async version of {@link #executeOnKeys}.
-     */
+    @Override
     public <R> InternalCompletableFuture<Map<K, R>> submitToKeys(@Nonnull Set<K> keys,
                                                                  @Nonnull EntryProcessor<K, V, R> entryProcessor) {
         checkNotNull(keys, NULL_KEYS_ARE_NOT_ALLOWED);
@@ -809,6 +863,22 @@ public class MapProxyImpl<K, V> extends MapProxySupport<K, V> implements EventJo
     @Override
     public <R> Collection<R> project(@Nonnull Projection<? super Map.Entry<K, V>, R> projection,
                                      @Nonnull Predicate<K, V> predicate) {
+        return project(projection, predicate, Target.ALL_NODES);
+    }
+
+    /**
+     * Execute the {@code project} operation only on the given {@code
+     * partitions}.
+     * <p>
+     * <b>Warning:</b> {@code partitions} is mutated during the call.
+     */
+    public <R> Collection<R> project(@Nonnull Projection<? super Map.Entry<K, V>, R> projection,
+                                     @Nonnull Predicate<K, V> predicate, PartitionIdSet partitions) {
+        return project(projection, predicate, Target.createPartitionTarget(partitions));
+    }
+
+    private <R> Collection<R> project(@Nonnull Projection<? super Map.Entry<K, V>, R> projection,
+                                     @Nonnull Predicate<K, V> predicate, Target target) {
         checkNotNull(projection, NULL_PROJECTION_IS_NOT_ALLOWED);
         checkNotNull(predicate, NULL_PREDICATE_IS_NOT_ALLOWED);
         checkNotPagingPredicate(predicate, "project");
@@ -816,7 +886,7 @@ public class MapProxyImpl<K, V> extends MapProxySupport<K, V> implements EventJo
         // HazelcastInstanceAware handled by cloning
         projection = serializationService.toObject(serializationService.toData(projection));
 
-        QueryResult result = executeQueryInternal(predicate, null, projection, IterationType.VALUE, Target.ALL_NODES);
+        QueryResult result = executeQueryInternal(predicate, null, projection, IterationType.VALUE, target);
         return transformToSet(serializationService, result, predicate, IterationType.VALUE, false, false);
     }
 
@@ -948,8 +1018,9 @@ public class MapProxyImpl<K, V> extends MapProxySupport<K, V> implements EventJo
                     + " must be greater or equal to minSize " + minSize);
         }
         final ManagedContext context = serializationService.getManagedContext();
-        context.initialize(predicate);
-        context.initialize(projection);
+        predicate = (java.util.function.Predicate<? super EventJournalMapEvent<K, V>>) context.initialize(predicate);
+        projection = (java.util.function.Function<? super EventJournalMapEvent<K, V>, ? extends T>)
+                context.initialize(projection);
         final MapEventJournalReadOperation<K, V, T> op = new MapEventJournalReadOperation<>(
                 name, startSequence, minSize, maxSize, predicate, projection);
         op.setPartitionId(partitionId);
@@ -1025,4 +1096,183 @@ public class MapProxyImpl<K, V> extends MapProxySupport<K, V> implements EventJo
             throw new IllegalArgumentException("PagingPredicate not supported in " + method + " method");
         }
     }
+
+    @Override
+    public V computeIfPresent(@Nonnull K key,
+                              @Nonnull BiFunction<? super K, ? super V, ? extends V> remappingFunction) {
+        checkNotNull(key, NULL_KEY_IS_NOT_ALLOWED);
+        checkNotNull(key, NULL_BIFUNCTION_IS_NOT_ALLOWED);
+
+        if (SerializationUtil.isClassStaticAndSerializable(remappingFunction)
+                && isClusterVersionGreaterOrEqual(Versions.V4_1)) {
+            ComputeIfPresentEntryProcessor<K, V> ep = new ComputeIfPresentEntryProcessor<>(remappingFunction);
+            return executeOnKey(key, ep);
+        } else {
+            return computeIfPresentLocally(key, remappingFunction);
+        }
+    }
+
+    private V computeIfPresentLocally(K key,
+                                      BiFunction<? super K, ? super V, ? extends V> remappingFunction) {
+
+        while (true) {
+            Data oldValueAsData = toData(getInternal(key));
+            if (oldValueAsData == null) {
+                return null;
+            }
+
+            V oldValueClone = toObject(oldValueAsData);
+            V newValue = remappingFunction.apply(key, oldValueClone);
+            if (newValue != null) {
+                if (replaceInternal(key, oldValueAsData, toData(newValue))) {
+                    return newValue;
+                }
+            } else if (removeInternal(key, oldValueAsData)) {
+                return null;
+            }
+        }
+    }
+
+    @Override
+    public V computeIfAbsent(@Nonnull K key, @Nonnull Function<? super K, ? extends V> mappingFunction) {
+        checkNotNull(key, NULL_KEY_IS_NOT_ALLOWED);
+        checkNotNull(mappingFunction, NULL_FUNCTION_IS_NOT_ALLOWED);
+
+        if (SerializationUtil.isClassStaticAndSerializable(mappingFunction)
+                && isClusterVersionGreaterOrEqual(Versions.V4_1)) {
+            ComputeIfAbsentEntryProcessor<K, V> ep = new ComputeIfAbsentEntryProcessor<>(mappingFunction);
+            return executeOnKey(key, ep);
+        } else {
+            return computeIfAbsentLocally(key, mappingFunction);
+        }
+    }
+
+    private V computeIfAbsentLocally(K key, Function<? super K, ? extends V> mappingFunction) {
+        V oldValue = toObject(getInternal(key));
+        if (oldValue != null) {
+            return oldValue;
+        }
+
+        V newValue = mappingFunction.apply(key);
+        if (newValue == null) {
+            return null;
+        }
+
+        Data result = putIfAbsentInternal(key, toData(newValue), UNSET, TimeUnit.MILLISECONDS, UNSET, TimeUnit.MILLISECONDS);
+        if (result == null) {
+            return newValue;
+        } else {
+            return toObject(result);
+        }
+    }
+
+    @Override
+    public void forEach(@Nonnull BiConsumer<? super K, ? super V> action) {
+        checkNotNull(action, NULL_CONSUMER_IS_NOT_ALLOWED);
+
+        if (SerializationUtil.isClassStaticAndSerializable(action)
+                && isClusterVersionGreaterOrEqual(Versions.V4_1)) {
+            KeyValueConsumingEntryProcessor<K, V> ep = new KeyValueConsumingEntryProcessor<>(action);
+            executeOnEntries(ep);
+        } else {
+            super.forEach(action);
+        }
+    }
+
+    public V compute(@Nonnull K key, @Nonnull BiFunction<? super K, ? super V, ? extends V> remappingFunction) {
+        checkNotNull(key, NULL_KEY_IS_NOT_ALLOWED);
+        checkNotNull(key, NULL_BIFUNCTION_IS_NOT_ALLOWED);
+
+        if (SerializationUtil.isClassStaticAndSerializable(remappingFunction)
+                && isClusterVersionGreaterOrEqual(Versions.V4_1)) {
+            ComputeEntryProcessor<K, V> ep = new ComputeEntryProcessor<>(remappingFunction);
+            return executeOnKey(key, ep);
+        } else {
+            return computeLocally(key, remappingFunction);
+        }
+    }
+
+    private V computeLocally(K key,
+                             BiFunction<? super K, ? super V, ? extends V> remappingFunction) {
+
+        while (true) {
+            Data oldValueAsData = toData(getInternal(key));
+            V oldValueClone = toObject(oldValueAsData);
+            V newValue = remappingFunction.apply(key, oldValueClone);
+
+            if (oldValueAsData != null) {
+                if (newValue != null) {
+                    if (replaceInternal(key, oldValueAsData, toData(newValue))) {
+                        return newValue;
+                    }
+                } else if (removeInternal(key, oldValueAsData)) {
+                    return null;
+                }
+            } else {
+                if (newValue != null) {
+                    Data result = putIfAbsentInternal(key, toData(newValue), UNSET, TimeUnit.MILLISECONDS, UNSET,
+                            TimeUnit.MILLISECONDS);
+                    if (result == null) {
+                        return newValue;
+                    }
+                } else {
+                    return null;
+                }
+            }
+        }
+    }
+
+    public V merge(@Nonnull K key, @Nonnull V value,
+                   @Nonnull BiFunction<? super V, ? super V, ? extends V> remappingFunction) {
+        checkNotNull(key, NULL_KEY_IS_NOT_ALLOWED);
+        checkNotNull(value, NULL_VALUE_IS_NOT_ALLOWED);
+        checkNotNull(remappingFunction, NULL_BIFUNCTION_IS_NOT_ALLOWED);
+
+        if (SerializationUtil.isClassStaticAndSerializable(remappingFunction)
+                && isClusterVersionGreaterOrEqual(Versions.V4_1)) {
+            MergeEntryProcessor<K, V> ep = new MergeEntryProcessor<>(remappingFunction, value);
+            return executeOnKey(key, ep);
+        } else {
+            return mergeLocally(key, value, remappingFunction);
+        }
+    }
+
+    private V mergeLocally(K key, V value, BiFunction<? super V, ? super V, ? extends V> remappingFunction) {
+        Data keyAsData = toDataWithStrategy(key);
+
+        while (true) {
+            Data oldValueAsData = toData(getInternal(keyAsData));
+            if (oldValueAsData != null) {
+                V oldValueClone = toObject(oldValueAsData);
+                V newValue = remappingFunction.apply(oldValueClone, value);
+                if (newValue != null) {
+                    if (replaceInternal(keyAsData, oldValueAsData, toData(newValue))) {
+                        return newValue;
+                    }
+                } else if (removeInternal(keyAsData, oldValueAsData)) {
+                    return null;
+                }
+            } else {
+                Data result =  putIfAbsentInternal(keyAsData, toData(value), UNSET, TimeUnit.MILLISECONDS, UNSET,
+                        TimeUnit.MILLISECONDS);
+                if (result == null) {
+                    return value;
+                }
+            }
+        }
+    }
+
+    @Override
+    public void replaceAll(BiFunction<? super K, ? super V, ? extends V> function) {
+        checkNotNull(function, NULL_BIFUNCTION_IS_NOT_ALLOWED);
+
+        if (SerializationUtil.isClassStaticAndSerializable(function)
+                && isClusterVersionGreaterOrEqual(Versions.V4_1)) {
+            MapEntryReplacingEntryProcessor<K, V> ep = new MapEntryReplacingEntryProcessor<>(function);
+            executeOnEntries(ep);
+        } else {
+            super.replaceAll(function);
+        }
+    }
+
 }

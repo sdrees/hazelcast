@@ -39,7 +39,9 @@ import com.hazelcast.spi.merge.SplitBrainMergePolicy;
 import com.hazelcast.spi.merge.SplitBrainMergeTypes.MapMergeTypes;
 import com.hazelcast.wan.impl.CallerProvenance;
 
+import java.util.Iterator;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 import java.util.function.BiConsumer;
@@ -78,7 +80,7 @@ public interface RecordStore<R extends Record> {
      * @param provenance origin of call to this method.
      * @return current record after put.
      */
-    R putBackup(Data key, Object value, CallerProvenance provenance);
+    R putBackup(Data key, Object value, long ttl, long maxIdle, CallerProvenance provenance);
 
     /**
      * @return current record after put.
@@ -258,9 +260,6 @@ public interface RecordStore<R extends Record> {
      */
     Object putFromLoadBackup(Data key, Object value, long expirationTime);
 
-    boolean merge(MapMergeTypes<Object, Object> mergingEntry,
-                  SplitBrainMergePolicy<Object, MapMergeTypes<Object, Object>, Object> mergePolicy);
-
     /**
      * Merges the given {@link MapMergeTypes} via the given {@link SplitBrainMergePolicy}.
      *
@@ -291,6 +290,8 @@ public interface RecordStore<R extends Record> {
     void forEach(BiConsumer<Data, R> consumer, boolean backup);
 
     void forEach(BiConsumer<Data, Record> consumer, boolean backup, boolean includeExpiredRecords);
+
+    Iterator<Map.Entry<Data, Record>> iterator();
 
     /**
      * Iterates over record store entries but first waits map store to
@@ -408,6 +409,17 @@ public interface RecordStore<R extends Record> {
      * @return <code>true</code> if the record is expired, <code>false</code> otherwise.
      */
     boolean isExpired(R record, long now, boolean backup);
+
+    /**
+     * Checks whether a key has expired, when
+     * expired, key is removed from record-store,
+     * otherwise this method updates its access stats.
+     *
+     * @param key the key
+     * @return {@code true} if key has expired or
+     * does not exist, otherwise return {@code false}
+     */
+    boolean expireOrAccess(Data key);
 
     /**
      * Does post eviction operations like sending events

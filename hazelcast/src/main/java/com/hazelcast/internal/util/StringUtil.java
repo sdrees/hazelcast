@@ -16,7 +16,7 @@
 
 package com.hazelcast.internal.util;
 
-import java.nio.charset.Charset;
+import java.nio.charset.StandardCharsets;
 import java.text.DateFormat;
 import java.text.SimpleDateFormat;
 import java.util.ArrayList;
@@ -24,8 +24,11 @@ import java.util.Arrays;
 import java.util.Date;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
+
+import javax.annotation.Nullable;
 
 import static java.lang.Character.isLetter;
 import static java.lang.Character.isLowerCase;
@@ -35,11 +38,6 @@ import static java.lang.Character.toLowerCase;
  * Utility class for Strings.
  */
 public final class StringUtil {
-
-    /**
-     * UTF-8 Charset
-     */
-    public static final Charset UTF8_CHARSET = Charset.forName("UTF-8");
 
     /**
      * Points to the System property 'line.separator'.
@@ -73,7 +71,7 @@ public final class StringUtil {
      * @return the string created from the byte array.
      */
     public static String bytesToString(byte[] bytes, int offset, int length) {
-        return new String(bytes, offset, length, UTF8_CHARSET);
+        return new String(bytes, offset, length, StandardCharsets.UTF_8);
     }
 
     /**
@@ -84,7 +82,7 @@ public final class StringUtil {
      */
     public static String bytesToString(byte[] bytes) {
 
-        return new String(bytes, UTF8_CHARSET);
+        return new String(bytes, StandardCharsets.UTF_8);
     }
 
     /**
@@ -94,7 +92,7 @@ public final class StringUtil {
      * @return the byte array created from the string.
      */
     public static byte[] stringToBytes(String s) {
-        return s.getBytes(UTF8_CHARSET);
+        return s.getBytes(StandardCharsets.UTF_8);
     }
 
     /**
@@ -387,5 +385,82 @@ public final class StringUtil {
         return (str1 == null || str2 == null)
                 ? false
                 : (str1 == str2 || lowerCaseInternal(str1).equals(lowerCaseInternal(str2)));
+    }
+
+    /**
+     * Strips the trailing slash from the input string, if it is present
+     *
+     * @param str
+     * @return the string with trailing slash removed
+     */
+    public static String stripTrailingSlash(String str) {
+        if (isNullOrEmpty(str)) {
+            return str;
+        }
+        if (str.charAt(str.length() - 1) == '/') {
+            return str.substring(0, str.length() - 1);
+        }
+        return str;
+    }
+
+    /**
+     * Returns a string where named placeholders are replaced by values from the
+     * given {@code variableValues} map. The placeholder is defined as the
+     * variable name prefixed by ${@code placeholderNamespace}&#123; and followed
+     * by &#125;. For example, if the {@code placeholderNamespace} is {@code HZ_TEST}
+     * the placeholder for "instance_name" would be $HZ_TEST&#123;instance_name&#125;.
+     * <p>
+     * The variable replacement is fail-safe which means any incorrect syntax such
+     * as missing closing brackets or missing variable values is ignored.
+     *
+     * @param pattern              the pattern in which placeholders should be replaced
+     * @param placeholderNamespace the string inserted into the placeholder prefix to distinguish between
+     *                             different types of placeholders
+     * @param variableValues       the placeholder variable values
+     * @return the formatted string
+     */
+    public static String resolvePlaceholders(String pattern,
+                                             String placeholderNamespace,
+                                             Map<String, Object> variableValues) {
+        StringBuilder sb = new StringBuilder(pattern);
+        String placeholderPrefix = "$" + placeholderNamespace + "{";
+        int endIndex;
+        int startIndex = sb.indexOf(placeholderPrefix);
+
+        while (startIndex > -1) {
+            endIndex = sb.indexOf("}", startIndex);
+            if (endIndex == -1) {
+                // ignore bad syntax, search finished
+                break;
+            }
+
+            String variableName = sb.substring(startIndex + placeholderPrefix.length(), endIndex);
+            Object variableValue = variableValues.get(variableName);
+            // ignore missing values
+            if (variableValue != null) {
+                String valueStr = variableValue.toString();
+                sb.replace(startIndex, endIndex + 1, valueStr);
+                endIndex = startIndex + valueStr.length();
+            }
+
+            startIndex = sb.indexOf(placeholderPrefix, endIndex);
+        }
+        return sb.toString();
+    }
+
+    /**
+     * Formats given XML String with the given indentation used. If the {@code input} XML string is {@code null}, or
+     * {@code indent} parameter is negative, or XML transformation fails, then the original value is returned unchanged. The
+     * {@link IllegalArgumentException} is thrown when {@code indent==0}.
+     *
+     * @param input the XML String
+     * @param indent indentation (number of spaces used for one indentation level)
+     * @return formatted XML String or the original String if the formatting fails.
+     * @throws IllegalArgumentException when indentation is equal to zero
+     * @deprecated Use directly {@link XmlUtil#format(String, int)}
+     */
+    @Deprecated
+    public static String formatXml(@Nullable String input, int indent) throws IllegalArgumentException {
+        return XmlUtil.format(input, indent);
     }
 }

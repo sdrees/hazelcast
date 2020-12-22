@@ -17,6 +17,7 @@
 package com.hazelcast.client.config;
 
 import com.hazelcast.client.LoadBalancer;
+import com.hazelcast.client.test.CustomLoadBalancer;
 import com.hazelcast.client.util.RandomLB;
 import com.hazelcast.config.AliasedDiscoveryConfig;
 import com.hazelcast.config.ConfigCompatibilityChecker;
@@ -29,17 +30,25 @@ import com.hazelcast.config.GlobalSerializerConfig;
 import com.hazelcast.config.InMemoryFormat;
 import com.hazelcast.config.IndexConfig;
 import com.hazelcast.config.IndexType;
+import com.hazelcast.config.InstanceTrackingConfig;
 import com.hazelcast.config.ListenerConfig;
+import com.hazelcast.config.LoginModuleConfig;
+import com.hazelcast.config.LoginModuleConfig.LoginModuleUsage;
 import com.hazelcast.config.NativeMemoryConfig;
 import com.hazelcast.config.NativeMemoryConfig.MemoryAllocatorType;
 import com.hazelcast.config.NearCacheConfig;
 import com.hazelcast.config.NearCachePreloaderConfig;
+import com.hazelcast.config.PersistentMemoryDirectoryConfig;
+import com.hazelcast.config.PersistentMemoryMode;
 import com.hazelcast.config.PredicateConfig;
 import com.hazelcast.config.QueryCacheConfig;
 import com.hazelcast.config.SSLConfig;
 import com.hazelcast.config.SerializationConfig;
 import com.hazelcast.config.SerializerConfig;
 import com.hazelcast.config.SocketInterceptorConfig;
+import com.hazelcast.config.security.JaasAuthenticationConfig;
+import com.hazelcast.config.security.KerberosIdentityConfig;
+import com.hazelcast.config.security.RealmConfig;
 import com.hazelcast.config.security.TokenEncoding;
 import com.hazelcast.config.security.TokenIdentityConfig;
 import com.hazelcast.config.security.UsernamePasswordIdentityConfig;
@@ -78,6 +87,7 @@ import static com.hazelcast.config.MaxSizePolicy.USED_NATIVE_MEMORY_SIZE;
 import static com.hazelcast.config.NearCacheConfig.LocalUpdatePolicy.CACHE_ON_UPDATE;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
 
 @RunWith(HazelcastParallelClassRunner.class)
@@ -245,7 +255,13 @@ public class ClientConfigXmlGeneratorTest extends HazelcastTestSupport {
             String testKey = generatedDiscoveryConfig.getProperty("testKey");
             assertEquals("testValue", testKey);
         }
+    }
 
+    @Test
+    public void networkAutoDetectionConfig() {
+        clientConfig.getNetworkConfig().getAutoDetectionConfig().setEnabled(false);
+        ClientConfig actualConfig = newConfigViaGenerator();
+        assertFalse(actualConfig.getNetworkConfig().getAutoDetectionConfig().isEnabled());
     }
 
     @Test
@@ -313,6 +329,26 @@ public class ClientConfigXmlGeneratorTest extends HazelcastTestSupport {
         clientConfig.getSecurityConfig().setTokenIdentityConfig(identityConfig);
         ClientConfig actual = newConfigViaGenerator();
         assertEquals(identityConfig, actual.getSecurityConfig().getTokenIdentityConfig());
+    }
+
+    @Test
+    public void kerberosIdentity() {
+        KerberosIdentityConfig identityConfig = new KerberosIdentityConfig()
+                .setRealm("realm")
+                .setSecurityRealm("security-realm")
+                .setPrincipal("jduke")
+                .setKeytabFile("/opt/keytab")
+                .setServiceNamePrefix("prefix")
+                .setSpn("spn");
+        RealmConfig realmConfig = new RealmConfig().setJaasAuthenticationConfig(new JaasAuthenticationConfig()
+                .addLoginModuleConfig(new LoginModuleConfig("test.Krb5LoginModule", LoginModuleUsage.REQUIRED)
+                        .setProperty("principal", "jduke")));
+
+        ClientSecurityConfig securityConfig = clientConfig.getSecurityConfig()
+            .setKerberosIdentityConfig(identityConfig)
+            .addRealmConfig("kerberos", realmConfig);
+        ClientConfig actual = newConfigViaGenerator();
+        assertEquals(securityConfig, actual.getSecurityConfig());
     }
 
     @Test
@@ -428,6 +464,42 @@ public class ClientConfigXmlGeneratorTest extends HazelcastTestSupport {
     }
 
     @Test
+    public void nativeMemoryWithPersistentMemory() {
+        NativeMemoryConfig expected = new NativeMemoryConfig();
+        expected.setEnabled(true)
+                .setAllocatorType(MemoryAllocatorType.STANDARD)
+                .setMetadataSpacePercentage(70)
+                .setMinBlockSize(randomInt())
+                .setPageSize(randomInt())
+                .setSize(new MemorySize(randomInt(), MemoryUnit.BYTES))
+                .getPersistentMemoryConfig()
+                .setEnabled(true)
+                .addDirectoryConfig(new PersistentMemoryDirectoryConfig("/mnt/pmem0", 0))
+                .addDirectoryConfig(new PersistentMemoryDirectoryConfig("/mnt/pmem1", 1));
+        clientConfig.setNativeMemoryConfig(expected);
+
+        NativeMemoryConfig actual = newConfigViaGenerator().getNativeMemoryConfig();
+        assertEquals(clientConfig.getNativeMemoryConfig(), actual);
+    }
+
+    @Test
+    public void nativeMemoryWithPersistentMemory_SystemMemoryMode() {
+        NativeMemoryConfig expected = new NativeMemoryConfig();
+        expected.setEnabled(true)
+                .setAllocatorType(MemoryAllocatorType.STANDARD)
+                .setMetadataSpacePercentage(70)
+                .setMinBlockSize(randomInt())
+                .setPageSize(randomInt())
+                .setSize(new MemorySize(randomInt(), MemoryUnit.BYTES))
+                .getPersistentMemoryConfig()
+                .setMode(PersistentMemoryMode.SYSTEM_MEMORY);
+        clientConfig.setNativeMemoryConfig(expected);
+
+        NativeMemoryConfig actual = newConfigViaGenerator().getNativeMemoryConfig();
+        assertEquals(clientConfig.getNativeMemoryConfig(), actual);
+    }
+
+    @Test
     public void proxyFactory() {
         ProxyFactoryConfig expected = new ProxyFactoryConfig();
         expected.setClassName(randomString())
@@ -441,8 +513,21 @@ public class ClientConfigXmlGeneratorTest extends HazelcastTestSupport {
     @Test
     public void loadBalancer() {
         clientConfig.setLoadBalancer(new RandomLB());
-        LoadBalancer actual = newConfigViaGenerator().getLoadBalancer();
+        ClientConfig newClientConfig = newConfigViaGenerator();
+        LoadBalancer actual = newClientConfig.getLoadBalancer();
         assertTrue(actual instanceof RandomLB);
+        String actualClassName = newClientConfig.getLoadBalancerClassName();
+        assertNull(actualClassName);
+    }
+
+    @Test
+    public void loadBalancerCustom() {
+        clientConfig.setLoadBalancer(new CustomLoadBalancer());
+        ClientConfig newClientConfig = newConfigViaGenerator();
+        LoadBalancer actual = newClientConfig.getLoadBalancer();
+        assertNull(actual);
+        String actualClassName = newClientConfig.getLoadBalancerClassName();
+        assertEquals("com.hazelcast.client.test.CustomLoadBalancer", actualClassName);
     }
 
     private NearCacheConfig createNearCacheConfig(String name) {
@@ -625,6 +710,20 @@ public class ClientConfigXmlGeneratorTest extends HazelcastTestSupport {
         assertEquals(originalConfig.isEnabled(), generatedConfig.isEnabled());
         assertEquals(originalConfig.getJmxConfig().isEnabled(), generatedConfig.getJmxConfig().isEnabled());
         assertEquals(originalConfig.getCollectionFrequencySeconds(), generatedConfig.getCollectionFrequencySeconds());
+    }
+
+    @Test
+    public void testInstanceTrackingConfig() {
+        clientConfig.getInstanceTrackingConfig()
+                    .setEnabled(true)
+                    .setFileName("/dummy/file")
+                    .setFormatPattern("dummy-pattern with $HZ_INSTANCE_TRACKING{placeholder} and $RND{placeholder}");
+
+        InstanceTrackingConfig originalConfig = clientConfig.getInstanceTrackingConfig();
+        InstanceTrackingConfig generatedConfig = newConfigViaGenerator().getInstanceTrackingConfig();
+        assertEquals(originalConfig.isEnabled(), generatedConfig.isEnabled());
+        assertEquals(originalConfig.getFileName(), generatedConfig.getFileName());
+        assertEquals(originalConfig.getFormatPattern(), generatedConfig.getFormatPattern());
     }
 
     private ClientConfig newConfigViaGenerator() {

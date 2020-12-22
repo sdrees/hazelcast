@@ -17,9 +17,9 @@
 package com.hazelcast.internal.ascii.rest;
 
 import com.hazelcast.internal.ascii.NoOpCommand;
-import com.hazelcast.internal.nio.Connection;
 import com.hazelcast.internal.nio.IOUtil;
 import com.hazelcast.internal.nio.ascii.TextDecoder;
+import com.hazelcast.internal.server.ServerConnection;
 import com.hazelcast.internal.util.StringUtil;
 
 import java.nio.BufferOverflowException;
@@ -46,9 +46,9 @@ public class HttpPostCommand extends HttpCommand {
     private ByteBuffer data;
     private String contentType;
     private ByteBuffer lineBuffer = ByteBuffer.allocate(INITIAL_CAPACITY);
-    private Connection connection;
+    private ServerConnection connection;
 
-    public HttpPostCommand(TextDecoder decoder, String uri, Connection connection) {
+    public HttpPostCommand(TextDecoder decoder, String uri, ServerConnection connection) {
         super(HTTP_POST, uri);
         this.decoder = decoder;
         this.connection = connection;
@@ -152,11 +152,11 @@ public class HttpPostCommand extends HttpCommand {
     }
 
     private void readLF(ByteBuffer cb) {
-        assert cb.hasRemaining() : "'\\n' should follow '\\r'";
+        assert cb.hasRemaining() : "'\\n' must follow '\\r'";
 
         byte b = cb.get();
         if (b != LINE_FEED) {
-            throw new IllegalStateException("'\\n' should follow '\\r', but got '" + (char) b + "'");
+            throw new IllegalStateException("'\\n' must follow '\\r', but got '" + (char) b + "'");
         }
     }
 
@@ -241,7 +241,7 @@ public class HttpPostCommand extends HttpCommand {
         }
     }
 
-    protected Connection getConnection() {
+    protected ServerConnection getConnection() {
         return connection;
     }
 }

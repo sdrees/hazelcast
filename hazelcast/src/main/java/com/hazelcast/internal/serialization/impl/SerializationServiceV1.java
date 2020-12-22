@@ -18,15 +18,43 @@ package com.hazelcast.internal.serialization.impl;
 
 import com.hazelcast.core.HazelcastJsonValue;
 import com.hazelcast.internal.nio.BufferObjectDataInput;
+import com.hazelcast.internal.serialization.Data;
 import com.hazelcast.internal.serialization.DataType;
-import com.hazelcast.internal.serialization.PortableContext;
-import com.hazelcast.internal.serialization.impl.ConstantSerializers.BooleanSerializer;
-import com.hazelcast.internal.serialization.impl.ConstantSerializers.ByteSerializer;
-import com.hazelcast.internal.serialization.impl.ConstantSerializers.StringArraySerializer;
+import com.hazelcast.internal.serialization.impl.defaultserializers.ArrayBlockingQueueStreamSerializer;
+import com.hazelcast.internal.serialization.impl.defaultserializers.ArrayDequeStreamSerializer;
+import com.hazelcast.internal.serialization.impl.defaultserializers.ArrayListStreamSerializer;
+import com.hazelcast.internal.serialization.impl.defaultserializers.ArrayStreamSerializer;
+import com.hazelcast.internal.serialization.impl.defaultserializers.ConcurrentHashMapStreamSerializer;
+import com.hazelcast.internal.serialization.impl.defaultserializers.ConcurrentSkipListMapStreamSerializer;
+import com.hazelcast.internal.serialization.impl.defaultserializers.ConcurrentSkipListSetStreamSerializer;
+import com.hazelcast.internal.serialization.impl.defaultserializers.ConstantSerializers;
+import com.hazelcast.internal.serialization.impl.defaultserializers.ConstantSerializers.BooleanSerializer;
+import com.hazelcast.internal.serialization.impl.defaultserializers.ConstantSerializers.ByteSerializer;
+import com.hazelcast.internal.serialization.impl.defaultserializers.ConstantSerializers.StringArraySerializer;
+import com.hazelcast.internal.serialization.impl.defaultserializers.CopyOnWriteArrayListStreamSerializer;
+import com.hazelcast.internal.serialization.impl.defaultserializers.CopyOnWriteArraySetStreamSerializer;
+import com.hazelcast.internal.serialization.impl.defaultserializers.DelayQueueStreamSerializer;
+import com.hazelcast.internal.serialization.impl.defaultserializers.HashMapStreamSerializer;
+import com.hazelcast.internal.serialization.impl.defaultserializers.HashSetStreamSerializer;
+import com.hazelcast.internal.serialization.impl.defaultserializers.JavaDefaultSerializers;
+import com.hazelcast.internal.serialization.impl.defaultserializers.JavaDefaultSerializers.OptionalSerializer;
+import com.hazelcast.internal.serialization.impl.defaultserializers.LinkedBlockingQueueStreamSerializer;
+import com.hazelcast.internal.serialization.impl.defaultserializers.LinkedHashMapStreamSerializer;
+import com.hazelcast.internal.serialization.impl.defaultserializers.LinkedHashSetStreamSerializer;
+import com.hazelcast.internal.serialization.impl.defaultserializers.LinkedListStreamSerializer;
+import com.hazelcast.internal.serialization.impl.defaultserializers.LinkedTransferQueueStreamSerializer;
+import com.hazelcast.internal.serialization.impl.defaultserializers.PriorityBlockingQueueStreamSerializer;
+import com.hazelcast.internal.serialization.impl.defaultserializers.PriorityQueueStreamSerializer;
+import com.hazelcast.internal.serialization.impl.defaultserializers.SynchronousQueueStreamSerializer;
+import com.hazelcast.internal.serialization.impl.defaultserializers.TreeMapStreamSerializer;
+import com.hazelcast.internal.serialization.impl.defaultserializers.TreeSetStreamSerializer;
+import com.hazelcast.internal.serialization.impl.portable.PortableContext;
+import com.hazelcast.internal.serialization.impl.portable.PortableContextImpl;
+import com.hazelcast.internal.serialization.impl.portable.PortableHookLoader;
+import com.hazelcast.internal.serialization.impl.portable.PortableSerializer;
 import com.hazelcast.nio.ObjectDataInput;
 import com.hazelcast.nio.serialization.ClassDefinition;
 import com.hazelcast.nio.serialization.ClassNameFilter;
-import com.hazelcast.internal.serialization.Data;
 import com.hazelcast.nio.serialization.DataSerializable;
 import com.hazelcast.nio.serialization.DataSerializableFactory;
 import com.hazelcast.nio.serialization.FieldDefinition;
@@ -34,7 +62,6 @@ import com.hazelcast.nio.serialization.FieldType;
 import com.hazelcast.nio.serialization.HazelcastSerializationException;
 import com.hazelcast.nio.serialization.Portable;
 import com.hazelcast.nio.serialization.PortableFactory;
-import com.hazelcast.nio.serialization.PortableReader;
 import com.hazelcast.partition.PartitioningStrategy;
 
 import java.io.Externalizable;
@@ -54,6 +81,7 @@ import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.LinkedList;
 import java.util.Map;
+import java.util.Optional;
 import java.util.PriorityQueue;
 import java.util.Set;
 import java.util.TreeMap;
@@ -71,33 +99,33 @@ import java.util.concurrent.LinkedTransferQueue;
 import java.util.concurrent.PriorityBlockingQueue;
 import java.util.concurrent.SynchronousQueue;
 
-import static com.hazelcast.internal.serialization.impl.ConstantSerializers.BooleanArraySerializer;
-import static com.hazelcast.internal.serialization.impl.ConstantSerializers.CharArraySerializer;
-import static com.hazelcast.internal.serialization.impl.ConstantSerializers.CharSerializer;
-import static com.hazelcast.internal.serialization.impl.ConstantSerializers.DoubleArraySerializer;
-import static com.hazelcast.internal.serialization.impl.ConstantSerializers.DoubleSerializer;
-import static com.hazelcast.internal.serialization.impl.ConstantSerializers.FloatArraySerializer;
-import static com.hazelcast.internal.serialization.impl.ConstantSerializers.FloatSerializer;
-import static com.hazelcast.internal.serialization.impl.ConstantSerializers.IntegerArraySerializer;
-import static com.hazelcast.internal.serialization.impl.ConstantSerializers.IntegerSerializer;
-import static com.hazelcast.internal.serialization.impl.ConstantSerializers.LongArraySerializer;
-import static com.hazelcast.internal.serialization.impl.ConstantSerializers.LongSerializer;
-import static com.hazelcast.internal.serialization.impl.ConstantSerializers.ShortArraySerializer;
-import static com.hazelcast.internal.serialization.impl.ConstantSerializers.ShortSerializer;
-import static com.hazelcast.internal.serialization.impl.ConstantSerializers.StringSerializer;
-import static com.hazelcast.internal.serialization.impl.ConstantSerializers.TheByteArraySerializer;
-import static com.hazelcast.internal.serialization.impl.ConstantSerializers.UuidSerializer;
-import static com.hazelcast.internal.serialization.impl.ConstantSerializers.SimpleEntrySerializer;
 import static com.hazelcast.internal.serialization.impl.DataSerializableSerializer.EE_FLAG;
 import static com.hazelcast.internal.serialization.impl.DataSerializableSerializer.IDS_FLAG;
 import static com.hazelcast.internal.serialization.impl.DataSerializableSerializer.isFlagSet;
-import static com.hazelcast.internal.serialization.impl.JavaDefaultSerializers.BigDecimalSerializer;
-import static com.hazelcast.internal.serialization.impl.JavaDefaultSerializers.BigIntegerSerializer;
-import static com.hazelcast.internal.serialization.impl.JavaDefaultSerializers.ClassSerializer;
-import static com.hazelcast.internal.serialization.impl.JavaDefaultSerializers.DateSerializer;
-import static com.hazelcast.internal.serialization.impl.JavaDefaultSerializers.HazelcastJsonValueSerializer;
-import static com.hazelcast.internal.serialization.impl.JavaDefaultSerializers.JavaSerializer;
 import static com.hazelcast.internal.serialization.impl.SerializationUtil.createSerializerAdapter;
+import static com.hazelcast.internal.serialization.impl.defaultserializers.ConstantSerializers.BooleanArraySerializer;
+import static com.hazelcast.internal.serialization.impl.defaultserializers.ConstantSerializers.CharArraySerializer;
+import static com.hazelcast.internal.serialization.impl.defaultserializers.ConstantSerializers.CharSerializer;
+import static com.hazelcast.internal.serialization.impl.defaultserializers.ConstantSerializers.DoubleArraySerializer;
+import static com.hazelcast.internal.serialization.impl.defaultserializers.ConstantSerializers.DoubleSerializer;
+import static com.hazelcast.internal.serialization.impl.defaultserializers.ConstantSerializers.FloatArraySerializer;
+import static com.hazelcast.internal.serialization.impl.defaultserializers.ConstantSerializers.FloatSerializer;
+import static com.hazelcast.internal.serialization.impl.defaultserializers.ConstantSerializers.IntegerArraySerializer;
+import static com.hazelcast.internal.serialization.impl.defaultserializers.ConstantSerializers.IntegerSerializer;
+import static com.hazelcast.internal.serialization.impl.defaultserializers.ConstantSerializers.LongArraySerializer;
+import static com.hazelcast.internal.serialization.impl.defaultserializers.ConstantSerializers.LongSerializer;
+import static com.hazelcast.internal.serialization.impl.defaultserializers.ConstantSerializers.ShortArraySerializer;
+import static com.hazelcast.internal.serialization.impl.defaultserializers.ConstantSerializers.ShortSerializer;
+import static com.hazelcast.internal.serialization.impl.defaultserializers.ConstantSerializers.SimpleEntrySerializer;
+import static com.hazelcast.internal.serialization.impl.defaultserializers.ConstantSerializers.StringSerializer;
+import static com.hazelcast.internal.serialization.impl.defaultserializers.ConstantSerializers.TheByteArraySerializer;
+import static com.hazelcast.internal.serialization.impl.defaultserializers.ConstantSerializers.UuidSerializer;
+import static com.hazelcast.internal.serialization.impl.defaultserializers.JavaDefaultSerializers.BigDecimalSerializer;
+import static com.hazelcast.internal.serialization.impl.defaultserializers.JavaDefaultSerializers.BigIntegerSerializer;
+import static com.hazelcast.internal.serialization.impl.defaultserializers.JavaDefaultSerializers.ClassSerializer;
+import static com.hazelcast.internal.serialization.impl.defaultserializers.JavaDefaultSerializers.DateSerializer;
+import static com.hazelcast.internal.serialization.impl.defaultserializers.JavaDefaultSerializers.HazelcastJsonValueSerializer;
+import static com.hazelcast.internal.serialization.impl.defaultserializers.JavaDefaultSerializers.JavaSerializer;
 import static com.hazelcast.internal.util.MapUtil.createHashMap;
 
 public class SerializationServiceV1 extends AbstractSerializationService {
@@ -111,20 +139,19 @@ public class SerializationServiceV1 extends AbstractSerializationService {
     SerializationServiceV1(AbstractBuilder<?> builder) {
         super(builder);
         PortableHookLoader loader = new PortableHookLoader(builder.portableFactories, builder.getClassLoader());
-        portableContext = new PortableContextImpl(this, builder.portableVersion);
+        portableContext = new PortableContextImpl(this, builder.portableVersion, builder.checkClassDefErrors);
         for (ClassDefinition cd : loader.getDefinitions()) {
             portableContext.registerClassDefinition(cd);
         }
-
         dataSerializerAdapter = createSerializerAdapter(
-                new DataSerializableSerializer(builder.dataSerializableFactories, builder.getClassLoader()), this);
+                new DataSerializableSerializer(builder.dataSerializableFactories, builder.getClassLoader()));
         portableSerializer = new PortableSerializer(portableContext, loader.getFactories());
-        portableSerializerAdapter = createSerializerAdapter(portableSerializer, this);
+        portableSerializerAdapter = createSerializerAdapter(portableSerializer);
 
         javaSerializerAdapter = createSerializerAdapter(
-                new JavaSerializer(builder.enableSharedObject, builder.enableCompression, builder.classNameFilter), this);
+                new JavaSerializer(builder.enableSharedObject, builder.enableCompression, builder.classNameFilter));
         javaExternalizableAdapter = createSerializerAdapter(
-                new JavaDefaultSerializers.ExternalizableSerializer(builder.enableCompression, builder.classNameFilter), this);
+                new JavaDefaultSerializers.ExternalizableSerializer(builder.enableCompression, builder.classNameFilter));
         registerConstantSerializers();
         registerJavaTypeSerializers();
     }
@@ -153,12 +180,12 @@ public class SerializationServiceV1 extends AbstractSerializationService {
         return (B) data;
     }
 
-    public PortableReader createPortableReader(Data data) throws IOException {
+    public InternalGenericRecord readAsInternalGenericRecord(Data data) throws IOException {
         if (!data.isPortable()) {
             throw new IllegalArgumentException("Given data is not Portable! -> " + data.getType());
         }
         BufferObjectDataInput in = createObjectDataInput(data);
-        return portableSerializer.createReader(in);
+        return portableSerializer.readAsInternalGenericRecord(in);
     }
 
     public PortableContext getPortableContext() {
@@ -197,6 +224,7 @@ public class SerializationServiceV1 extends AbstractSerializationService {
     private void registerJavaTypeSerializers() {
         //Java extensions: more serializers
         registerConstant(Class.class, new ClassSerializer());
+        registerConstant(Optional.class, new OptionalSerializer());
         registerConstant(Date.class, new DateSerializer());
         registerConstant(BigInteger.class, new BigIntegerSerializer());
         registerConstant(BigDecimal.class, new BigDecimalSerializer());
@@ -232,40 +260,50 @@ public class SerializationServiceV1 extends AbstractSerializationService {
         safeRegister(HazelcastJsonValue.class, new HazelcastJsonValueSerializer());
     }
 
-    public void registerClassDefinitions(Collection<ClassDefinition> classDefinitions, boolean checkClassDefErrors) {
-        final Map<Integer, ClassDefinition> classDefMap = createHashMap(classDefinitions.size());
+    public void registerClassDefinitions(Collection<ClassDefinition> classDefinitions) {
+        Map<Integer, Map<Integer, ClassDefinition>> factoryMap = createHashMap(classDefinitions.size());
         for (ClassDefinition cd : classDefinitions) {
-            if (classDefMap.containsKey(cd.getClassId())) {
-                throw new HazelcastSerializationException("Duplicate registration found for class-id[" + cd.getClassId() + "]!");
+            int factoryId = cd.getFactoryId();
+            Map<Integer, ClassDefinition> classDefMap = factoryMap.computeIfAbsent(factoryId, k -> new HashMap<>());
+            int classId = cd.getClassId();
+            if (classDefMap.containsKey(classId)) {
+                throw new HazelcastSerializationException("Duplicate registration found for factory-id : "
+                        + factoryId + ", class-id " + classId);
             }
-            classDefMap.put(cd.getClassId(), cd);
+            classDefMap.put(classId, cd);
         }
         for (ClassDefinition classDefinition : classDefinitions) {
-            registerClassDefinition(classDefinition, classDefMap, checkClassDefErrors);
+            registerClassDefinition(classDefinition, factoryMap);
         }
     }
 
-    protected void registerClassDefinition(ClassDefinition cd, Map<Integer, ClassDefinition> classDefMap,
-                                           boolean checkClassDefErrors) {
-        final Set<String> fieldNames = cd.getFieldNames();
+    private void registerClassDefinition(ClassDefinition cd, Map<Integer, Map<Integer, ClassDefinition>> factoryMap) {
+        Set<String> fieldNames = cd.getFieldNames();
         for (String fieldName : fieldNames) {
             FieldDefinition fd = cd.getField(fieldName);
             if (fd.getType() == FieldType.PORTABLE || fd.getType() == FieldType.PORTABLE_ARRAY) {
+                int factoryId = fd.getFactoryId();
                 int classId = fd.getClassId();
-                ClassDefinition nestedCd = classDefMap.get(classId);
-                if (nestedCd != null) {
-                    registerClassDefinition(nestedCd, classDefMap, checkClassDefErrors);
-                    portableContext.registerClassDefinition(nestedCd);
-                } else if (checkClassDefErrors) {
-                    throw new HazelcastSerializationException(
-                            "Could not find registered ClassDefinition for class-id: " + classId);
+                Map<Integer, ClassDefinition> classDefinitionMap = factoryMap.get(factoryId);
+                if (classDefinitionMap != null) {
+                    ClassDefinition nestedCd = classDefinitionMap.get(classId);
+                    if (nestedCd != null) {
+                        registerClassDefinition(nestedCd, factoryMap);
+                        portableContext.registerClassDefinition(nestedCd);
+                        continue;
+                    }
                 }
+                if (portableContext.shouldCheckClassDefinitionErrors()) {
+                    throw new HazelcastSerializationException("Could not find registered ClassDefinition for factory-id : "
+                            + factoryId + ", class-id " + classId);
+                }
+
             }
         }
         portableContext.registerClassDefinition(cd);
     }
 
-    final PortableSerializer getPortableSerializer() {
+    public final PortableSerializer getPortableSerializer() {
         return portableSerializer;
     }
 
@@ -310,6 +348,7 @@ public class SerializationServiceV1 extends AbstractSerializationService {
         private boolean enableCompression;
         private boolean enableSharedObject;
         private ClassNameFilter classNameFilter;
+        private boolean checkClassDefErrors;
 
         protected AbstractBuilder() {
         }
@@ -346,6 +385,11 @@ public class SerializationServiceV1 extends AbstractSerializationService {
 
         public final T withClassNameFilter(ClassNameFilter classNameFilter) {
             this.classNameFilter = classNameFilter;
+            return self();
+        }
+
+        public final T withCheckClassDefErrors(boolean checkClassDefErrors) {
+            this.checkClassDefErrors = checkClassDefErrors;
             return self();
         }
     }

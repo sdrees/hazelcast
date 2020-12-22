@@ -64,6 +64,7 @@ import com.hazelcast.scheduledexecutor.impl.DistributedScheduledExecutorService;
 import com.hazelcast.spi.impl.SerializationServiceSupport;
 import com.hazelcast.spi.impl.proxyservice.ProxyService;
 import com.hazelcast.splitbrainprotection.SplitBrainProtectionService;
+import com.hazelcast.sql.SqlService;
 import com.hazelcast.topic.ITopic;
 import com.hazelcast.topic.impl.TopicService;
 import com.hazelcast.topic.impl.reliable.ReliableTopicService;
@@ -407,6 +408,12 @@ public class HazelcastInstanceImpl implements HazelcastInstance, SerializationSe
     @Override
     public CPSubsystem getCPSubsystem() {
         return cpSubsystem;
+    }
+
+    @Nonnull
+    @Override
+    public SqlService getSql() {
+        return node.getNodeEngine().getSqlService();
     }
 
     @Override

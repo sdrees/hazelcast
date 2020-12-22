@@ -36,7 +36,7 @@ import static com.hazelcast.client.impl.protocol.codec.builtin.FixedSizeTypesCod
 /**
  * Promotes the local member to the CP role.
  */
-@Generated("515b34a3f7c98267ff8b148f790e11c9")
+@Generated("b96a15891898b7e86233db7a8b31122e")
 public final class MCPromoteToCPMemberCodec {
     //hex: 0x201A00
     public static final int REQUEST_MESSAGE_TYPE = 2103808;
@@ -46,10 +46,6 @@ public final class MCPromoteToCPMemberCodec {
     private static final int RESPONSE_INITIAL_FRAME_SIZE = RESPONSE_BACKUP_ACKS_FIELD_OFFSET + BYTE_SIZE_IN_BYTES;
 
     private MCPromoteToCPMemberCodec() {
-    }
-
-    @edu.umd.cs.findbugs.annotations.SuppressFBWarnings({"URF_UNREAD_PUBLIC_OR_PROTECTED_FIELD"})
-    public static class RequestParameters {
     }
 
     public static ClientMessage encodeRequest() {
@@ -63,17 +59,6 @@ public final class MCPromoteToCPMemberCodec {
         return clientMessage;
     }
 
-    public static MCPromoteToCPMemberCodec.RequestParameters decodeRequest(ClientMessage clientMessage) {
-        ClientMessage.ForwardFrameIterator iterator = clientMessage.frameIterator();
-        RequestParameters request = new RequestParameters();
-        //empty initial frame
-        iterator.next();
-        return request;
-    }
-
-    @edu.umd.cs.findbugs.annotations.SuppressFBWarnings({"URF_UNREAD_PUBLIC_OR_PROTECTED_FIELD"})
-    public static class ResponseParameters {
-    }
 
     public static ClientMessage encodeResponse() {
         ClientMessage clientMessage = ClientMessage.createForEncode();
@@ -84,12 +69,5 @@ public final class MCPromoteToCPMemberCodec {
         return clientMessage;
     }
 
-    public static MCPromoteToCPMemberCodec.ResponseParameters decodeResponse(ClientMessage clientMessage) {
-        ClientMessage.ForwardFrameIterator iterator = clientMessage.frameIterator();
-        ResponseParameters response = new ResponseParameters();
-        //empty initial frame
-        iterator.next();
-        return response;
-    }
 
 }

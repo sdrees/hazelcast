@@ -18,7 +18,6 @@ package com.hazelcast.query.impl;
 
 import com.hazelcast.config.IndexConfig;
 import com.hazelcast.internal.serialization.InternalSerializationService;
-import com.hazelcast.map.impl.StoreAdapter;
 import com.hazelcast.internal.monitor.impl.PerIndexStats;
 import com.hazelcast.query.impl.getters.Extractors;
 
@@ -43,11 +42,10 @@ public interface IndexProvider {
      * @return the created index instance.
      */
     InternalIndex createIndex(
-        IndexConfig config,
-        Extractors extractors,
-        InternalSerializationService ss,
-        IndexCopyBehavior copyBehavior,
-        PerIndexStats stats,
-        StoreAdapter storeAdapter
-    );
+            IndexConfig config,
+            Extractors extractors,
+            InternalSerializationService ss,
+            IndexCopyBehavior copyBehavior,
+            PerIndexStats stats,
+            int partitionCount);
 }

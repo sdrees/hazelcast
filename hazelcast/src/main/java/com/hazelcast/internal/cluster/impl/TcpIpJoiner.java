@@ -64,7 +64,7 @@ public class TcpIpJoiner extends AbstractJoiner {
         super(node);
         int tryCount = node.getProperties().getInteger(ClusterProperty.TCP_JOIN_PORT_TRY_COUNT);
         if (tryCount <= 0) {
-            throw new IllegalArgumentException(String.format("%s should be greater than zero! Current value: %d",
+            throw new IllegalArgumentException(String.format("%s must be greater than zero! Current value: %d",
                     ClusterProperty.TCP_JOIN_PORT_TRY_COUNT, tryCount));
         }
         maxPortTryCount = tryCount;
@@ -113,7 +113,7 @@ public class TcpIpJoiner extends AbstractJoiner {
             Connection connection;
             while (shouldRetry() && (Clock.currentTimeMillis() - joinStartTime < maxJoinMillis)) {
 
-                connection = node.getEndpointManager(MEMBER).getOrConnect(targetAddress);
+                connection = node.getServer().getConnectionManager(MEMBER).getOrConnect(targetAddress);
                 if (connection == null) {
                     //noinspection BusyWait
                     Thread.sleep(JOIN_RETRY_WAIT_TIME);
@@ -122,7 +122,7 @@ public class TcpIpJoiner extends AbstractJoiner {
                 if (logger.isFineEnabled()) {
                     logger.fine("Sending joinRequest " + targetAddress);
                 }
-                clusterJoinManager.sendJoinRequest(targetAddress, true);
+                clusterJoinManager.sendJoinRequest(targetAddress);
                 //noinspection BusyWait
                 Thread.sleep(JOIN_RETRY_WAIT_TIME);
             }
@@ -231,7 +231,7 @@ public class TcpIpJoiner extends AbstractJoiner {
             if (isBlacklisted(address)) {
                 continue;
             }
-            if (node.getEndpointManager(MEMBER).getConnection(address) != null) {
+            if (node.getServer().getConnectionManager(MEMBER).get(address) != null) {
                 if (thisHashCode > address.hashCode()) {
                     return false;
                 }
@@ -254,7 +254,7 @@ public class TcpIpJoiner extends AbstractJoiner {
                 if (logger.isFineEnabled()) {
                     logger.fine("Sending join request to " + masterAddress);
                 }
-                clusterJoinManager.sendJoinRequest(masterAddress, true);
+                clusterJoinManager.sendJoinRequest(masterAddress);
             } else {
                 sendMasterQuestion(addresses);
             }

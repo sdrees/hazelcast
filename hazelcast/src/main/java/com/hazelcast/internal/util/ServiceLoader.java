@@ -26,7 +26,9 @@ import java.io.InputStreamReader;
 import java.lang.reflect.Constructor;
 import java.lang.reflect.InvocationTargetException;
 import java.net.URI;
+import java.net.URISyntaxException;
 import java.net.URL;
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Enumeration;
@@ -70,7 +72,7 @@ public final class ServiceLoader {
 
     public static <T> Iterator<T> iterator(Class<T> expectedType, String factoryId, ClassLoader classLoader) throws Exception {
         Iterator<Class<T>> classIterator = classIterator(expectedType, factoryId, classLoader);
-        return new NewInstanceIterator<T>(classIterator);
+        return new NewInstanceIterator<>(classIterator);
     }
 
     public static <T> Iterator<Class<T>> classIterator(Class<T> expectedType, String factoryId, ClassLoader classLoader)
@@ -106,13 +108,8 @@ public final class ServiceLoader {
             Set<URLDefinition> urlDefinitions = new HashSet<URLDefinition>();
             while (configs.hasMoreElements()) {
                 URL url = configs.nextElement();
-                String externalForm = url.toExternalForm()
-                                         .replace(" ", "%20")
-                                         .replace("^", "%5e");
-                URI uri = new URI(externalForm);
-
                 if (!classLoader.getClass().getName().equals(IGNORED_GLASSFISH_MAGIC_CLASSLOADER)) {
-                    urlDefinitions.add(new URLDefinition(uri, classLoader));
+                    urlDefinitions.add(new URLDefinition(url, classLoader));
                 }
             }
             return urlDefinitions;
@@ -128,8 +125,8 @@ public final class ServiceLoader {
             Set<ServiceDefinition> names = new HashSet<ServiceDefinition>();
             BufferedReader r = null;
             try {
-                URL url = urlDefinition.uri.toURL();
-                r = new BufferedReader(new InputStreamReader(url.openStream(), "UTF-8"));
+                URL url = urlDefinition.url;
+                r = new BufferedReader(new InputStreamReader(url.openStream(), StandardCharsets.UTF_8));
                 while (true) {
                     String line = r.readLine();
                     if (line == null) {
@@ -157,7 +154,7 @@ public final class ServiceLoader {
 
     static List<ClassLoader> selectClassLoaders(ClassLoader classLoader) {
         // list prevents reordering!
-        List<ClassLoader> classLoaders = new ArrayList<ClassLoader>();
+        List<ClassLoader> classLoaders = new ArrayList<>();
 
         if (classLoader != null) {
             classLoaders.add(classLoader);
@@ -233,15 +230,23 @@ public final class ServiceLoader {
 
     /**
      * This class keeps track of available service definition URLs and
-     * the corresponding classloaders.
+     * the corresponding classloaders. It uses the URLs URI for hashing andd
+     * equality comparison, rather than the URL itself. The specifications for
+     * hashing and equality on URL are unusual, and involve blocking DNS
+     * lookups. However, the conversion from URL to URI is lossy, so if there
+     * are multiple URLs that map to the same URI, then they may be considered
+     * equal even if the URLs are not. If these are put in a HashSet, then the
+     * last added element wins.
      */
     private static final class URLDefinition {
 
+        private final URL url;
         private final URI uri;
         private final ClassLoader classLoader;
 
-        private URLDefinition(URI url, ClassLoader classLoader) {
-            this.uri = url;
+        private URLDefinition(URL url, ClassLoader classLoader) throws URISyntaxException {
+            this.url = url;
+            this.uri = url == null ? null : url.toURI();
             this.classLoader = classLoader;
         }
 
@@ -375,7 +380,7 @@ public final class ServiceLoader {
             if (className.startsWith("com.hazelcast")) {
                 LOGGER.fine("Failed to load " + className + " by " + classLoader
                         + ". This indicates a classloading issue. It can happen in a runtime with "
-                        + "a complicated classloading model. (OSGi, Java EE, etc);");
+                        + "a complicated classloading model (OSGi, Java EE, etc)");
             } else {
                 throw new HazelcastException(e);
             }
@@ -385,17 +390,22 @@ public final class ServiceLoader {
             if (expectedType.isInterface()) {
                 if (ClassLoaderUtil.implementsInterfaceWithSameName(candidate, expectedType)) {
                     // this can happen in application containers - different Hazelcast JARs are loaded
-                    // by different classloaders.
+                    // by different class loaders.
                     LOGGER.fine("There appears to be a classloading conflict. "
                             + "Class " + className + " loaded by " + candidate.getClassLoader() + " implements "
                             + expectedType.getName() + " from its own class loader, but it does not implement "
                             + expectedType.getName() + " loaded by " + expectedType.getClassLoader());
                 } else {
-                    //the class does not implement interface with the expected name.
-                    LOGGER.fine("There appears to be a classloading conflict. "
-                            + "Class " + className + " loaded by " + candidate.getClassLoader() + " does not "
-                            + "implement an interface with name " + expectedType.getName() + " in both class loaders."
-                            + "the interface currently loaded by " + expectedType.getClassLoader());
+                    // the class does not implement an interface with the expected name
+                    if (candidate.getClassLoader() != expectedType.getClassLoader()) {
+                        LOGGER.fine("There appears to be a classloading conflict. "
+                                + "Class " + className + " loaded by " + candidate.getClassLoader() + " does not "
+                                + "implement an interface with name " + expectedType.getName() + " in both class loaders. "
+                                + "The interface is currently loaded by " + expectedType.getClassLoader());
+                    } else {
+                        LOGGER.fine("The class " + candidate.getName() + " does not implement the expected "
+                                + "interface " + expectedType.getName());
+                    }
                 }
             }
         }

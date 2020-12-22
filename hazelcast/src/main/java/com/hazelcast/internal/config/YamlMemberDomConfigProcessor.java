@@ -22,8 +22,6 @@ import com.hazelcast.config.CacheSimpleConfig;
 import com.hazelcast.config.CardinalityEstimatorConfig;
 import com.hazelcast.config.ClassFilter;
 import com.hazelcast.config.Config;
-import com.hazelcast.config.WanBatchPublisherConfig;
-import com.hazelcast.config.WanCustomPublisherConfig;
 import com.hazelcast.config.DiscoveryConfig;
 import com.hazelcast.config.DurableExecutorConfig;
 import com.hazelcast.config.EndpointConfig;
@@ -43,12 +41,13 @@ import com.hazelcast.config.MapPartitionLostListenerConfig;
 import com.hazelcast.config.MemberGroupConfig;
 import com.hazelcast.config.MergePolicyConfig;
 import com.hazelcast.config.MultiMapConfig;
-import com.hazelcast.config.MulticastConfig;
 import com.hazelcast.config.NetworkConfig;
 import com.hazelcast.config.OnJoinPermissionOperationName;
 import com.hazelcast.config.PNCounterConfig;
 import com.hazelcast.config.PermissionConfig;
 import com.hazelcast.config.PermissionConfig.PermissionType;
+import com.hazelcast.config.PersistentMemoryConfig;
+import com.hazelcast.config.PersistentMemoryDirectoryConfig;
 import com.hazelcast.config.PredicateConfig;
 import com.hazelcast.config.QueryCacheConfig;
 import com.hazelcast.config.QueueConfig;
@@ -66,6 +65,9 @@ import com.hazelcast.config.SplitBrainProtectionConfig;
 import com.hazelcast.config.SplitBrainProtectionListenerConfig;
 import com.hazelcast.config.TcpIpConfig;
 import com.hazelcast.config.TopicConfig;
+import com.hazelcast.config.TrustedInterfacesConfigurable;
+import com.hazelcast.config.WanBatchPublisherConfig;
+import com.hazelcast.config.WanCustomPublisherConfig;
 import com.hazelcast.config.WanReplicationConfig;
 import com.hazelcast.config.WanReplicationRef;
 import com.hazelcast.config.cp.CPSubsystemConfig;
@@ -76,6 +78,7 @@ import com.hazelcast.config.security.RealmConfig;
 import com.hazelcast.config.security.TokenEncoding;
 import com.hazelcast.config.security.TokenIdentityConfig;
 import com.hazelcast.instance.ProtocolType;
+import com.hazelcast.internal.util.StringUtil;
 import com.hazelcast.internal.yaml.YamlMapping;
 import com.hazelcast.internal.yaml.YamlNode;
 import com.hazelcast.internal.yaml.YamlScalar;
@@ -88,6 +91,7 @@ import org.w3c.dom.NodeList;
 import java.nio.ByteOrder;
 import java.util.Map;
 import java.util.Properties;
+import java.util.function.Consumer;
 import java.util.function.Function;
 
 import static com.hazelcast.internal.config.DomConfigHelper.childElements;
@@ -102,12 +106,18 @@ import static com.hazelcast.internal.yaml.YamlUtil.asScalar;
 import static java.lang.Integer.parseInt;
 
 @SuppressWarnings({"checkstyle:methodcount",
-        "checkstyle:cyclomaticcomplexity",
-        "checkstyle:classfanoutcomplexity",
-        "checkstyle:classdataabstractioncoupling"})
+                   "checkstyle:cyclomaticcomplexity",
+                   "checkstyle:classfanoutcomplexity",
+                   "checkstyle:classdataabstractioncoupling"})
 public class YamlMemberDomConfigProcessor extends MemberDomConfigProcessor {
+
+
     public YamlMemberDomConfigProcessor(boolean domLevel3, Config config) {
         super(domLevel3, config);
+    }
+
+    public YamlMemberDomConfigProcessor(boolean domLevel3, Config config, boolean strict) {
+        super(domLevel3, config, strict);
     }
 
     @Override
@@ -124,55 +134,16 @@ public class YamlMemberDomConfigProcessor extends MemberDomConfigProcessor {
                     .valueOf(upperCaseInternal(onJoinOp));
             config.getSecurityConfig().setOnJoinPermissionOperation(onJoinPermissionOperation);
         }
-        for (Node child : childElements(node)) {
+        Iterable<Node> nodes = childElements(node);
+        for (Node child : nodes) {
             String nodeName = cleanNodeName(child);
-            PermissionType type;
-            if ("map".equals(nodeName)) {
-                type = PermissionConfig.PermissionType.MAP;
-            } else if ("queue".equals(nodeName)) {
-                type = PermissionConfig.PermissionType.QUEUE;
-            } else if ("multimap".equals(nodeName)) {
-                type = PermissionConfig.PermissionType.MULTIMAP;
-            } else if ("topic".equals(nodeName)) {
-                type = PermissionConfig.PermissionType.TOPIC;
-            } else if ("list".equals(nodeName)) {
-                type = PermissionConfig.PermissionType.LIST;
-            } else if ("set".equals(nodeName)) {
-                type = PermissionConfig.PermissionType.SET;
-            } else if ("lock".equals(nodeName)) {
-                type = PermissionConfig.PermissionType.LOCK;
-            } else if ("atomic-long".equals(nodeName)) {
-                type = PermissionConfig.PermissionType.ATOMIC_LONG;
-            } else if ("atomic-reference".equals(nodeName)) {
-                type = PermissionConfig.PermissionType.ATOMIC_REFERENCE;
-            } else if ("countdown-latch".equals(nodeName)) {
-                type = PermissionConfig.PermissionType.COUNTDOWN_LATCH;
-            } else if ("semaphore".equals(nodeName)) {
-                type = PermissionConfig.PermissionType.SEMAPHORE;
-            } else if ("flake-id-generator".equals(nodeName)) {
-                type = PermissionConfig.PermissionType.FLAKE_ID_GENERATOR;
-            } else if ("executor-service".equals(nodeName)) {
-                type = PermissionConfig.PermissionType.EXECUTOR_SERVICE;
-            } else if ("transaction".equals(nodeName)) {
-                type = PermissionConfig.PermissionType.TRANSACTION;
-            } else if ("all".equals(nodeName)) {
-                type = PermissionConfig.PermissionType.ALL;
-            } else if ("durable-executor-service".equals(nodeName)) {
-                type = PermissionConfig.PermissionType.DURABLE_EXECUTOR_SERVICE;
-            } else if ("cardinality-estimator".equals(nodeName)) {
-                type = PermissionConfig.PermissionType.CARDINALITY_ESTIMATOR;
-            } else if ("scheduled-executor".equals(nodeName)) {
-                type = PermissionConfig.PermissionType.SCHEDULED_EXECUTOR;
-            } else if ("pn-counter".equals(nodeName)) {
-                type = PermissionConfig.PermissionType.PN_COUNTER;
-            } else if ("cache".equals(nodeName)) {
-                type = PermissionConfig.PermissionType.CACHE;
-            } else if ("user-code-deployment".equals(nodeName)) {
-                type = PermissionConfig.PermissionType.USER_CODE_DEPLOYMENT;
-            } else if ("config".equals(nodeName)) {
-                type = PermissionConfig.PermissionType.CONFIG;
-            } else {
+            if (matches("on-join-operation", nodeName)) {
                 continue;
+            }
+            nodeName = matches("all", nodeName) ? nodeName + "-permissions" : nodeName + "-permission";
+            PermissionType type = PermissionConfig.PermissionType.getType(nodeName);
+            if (type == null) {
+                throw new InvalidConfigurationException("Security permission type is not valid " + nodeName);
             }
 
             if (PermissionConfig.PermissionType.CONFIG == type
@@ -194,7 +165,7 @@ public class YamlMemberDomConfigProcessor extends MemberDomConfigProcessor {
     @Override
     void handleSecurityPermissionActions(Node node, PermissionConfig permConfig) {
         for (Node child : childElements(node)) {
-            permConfig.addAction(getTextContent(child).trim());
+            permConfig.addAction(getTextContent(child));
         }
     }
 
@@ -206,13 +177,13 @@ public class YamlMemberDomConfigProcessor extends MemberDomConfigProcessor {
     }
 
     @Override
-    protected void handleTrustedInterfaces(MulticastConfig multicastConfig, Node n) {
+    protected void handleTrustedInterfaces(TrustedInterfacesConfigurable<?> tiConfig, Node n) {
         YamlSequence yamlNode = getWrappedYamlSequence(n);
         for (YamlNode interfaceNode : yamlNode.children()) {
             String trustedInterface = asScalar(interfaceNode).nodeValue();
-            multicastConfig.addTrustedInterface(trustedInterface);
+            tiConfig.addTrustedInterface(trustedInterface);
         }
-        super.handleTrustedInterfaces(multicastConfig, n);
+        super.handleTrustedInterfaces(tiConfig, n);
     }
 
     @Override
@@ -226,11 +197,11 @@ public class YamlMemberDomConfigProcessor extends MemberDomConfigProcessor {
 
     @Override
     protected void handleWanReplicationChild(WanReplicationConfig wanReplicationConfig, Node nodeTarget, String nodeName) {
-        if ("batch-publisher".equals(nodeName)) {
+        if (matches("batch-publisher", nodeName)) {
             for (Node publisherNode : childElements(nodeTarget)) {
                 WanBatchPublisherConfig publisherConfig = new WanBatchPublisherConfig();
                 String clusterNameOrPublisherId = publisherNode.getNodeName();
-                Node clusterNameAttr = publisherNode.getAttributes().getNamedItem("cluster-name");
+                Node clusterNameAttr = getNamedItemNode(publisherNode, "cluster-name");
 
                 // the publisher's key may mean either the publisher-id or the
                 // cluster-name depending on whether the cluster-name is explicitly defined
@@ -241,13 +212,13 @@ public class YamlMemberDomConfigProcessor extends MemberDomConfigProcessor {
 
                 handleBatchWanPublisherNode(wanReplicationConfig, publisherNode, publisherConfig);
             }
-        } else if ("custom-publisher".equals(nodeName)) {
+        } else if (matches("custom-publisher", nodeName)) {
             for (Node publisherNode : childElements(nodeTarget)) {
                 WanCustomPublisherConfig publisherConfig = new WanCustomPublisherConfig();
                 publisherConfig.setPublisherId(publisherNode.getNodeName());
                 handleCustomWanPublisherNode(wanReplicationConfig, publisherNode, publisherConfig);
             }
-        } else if ("consumer".equals(nodeName)) {
+        } else if (matches("consumer", nodeName)) {
             handleWanConsumerNode(wanReplicationConfig, nodeTarget);
         }
     }
@@ -258,15 +229,14 @@ public class YamlMemberDomConfigProcessor extends MemberDomConfigProcessor {
         NamedNodeMap attributes = node.getAttributes();
         for (int a = 0; a < attributes.getLength(); a++) {
             Node att = attributes.item(a);
-            String value = getTextContent(att).trim();
 
-            if ("port".equals(att.getNodeName())) {
-                int portCount = parseInt(value);
+            if (matches("port", att.getNodeName())) {
+                int portCount = parseInt(getTextContent(att));
                 networkConfig.setPort(portCount);
-            } else if ("auto-increment".equals(att.getNodeName())) {
-                networkConfig.setPortAutoIncrement(getBooleanValue(value));
-            } else if ("port-count".equals(att.getNodeName())) {
-                int portCount = parseInt(value);
+            } else if (matches("auto-increment", att.getNodeName())) {
+                networkConfig.setPortAutoIncrement(getBooleanValue(getTextContent(att)));
+            } else if (matches("port-count", att.getNodeName())) {
+                int portCount = parseInt(getTextContent(att));
                 networkConfig.setPortCount(portCount);
             }
         }
@@ -275,8 +245,7 @@ public class YamlMemberDomConfigProcessor extends MemberDomConfigProcessor {
     @Override
     protected void handleQueue(Node node) {
         for (Node queueNode : childElements(node)) {
-            QueueConfig queueConfig = new QueueConfig();
-            queueConfig.setName(queueNode.getNodeName());
+            QueueConfig queueConfig = config.getQueueConfig(queueNode.getNodeName());
             handleQueueNode(queueNode, queueConfig);
         }
     }
@@ -284,8 +253,7 @@ public class YamlMemberDomConfigProcessor extends MemberDomConfigProcessor {
     @Override
     protected void handleList(Node node) {
         for (Node listNode : childElements(node)) {
-            ListConfig listConfig = new ListConfig();
-            listConfig.setName(listNode.getNodeName());
+            ListConfig listConfig = config.getListConfig(listNode.getNodeName());
             handleListNode(listNode, listConfig);
         }
     }
@@ -293,8 +261,7 @@ public class YamlMemberDomConfigProcessor extends MemberDomConfigProcessor {
     @Override
     protected void handleSet(Node node) {
         for (Node setNode : childElements(node)) {
-            SetConfig setConfig = new SetConfig();
-            setConfig.setName(setNode.getNodeName());
+            SetConfig setConfig = config.getSetConfig(setNode.getNodeName());
             handleSetNode(setNode, setConfig);
         }
     }
@@ -329,8 +296,7 @@ public class YamlMemberDomConfigProcessor extends MemberDomConfigProcessor {
     @Override
     protected void handleMap(Node parentNode) throws Exception {
         for (Node mapNode : childElements(parentNode)) {
-            MapConfig mapConfig = new MapConfig();
-            mapConfig.setName(mapNode.getNodeName());
+            MapConfig mapConfig = config.getMapConfig(mapNode.getNodeName());
             handleMapNode(mapNode, mapConfig);
         }
     }
@@ -347,18 +313,18 @@ public class YamlMemberDomConfigProcessor extends MemberDomConfigProcessor {
     @Override
     protected void handleSplitBrainProtection(Node node) {
         for (Node splitBrainProtectionNode : childElements(node)) {
-            SplitBrainProtectionConfig splitBrainProtectionConfig = new SplitBrainProtectionConfig();
-            String splitBrainProtectionName = splitBrainProtectionNode.getNodeName();
-            splitBrainProtectionConfig.setName(splitBrainProtectionName);
-            handleSplitBrainProtectionNode(splitBrainProtectionNode, splitBrainProtectionConfig, splitBrainProtectionName);
+            String name = splitBrainProtectionNode.getNodeName();
+            SplitBrainProtectionConfig splitBrainProtectionConfig = config.getSplitBrainProtectionConfig(name);
+            handleSplitBrainProtectionNode(splitBrainProtectionNode, splitBrainProtectionConfig, name);
         }
     }
 
     @Override
     protected void handleFlakeIdGenerator(Node node) {
         for (Node genNode : childElements(node)) {
-            FlakeIdGeneratorConfig genConfig = new FlakeIdGeneratorConfig();
-            genConfig.setName(genNode.getNodeName());
+            FlakeIdGeneratorConfig genConfig = config
+              .getFlakeIdGeneratorConfig(genNode.getNodeName());
+
             handleFlakeIdGeneratorNode(genNode, genConfig);
         }
     }
@@ -366,8 +332,7 @@ public class YamlMemberDomConfigProcessor extends MemberDomConfigProcessor {
     @Override
     protected void handleExecutor(Node node) throws Exception {
         for (Node executorNode : childElements(node)) {
-            ExecutorConfig executorConfig = new ExecutorConfig();
-            executorConfig.setName(executorNode.getNodeName());
+            ExecutorConfig executorConfig = config.getExecutorConfig(executorNode.getNodeName());
             handleViaReflection(executorNode, config, executorConfig);
         }
     }
@@ -375,8 +340,7 @@ public class YamlMemberDomConfigProcessor extends MemberDomConfigProcessor {
     @Override
     protected void handleDurableExecutor(Node node) throws Exception {
         for (Node executorNode : childElements(node)) {
-            DurableExecutorConfig executorConfig = new DurableExecutorConfig();
-            executorConfig.setName(executorNode.getNodeName());
+            DurableExecutorConfig executorConfig = config.getDurableExecutorConfig(executorNode.getNodeName());
             handleViaReflection(executorNode, config, executorConfig);
         }
     }
@@ -384,8 +348,7 @@ public class YamlMemberDomConfigProcessor extends MemberDomConfigProcessor {
     @Override
     protected void handleScheduledExecutor(Node node) {
         for (Node executorNode : childElements(node)) {
-            ScheduledExecutorConfig executorConfig = new ScheduledExecutorConfig();
-            executorConfig.setName(executorNode.getNodeName());
+            ScheduledExecutorConfig executorConfig = config.getScheduledExecutorConfig(executorNode.getNodeName());
             handleScheduledExecutorNode(executorNode, executorConfig);
         }
     }
@@ -393,8 +356,9 @@ public class YamlMemberDomConfigProcessor extends MemberDomConfigProcessor {
     @Override
     protected void handleCardinalityEstimator(Node node) {
         for (Node estimatorNode : childElements(node)) {
-            CardinalityEstimatorConfig estimatorConfig = new CardinalityEstimatorConfig();
-            estimatorConfig.setName(estimatorNode.getNodeName());
+            CardinalityEstimatorConfig estimatorConfig = config
+              .getCardinalityEstimatorConfig(estimatorNode.getNodeName());
+
             handleCardinalityEstimatorNode(estimatorNode, estimatorConfig);
         }
     }
@@ -402,8 +366,9 @@ public class YamlMemberDomConfigProcessor extends MemberDomConfigProcessor {
     @Override
     protected void handlePNCounter(Node node) throws Exception {
         for (Node counterNode : childElements(node)) {
-            PNCounterConfig counterConfig = new PNCounterConfig();
-            counterConfig.setName(counterNode.getNodeName());
+            PNCounterConfig counterConfig = config
+              .getPNCounterConfig(counterNode.getNodeName());
+
             handleViaReflection(counterNode, config, counterConfig);
         }
     }
@@ -411,8 +376,7 @@ public class YamlMemberDomConfigProcessor extends MemberDomConfigProcessor {
     @Override
     protected void handleMultiMap(Node node) {
         for (Node multiMapNode : childElements(node)) {
-            MultiMapConfig multiMapConfig = new MultiMapConfig();
-            multiMapConfig.setName(multiMapNode.getNodeName());
+            MultiMapConfig multiMapConfig = config.getMultiMapConfig(multiMapNode.getNodeName());
             handleMultiMapNode(multiMapNode, multiMapConfig);
         }
     }
@@ -420,8 +384,7 @@ public class YamlMemberDomConfigProcessor extends MemberDomConfigProcessor {
     @Override
     protected void handleReplicatedMap(Node node) {
         for (Node replicatedMapNode : childElements(node)) {
-            ReplicatedMapConfig replicatedMapConfig = new ReplicatedMapConfig();
-            replicatedMapConfig.setName(replicatedMapNode.getNodeName());
+            ReplicatedMapConfig replicatedMapConfig = config.getReplicatedMapConfig(replicatedMapNode.getNodeName());
             handleReplicatedMapNode(replicatedMapNode, replicatedMapConfig);
         }
     }
@@ -445,7 +408,7 @@ public class YamlMemberDomConfigProcessor extends MemberDomConfigProcessor {
     @Override
     protected void mapIndexesHandle(Node n, MapConfig mapConfig) {
         for (Node indexNode : childElements(n)) {
-            IndexConfig indexConfig = IndexUtils.getIndexConfigFromYaml(indexNode, domLevel3);
+            IndexConfig indexConfig = IndexUtils.getIndexConfigFromYaml(indexNode, domLevel3, strict);
 
             mapConfig.addIndexConfig(indexConfig);
         }
@@ -454,8 +417,7 @@ public class YamlMemberDomConfigProcessor extends MemberDomConfigProcessor {
     @Override
     protected void attributesHandle(Node n, MapConfig mapConfig) {
         for (Node extractorNode : childElements(n)) {
-            NamedNodeMap attrs = extractorNode.getAttributes();
-            String extractor = getTextContent(attrs.getNamedItem("extractor-class-name"));
+            String extractor = getTextContent(getNamedItemNode(extractorNode, "extractor-class-name"));
             String name = extractorNode.getNodeName();
             mapConfig.addAttributeConfig(new AttributeConfig(name, extractor));
         }
@@ -472,9 +434,8 @@ public class YamlMemberDomConfigProcessor extends MemberDomConfigProcessor {
 
     @Override
     protected void queryCachePredicateHandler(Node childNode, QueryCacheConfig queryCacheConfig) {
-        NamedNodeMap predicateAttributes = childNode.getAttributes();
-        Node classNameNode = predicateAttributes.getNamedItem("class-name");
-        Node sqlNode = predicateAttributes.getNamedItem("sql");
+        Node classNameNode = getNamedItemNode(childNode, "class-name");
+        Node sqlNode = getNamedItemNode(childNode, "sql");
 
         if (classNameNode != null && sqlNode != null) {
             throw new InvalidConfigurationException("Both class-name and sql is defined for the predicate of map "
@@ -482,7 +443,7 @@ public class YamlMemberDomConfigProcessor extends MemberDomConfigProcessor {
         }
 
         if (classNameNode == null && sqlNode == null) {
-            throw new InvalidConfigurationException("Either class-name and sql should be defined for the predicate of map "
+            throw new InvalidConfigurationException("Either class-name and sql must be defined for the predicate of map "
                     + childNode.getParentNode().getParentNode().getNodeName());
         }
 
@@ -498,12 +459,11 @@ public class YamlMemberDomConfigProcessor extends MemberDomConfigProcessor {
     @Override
     protected void queryCacheIndexesHandle(Node n, QueryCacheConfig queryCacheConfig) {
         for (Node indexNode : childElements(n)) {
-            IndexConfig indexConfig = IndexUtils.getIndexConfigFromYaml(indexNode, domLevel3);
+            IndexConfig indexConfig = IndexUtils.getIndexConfigFromYaml(indexNode, domLevel3, strict);
 
             queryCacheConfig.addIndexConfig(indexConfig);
         }
     }
-
 
     @Override
     protected void handleMemberGroup(Node node, Config config) {
@@ -519,7 +479,7 @@ public class YamlMemberDomConfigProcessor extends MemberDomConfigProcessor {
     @Override
     protected MergePolicyConfig createMergePolicyConfig(Node node) {
         MergePolicyConfig mergePolicyConfig = new MergePolicyConfig();
-        String policyString = getTextContent(node.getAttributes().getNamedItem("class-name"));
+        String policyString = getTextContent(getNamedItemNode(node, "class-name"));
         mergePolicyConfig.setPolicy(policyString);
         final String att = getAttribute(node, "batch-size");
         if (att != null) {
@@ -552,23 +512,26 @@ public class YamlMemberDomConfigProcessor extends MemberDomConfigProcessor {
     }
 
     @Override
-    protected void handleItemListeners(Node n, Function<ItemListenerConfig, Void> configAddFunction) {
+    protected void handleItemListeners(Node n, Consumer<ItemListenerConfig> configAddFunction) {
         for (Node listenerNode : childElements(n)) {
-            NamedNodeMap attrs = listenerNode.getAttributes();
-            boolean incValue = getBooleanValue(getTextContent(attrs.getNamedItem("include-value")));
-            String listenerClass = getTextContent(attrs.getNamedItem("class-name"));
-            configAddFunction.apply(new ItemListenerConfig(listenerClass, incValue));
+            boolean incValue = getBooleanValue(getTextContent(
+              getNamedItemNode(listenerNode, "include-value")));
+            String listenerClass = getTextContent(
+              getNamedItemNode(listenerNode, "class-name"));
+            configAddFunction.accept(new ItemListenerConfig(listenerClass, incValue));
         }
     }
 
     @Override
-    protected void handleEntryListeners(Node n, Function<EntryListenerConfig, Void> configAddFunction) {
+    protected void handleEntryListeners(Node n, Consumer<EntryListenerConfig> configAddFunction) {
         for (Node listenerNode : childElements(n)) {
-            NamedNodeMap attrs = listenerNode.getAttributes();
-            boolean incValue = getBooleanValue(getTextContent(attrs.getNamedItem("include-value")));
-            boolean local = getBooleanValue(getTextContent(attrs.getNamedItem("local")));
-            String listenerClass = getTextContent(attrs.getNamedItem("class-name"));
-            configAddFunction.apply(new EntryListenerConfig(listenerClass, local, incValue));
+            boolean incValue = getBooleanValue(getTextContent(
+              getNamedItemNode(listenerNode, "include-value")));
+            boolean local = getBooleanValue(getTextContent(
+              getNamedItemNode(listenerNode, "local")));
+            String listenerClass = getTextContent(
+              getNamedItemNode(listenerNode, "class-name"));
+            configAddFunction.accept(new EntryListenerConfig(listenerClass, local, incValue));
         }
     }
 
@@ -613,13 +576,13 @@ public class YamlMemberDomConfigProcessor extends MemberDomConfigProcessor {
     @Override
     protected void handleDiscoveryStrategiesChild(DiscoveryConfig discoveryConfig, Node child) {
         String name = cleanNodeName(child);
-        if ("discovery-strategies".equals(name)) {
+        if (matches("discovery-strategies", name)) {
             NodeList strategies = child.getChildNodes();
             for (int i = 0; i < strategies.getLength(); i++) {
                 Node strategy = strategies.item(i);
                 handleDiscoveryStrategy(strategy, discoveryConfig);
             }
-        } else if ("node-filter".equals(name)) {
+        } else if (matches("node-filter", name)) {
             handleDiscoveryNodeFilter(child, discoveryConfig);
         }
     }
@@ -629,38 +592,35 @@ public class YamlMemberDomConfigProcessor extends MemberDomConfigProcessor {
         SerializationConfig serializationConfig = new SerializationConfig();
         for (Node child : childElements(node)) {
             final String name = cleanNodeName(child);
-            if ("portable-version".equals(name)) {
-                String value = getTextContent(child);
-                serializationConfig.setPortableVersion(getIntegerValue(name, value));
-            } else if ("check-class-def-errors".equals(name)) {
-                String value = getTextContent(child);
-                serializationConfig.setCheckClassDefErrors(getBooleanValue(value));
-            } else if ("use-native-byte-order".equals(name)) {
+            if (matches("portable-version", name)) {
+                serializationConfig.setPortableVersion(getIntegerValue(name, getTextContent(child)));
+            } else if (matches("check-class-def-errors", name)) {
+                serializationConfig.setCheckClassDefErrors(getBooleanValue(getTextContent(child)));
+            } else if (matches("use-native-byte-order", name)) {
                 serializationConfig.setUseNativeByteOrder(getBooleanValue(getTextContent(child)));
-            } else if ("byte-order".equals(name)) {
-                String value = getTextContent(child);
+            } else if (matches("byte-order", name)) {
                 ByteOrder byteOrder = null;
-                if (ByteOrder.BIG_ENDIAN.toString().equals(value)) {
+                if (ByteOrder.BIG_ENDIAN.toString().equals(getTextContent(child))) {
                     byteOrder = ByteOrder.BIG_ENDIAN;
-                } else if (ByteOrder.LITTLE_ENDIAN.toString().equals(value)) {
+                } else if (ByteOrder.LITTLE_ENDIAN.toString().equals(getTextContent(child))) {
                     byteOrder = ByteOrder.LITTLE_ENDIAN;
                 }
                 serializationConfig.setByteOrder(byteOrder != null ? byteOrder : ByteOrder.BIG_ENDIAN);
-            } else if ("enable-compression".equals(name)) {
+            } else if (matches("enable-compression", name)) {
                 serializationConfig.setEnableCompression(getBooleanValue(getTextContent(child)));
-            } else if ("enable-shared-object".equals(name)) {
+            } else if (matches("enable-shared-object", name)) {
                 serializationConfig.setEnableSharedObject(getBooleanValue(getTextContent(child)));
-            } else if ("allow-unsafe".equals(name)) {
+            } else if (matches("allow-unsafe", name)) {
                 serializationConfig.setAllowUnsafe(getBooleanValue(getTextContent(child)));
-            } else if ("data-serializable-factories".equals(name)) {
+            } else if (matches("data-serializable-factories", name)) {
                 fillDataSerializableFactories(child, serializationConfig);
-            } else if ("portable-factories".equals(name)) {
+            } else if (matches("portable-factories", name)) {
                 fillPortableFactories(child, serializationConfig);
-            } else if ("serializers".equals(name)) {
+            } else if (matches("serializers", name)) {
                 fillSerializers(child, serializationConfig);
-            } else if ("global-serializer".equals(name)) {
+            } else if (matches("global-serializer", name)) {
                 fillGlobalSerializer(child, serializationConfig);
-            } else if ("java-serialization-filter".equals(name)) {
+            } else if (matches("java-serialization-filter", name)) {
                 fillJavaSerializationFilter(child, serializationConfig);
             }
         }
@@ -693,9 +653,8 @@ public class YamlMemberDomConfigProcessor extends MemberDomConfigProcessor {
     @Override
     protected void fillDataSerializableFactories(Node node, SerializationConfig serializationConfig) {
         for (Node child : childElements(node)) {
-            NamedNodeMap attributes = child.getAttributes();
-            final Node factoryIdNode = attributes.getNamedItem("factory-id");
-            final Node classNameNode = attributes.getNamedItem("class-name");
+            final Node factoryIdNode = getNamedItemNode(child, "factory-id");
+            final Node classNameNode = getNamedItemNode(child, "class-name");
             if (factoryIdNode == null) {
                 throw new IllegalArgumentException(
                         "'factory-id' attribute of 'data-serializable-factory' is required!");
@@ -713,9 +672,8 @@ public class YamlMemberDomConfigProcessor extends MemberDomConfigProcessor {
     @Override
     protected void fillPortableFactories(Node node, SerializationConfig serializationConfig) {
         for (Node child : childElements(node)) {
-            NamedNodeMap attributes = child.getAttributes();
-            final Node factoryIdNode = attributes.getNamedItem("factory-id");
-            final Node classNameNode = attributes.getNamedItem("class-name");
+            final Node factoryIdNode = getNamedItemNode(child, "factory-id");
+            final Node classNameNode = getNamedItemNode(child, "class-name");
             if (factoryIdNode == null) {
                 throw new IllegalArgumentException("'factory-id' attribute of 'portable-factory' is required!");
             }
@@ -733,15 +691,15 @@ public class YamlMemberDomConfigProcessor extends MemberDomConfigProcessor {
         ClassFilter list = new ClassFilter();
         for (Node typeNode : childElements(node)) {
             final String name = cleanNodeName(typeNode);
-            if ("class".equals(name)) {
+            if (matches("class", name)) {
                 for (Node classNode : childElements(typeNode)) {
                     list.addClasses(getTextContent(classNode));
                 }
-            } else if ("package".equals(name)) {
+            } else if (matches("package", name)) {
                 for (Node packageNode : childElements(typeNode)) {
                     list.addPackages(getTextContent(packageNode));
                 }
-            } else if ("prefix".equals(name)) {
+            } else if (matches("prefix", name)) {
                 for (Node prefixNode : childElements(typeNode)) {
                     list.addPrefixes(getTextContent(prefixNode));
                 }
@@ -753,9 +711,9 @@ public class YamlMemberDomConfigProcessor extends MemberDomConfigProcessor {
     @Override
     protected void handleMemberAttributes(Node node) {
         for (Node n : childElements(node)) {
-            String attributeValue = getTextContent(n.getAttributes().getNamedItem("value"));
+            String attributeValue = getTextContent(getNamedItemNode(n, "value"));
             String attributeName = n.getNodeName();
-            handleMemberAttributesNode(n, attributeName, attributeValue);
+            handleMemberAttributesNode(attributeName, attributeValue);
         }
     }
 
@@ -763,26 +721,23 @@ public class YamlMemberDomConfigProcessor extends MemberDomConfigProcessor {
     protected void handleOutboundPorts(Node child) {
         NetworkConfig networkConfig = config.getNetworkConfig();
         for (Node n : childElements(child)) {
-            String value = getTextContent(n);
-            networkConfig.addOutboundPortDefinition(value);
+            networkConfig.addOutboundPortDefinition(getTextContent(n));
         }
     }
 
     @Override
     protected void handleOutboundPorts(Node child, EndpointConfig endpointConfig) {
         for (Node n : childElements(child)) {
-            String value = getTextContent(n);
-            endpointConfig.addOutboundPortDefinition(value);
+            endpointConfig.addOutboundPortDefinition(getTextContent(n));
         }
     }
 
     @Override
     protected void handleInterfacesList(Node node, InterfacesConfig interfaces) {
         for (Node interfacesNode : childElements(node)) {
-            if ("interfaces".equals(lowerCaseInternal(cleanNodeName(interfacesNode)))) {
+            if (matches("interfaces", lowerCaseInternal(cleanNodeName(interfacesNode)))) {
                 for (Node interfaceNode : childElements(interfacesNode)) {
-                    String value = getTextContent(interfaceNode).trim();
-                    interfaces.addInterface(value);
+                    interfaces.addInterface(getTextContent(interfaceNode));
                 }
             }
         }
@@ -801,8 +756,7 @@ public class YamlMemberDomConfigProcessor extends MemberDomConfigProcessor {
         JoinConfig join = joinConfig(advancedNetworkConfig);
         TcpIpConfig tcpIpConfig = join.getTcpIpConfig();
         for (Node n : childElements(node)) {
-            String value = getTextContent(n).trim();
-            tcpIpConfig.addMember(value);
+            tcpIpConfig.addMember(getTextContent(n));
         }
     }
 
@@ -810,7 +764,7 @@ public class YamlMemberDomConfigProcessor extends MemberDomConfigProcessor {
     protected void handleRestApiEndpointGroups(Node node) {
         for (Node child : childElements(node)) {
             String nodeName = cleanNodeName(child);
-            if ("endpoint-groups".equals(nodeName)) {
+            if (matches("endpoint-groups", nodeName)) {
                 for (Node groupNode : childElements(child)) {
                     String groupName = groupNode.getNodeName();
                     handleEndpointGroup(groupNode, groupName);
@@ -826,7 +780,7 @@ public class YamlMemberDomConfigProcessor extends MemberDomConfigProcessor {
 
     @Override
     protected void handlePort(Node node, ServerSocketEndpointConfig endpointConfig) {
-        Node portNode = node.getAttributes().getNamedItem("port");
+        Node portNode = getNamedItemNode(node, "port");
         if (portNode != null) {
             String portStr = portNode.getNodeValue().trim();
             if (portStr.length() > 0) {
@@ -863,11 +817,10 @@ public class YamlMemberDomConfigProcessor extends MemberDomConfigProcessor {
             semaphoreConfig.setName(child.getNodeName());
             for (Node subChild : childElements(child)) {
                 String nodeName = cleanNodeName(subChild);
-                String value = getTextContent(subChild).trim();
-                if ("jdk-compatible".equals(nodeName)) {
-                    semaphoreConfig.setJDKCompatible(Boolean.parseBoolean(value));
-                } else if ("initial-permits".equals(nodeName)) {
-                    semaphoreConfig.setInitialPermits(Integer.parseInt(value));
+                if (matches("jdk-compatible", nodeName)) {
+                    semaphoreConfig.setJDKCompatible(Boolean.parseBoolean(getTextContent(subChild)));
+                } else if (matches("initial-permits", nodeName)) {
+                    semaphoreConfig.setInitialPermits(Integer.parseInt(getTextContent(subChild)));
                 }
             }
             cpSubsystemConfig.addSemaphoreConfig(semaphoreConfig);
@@ -881,9 +834,8 @@ public class YamlMemberDomConfigProcessor extends MemberDomConfigProcessor {
             lockConfig.setName(child.getNodeName());
             for (Node subChild : childElements(child)) {
                 String nodeName = cleanNodeName(subChild);
-                String value = getTextContent(subChild).trim();
-                if ("lock-acquire-limit".equals(nodeName)) {
-                    lockConfig.setLockAcquireLimit(Integer.parseInt(value));
+                if (matches("lock-acquire-limit", nodeName)) {
+                    lockConfig.setLockAcquireLimit(Integer.parseInt(getTextContent(subChild)));
                 }
             }
             cpSubsystemConfig.addLockConfig(lockConfig);
@@ -911,5 +863,17 @@ public class YamlMemberDomConfigProcessor extends MemberDomConfigProcessor {
         TokenEncoding encoding = TokenEncoding.getTokenEncoding(getAttribute(node, "encoding"));
         TokenIdentityConfig tic = new TokenIdentityConfig(encoding, getAttribute(node, "value"));
         realmConfig.setTokenIdentityConfig(tic);
+    }
+
+    @Override
+    protected void handlePersistentMemoryDirectory(PersistentMemoryConfig persistentMemoryConfig, Node dirNode) {
+        String directory = getTextContent(getNamedItemNode(dirNode, "directory"));
+        String numaNodeIdStr = getTextContent(getNamedItemNode(dirNode, "numa-node"));
+        if (!StringUtil.isNullOrEmptyAfterTrim(numaNodeIdStr)) {
+            int numaNodeId = getIntegerValue("numa-node", numaNodeIdStr);
+            persistentMemoryConfig.addDirectoryConfig(new PersistentMemoryDirectoryConfig(directory, numaNodeId));
+        } else {
+            persistentMemoryConfig.addDirectoryConfig(new PersistentMemoryDirectoryConfig(directory));
+        }
     }
 }

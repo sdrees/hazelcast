@@ -39,6 +39,9 @@ import java.util.UUID;
 import java.util.concurrent.CompletionStage;
 import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.TimeUnit;
+import java.util.function.BiConsumer;
+import java.util.function.BiFunction;
+import java.util.function.Function;
 
 /**
  * Concurrent, distributed, observable and queryable map.
@@ -220,7 +223,9 @@ import java.util.concurrent.TimeUnit;
  * The methods to which this procedure applies: {@link #put(Object, Object) put},
  * {@link #set(Object, Object) set}, {@link #putAsync(Object, Object) putAsync},
  * {@link #setAsync(Object, Object) setAsync},
- * {@link #tryPut(Object, Object, long, TimeUnit) tryPut}, {@link #putAll(Map) putAll},
+ * {@link #tryPut(Object, Object, long, TimeUnit) tryPut},
+ * {@link #putAll(Map) putAll}, {@link #setAll(Map) setAll},
+ * {@link #putAllAsync(Map) putAllAsync}, {@link #setAllAsync(Map) setAllAsync},
  * {@link #replace(Object, Object, Object)} and {@link #replace(Object, Object)}.
  *
  *  <p>
@@ -862,6 +867,60 @@ public interface IMap<K, V> extends ConcurrentMap<K, V>, BaseMap<K, V> {
     CompletionStage<V> putAsync(@Nonnull K key, @Nonnull V value,
                                 long ttl, @Nonnull TimeUnit ttlUnit,
                                 long maxIdle, @Nonnull TimeUnit maxIdleUnit);
+
+    /**
+     * Asynchronously copies all of the mappings from the specified map to this map.
+     * This version doesn't support batching.
+     * <pre>{@code
+     *     CompletionStage<Void> future = map.putAllAsync(map);
+     *     // do some other stuff, when ready wait for completion
+     *     future.toCompletableFuture.get();
+     * }</pre>
+     * {@code CompletionStage.toCompletableFuture.get()} will block until the actual map.putAll(map) operation completes
+     * You can also register further computation stages to be invoked upon
+     * completion of the {@code CompletionStage} via any of {@link CompletionStage}
+     * methods:
+     * <pre>{@code
+     *      CompletionStage<Void> future = map.putAllAsync(map);
+     *      future.thenRunAsync(() -> System.out.println("All the entries are added"));
+     * }</pre>
+     *  {@inheritDoc}
+     * <p>
+     * No atomicity guarantees are given. It could be that in case of failure
+     * some of the key/value-pairs get written, while others are not.
+     *
+     * <p><b>Interactions with the map store</b>
+     * <p>
+     * For each element not found in memory
+     * {@link MapLoader#load(Object)} is invoked to load the value from
+     * the map store backing the map, which may come at a significant
+     * performance cost. Exceptions thrown by load fail the operation
+     * and are propagated to the caller. The elements which were added
+     * before the exception was thrown will remain in the map, the rest
+     * will not be added.
+     * <p>
+     * If write-through persistence mode is configured,
+     * {@link MapStore#store(Object, Object)} is invoked for each element
+     * before the element is added in memory, which may come at a
+     * significant performance cost. Exceptions thrown by store fail the
+     * operation and are propagated to the caller. The elements which
+     * were added before the exception was thrown will remain in the map,
+     * the rest will not be added.
+     * <p>
+     * If write-behind persistence mode is configured with
+     * write-coalescing turned off,
+     * {@link com.hazelcast.map.ReachedMaxSizeException} may be thrown
+     * if the write-behind queue has reached its per-node maximum
+     * capacity.
+     * @param map mappings to be stored in this map
+     * @return CompletionStage on which client code can block waiting for the
+     * operation to complete or register callbacks to be invoked
+     * upon putAll operation completion
+     * @see CompletionStage
+     *
+     * @since 4.1
+     */
+    CompletionStage<Void> putAllAsync(@Nonnull Map<? extends K, ? extends V> map);
 
     /**
      * Asynchronously puts the given key and value.
@@ -1710,6 +1769,85 @@ public interface IMap<K, V> extends ConcurrentMap<K, V>, BaseMap<K, V> {
              long maxIdle, @Nonnull TimeUnit maxIdleUnit);
 
     /**
+     * Copies all of the mappings from the specified map to this map without loading
+     * non-existing elements from map store (which is more efficient than {@code putAll()}).
+     * <p>
+     * This method breaks the contract of EntryListener.
+     * EntryEvent of all the updated entries will have null oldValue even if they exist previously.
+     * <p>
+     * No atomicity guarantees are given. It could be that in case of failure
+     * some of the key/value-pairs get written, while others are not.
+     *
+     * <p><b>Interactions with the map store</b>
+     * <p>
+     * If write-through persistence mode is configured,
+     * {@link MapStore#store(Object, Object)} is invoked for each element
+     * before the element is added in memory, which may come at a
+     * significant performance cost. Exceptions thrown by store fail the
+     * operation and are propagated to the caller. The elements which
+     * were added before the exception was thrown will remain in the map,
+     * the rest will not be added.
+     * <p>
+     * If write-behind persistence mode is configured with
+     * write-coalescing turned off,
+     * {@link com.hazelcast.map.ReachedMaxSizeException} may be thrown
+     * if the write-behind queue has reached its per-node maximum
+     * capacity.
+     *
+     * @since 4.1
+     */
+    void setAll(@Nonnull Map<? extends K, ? extends V> map);
+
+    /**
+     * Asynchronously copies all of the mappings from the specified map to this map
+     * without loading non-existing elements from map store. This version doesn't
+     * support batching.
+     * <pre>{@code
+     *     CompletionStage<Void> future = map.setAllAsync(map);
+     *     // do some other stuff, when ready wait for completion
+     *     future.toCompletableFuture.get();
+     * }</pre>
+     * {@code CompletionStage.toCompletableFuture.get()} will block until the actual map.setAll(map) operation completes
+     * You can also register further computation stages to be invoked upon
+     * completion of the {@code CompletionStage} via any of {@link CompletionStage}
+     * methods:
+     * <pre>{@code
+     *      CompletionStage<Void> future = map.setAllAsync(map);
+     *      future.thenRunAsync(() -> System.out.println("All the entries are set"));
+     * }</pre>
+     * <p>
+     * This method breaks the contract of EntryListener.
+     * EntryEvent of all the updated entries will have null oldValue even if they exist previously.
+     * <p>
+     * No atomicity guarantees are given. It could be that in case of failure
+     * some of the key/value-pairs get written, while others are not.
+     *
+     * <p><b>Interactions with the map store</b>
+     * <p>
+     * If write-through persistence mode is configured,
+     * {@link MapStore#store(Object, Object)} is invoked for each element
+     * before the element is added in memory, which may come at a
+     * significant performance cost. Exceptions thrown by store fail the
+     * operation and are propagated to the caller. The elements which
+     * were added before the exception was thrown will remain in the map,
+     * the rest will not be added.
+     * <p>
+     * If write-behind persistence mode is configured with
+     * write-coalescing turned off,
+     * {@link com.hazelcast.map.ReachedMaxSizeException} may be thrown
+     * if the write-behind queue has reached its per-node maximum
+     * capacity.
+     * @param map mappings to be stored in this map
+     * @return CompletionStage on which client code can block waiting for the
+     * operation to complete or register callbacks to be invoked
+     * upon setAll operation completion
+     * @see CompletionStage
+     *
+     * @since 4.1
+     */
+    CompletionStage<Void> setAllAsync(@Nonnull Map<? extends K, ? extends V> map);
+
+    /**
      * Acquires the lock for the specified key.
      * <p>
      * If the lock is not available, then the current thread becomes disabled
@@ -2555,6 +2693,20 @@ public interface IMap<K, V> extends ConcurrentMap<K, V>, BaseMap<K, V> {
                                 @Nonnull EntryProcessor<K, V, R> entryProcessor);
 
     /**
+     * Async version of {@link #executeOnKeys}.
+     * @param keys the keys to execute the entry processor on. Can be empty, in
+     *             that case it's a local no-op
+     * @param entryProcessor the processor to process the keys
+     * @param <R> return type for entry processor
+     * @return CompletionStage on which client code can block waiting for the
+     * operation to complete or register callbacks to be invoked
+     * upon set operation completion
+     * @see CompletionStage
+     */
+    <R> CompletionStage<Map<K, R>> submitToKeys(@Nonnull Set<K> keys,
+                               @Nonnull EntryProcessor<K, V, R> entryProcessor);
+
+    /**
      * Applies the user defined {@code EntryProcessor} to the entry mapped by the {@code key}.
      * Returns immediately with a {@link CompletionStage} representing that task.
      * <p>
@@ -2865,4 +3017,154 @@ public interface IMap<K, V> extends ConcurrentMap<K, V>, BaseMap<K, V> {
      * @since 3.11
      */
     boolean setTtl(@Nonnull K key, long ttl, @Nonnull TimeUnit timeunit);
+
+    /**
+     * {@inheritDoc}
+     *
+     * <p> </p>
+     * <p>
+     *     If the supplied {@code remappingFunction} is a lambda, anonymous class or an inner class,
+     *     it would be executed locally. Same would happen if it is not serializable.
+     *     This may result in multiple round-trips between hazelcast nodes, and possibly a livelock.
+     *</p>
+     * <p>
+     *     Otherwise (i.e. if it is a top-level class or a member class, and it is serializable), the function <i>may be</i> sent
+     *     to the server which owns the key. This results in a single remote call. Also, the function would have exclusive
+     *     access to the map entry during its execution.
+     *     Note that in this case, the function class must be deployed on all the servers (either physically
+     *     or via user-code-deployment).
+     * </p>
+     * <p>
+     *     When this method is invoked using a hazelcast-client instance, the {@code remappingFunction} is always executed locally
+     * </p>
+     *
+     * @since 4.1
+     */
+    V computeIfPresent(@Nonnull K key, @Nonnull BiFunction<? super K, ? super V, ? extends V> remappingFunction);
+
+    /**
+     * {@inheritDoc}
+     *
+     * <p> </p>
+     * <p>
+     *     If the supplied {@code mappingFunction} is a lambda, anonymous class or an inner class,
+     *     it would be executed locally. Same would happen if it is not serializable.
+     *     This may result in two round-trips between hazelcast nodes.
+     *</p>
+     * <p>
+     *     Otherwise (i.e. if it is a top-level class or a member class, and it is serializable), the function <i>may be</i> sent
+     *     to the server which owns the key. This results in a single remote call. Also, the function would have exclusive
+     *     access to the map entry during its execution.
+     *     Note that in this case, the function class must be deployed on all the servers (either physically
+     *     or via user-code-deployment).
+     * </p>
+     * <p>
+     *     When this method is invoked using a hazelcast-client instance, the {@code mappingFunction} is always executed locally
+     * </p>
+     *
+     * @since 4.1
+     */
+    V computeIfAbsent(@Nonnull K key, @Nonnull Function<? super K, ? extends V> mappingFunction);
+
+    /**
+     * {@inheritDoc}
+     *
+     * <p> </p>
+     * <p>
+     *     If the supplied {@code action} is a lambda, anonymous class or an inner class,
+     *     it would be executed locally. Same would happen if it is not serializable.
+     *     This may result in multiple round-trips between hazelcast nodes, as all map entries
+     *     will need to be pulled into the local node
+     *</p>
+     * <p>
+     *     Otherwise (i.e. if it is a top-level class or a member class, and it is serializable), the function <i>may be</i> sent
+     *     to the servers which own the partitions/keys. This results in a much less number of remote calls.
+     *     Note that in this case, side effects of the {@code action} may not be visible to the local JVM.
+     *     If users intend to install the changed value in the map entry, the {@link IMap#executeOnEntries(EntryProcessor)}
+     *     method can be used instead
+     * </p>
+     * <p>
+     *     When this method is invoked using a hazelcast-client instance, the {@code action} is always executed locally
+     * </p>
+     */
+    default void forEach(@Nonnull BiConsumer<? super K, ? super V> action) {
+        ConcurrentMap.super.forEach(action);
+    }
+
+    /**
+     * {@inheritDoc}
+     *
+     * <p> </p>
+     * <p>
+     *     If the supplied {@code remappingFunction} is a lambda, anonymous class or an inner class,
+     *     it would be executed locally. Same would happen if it is not serializable.
+     *     This may result in multiple round-trips between hazelcast nodes, and possibly a livelock.
+     *</p>
+     * <p>
+     *     Otherwise (i.e. if it is a top-level class or a member class, and it is serializable), the function <i>may be</i> sent
+     *     to the server which owns the key. This results in a single remote call. Also, the function would have exclusive
+     *     access to the map entry during its execution.
+     *     Note that in this case, the function class must be deployed on all the servers (either physically
+     *     or via user-code-deployment).
+     * </p>
+     * <p>
+     *     When this method is invoked using a hazelcast-client instance, the {@code remappingFunction} is always executed locally
+     * </p>
+     *
+     * @since 4.1
+     */
+    V compute(@Nonnull K key, @Nonnull BiFunction<? super K, ? super V, ? extends V> remappingFunction);
+
+    /**
+     * {@inheritDoc}
+     *
+     * <p> </p>
+     * <p>
+     *     If the supplied {@code remappingFunction} is a lambda, anonymous class or an inner class,
+     *     it would be executed locally. Same would happen if it is not serializable.
+     *     This may result in multiple round-trips between hazelcast nodes, and possibly a livelock.
+     *</p>
+     * <p>
+     *     Otherwise (i.e. if it is a top-level class or a member class, and it is serializable), the function <i>may be</i> sent
+     *     to the server which owns the key. This results in a single remote call. Also, the function would have exclusive
+     *     access to the map entry during its execution.
+     *     Note that in this case, the function class must be deployed on all the servers (either physically
+     *     or via user-code-deployment).
+     * </p>
+     * <p>
+     *     When this method is invoked using a hazelcast-client instance, the {@code remappingFunction} is always executed locally
+     * </p>
+     *
+     * @since 4.1
+     */
+    @Override
+    V merge(@Nonnull K key, @Nonnull V value, @Nonnull BiFunction<? super V, ? super V, ? extends V> remappingFunction);
+
+
+    /**
+     * {@inheritDoc}
+     *
+     * <p> </p>
+     * <p>
+     *     If the supplied {@code function} is a lambda, anonymous class or an inner class,
+     *     it would be executed locally. Same would happen if it is not serializable.
+     *     This may result in multiple round-trips between hazelcast nodes, and possibly a livelock.
+     *</p>
+     * <p>
+     *     Otherwise (i.e. if it is a top-level class or a member class, and it is serializable), the function <i>may be</i> sent
+     *     to the server which owns the key. This results in a single remote call. Also, the function would have exclusive
+     *     access to the map entry during its execution.
+     *     Note that in this case, the function class must be deployed on all the servers (either physically
+     *     or via user-code-deployment).
+     * </p>
+     * <p>
+     *     When this method is invoked using a hazelcast-client instance, the {@code function} is always executed locally
+     * </p>
+     *
+     * @since 4.1
+     */
+    default void replaceAll(@Nonnull BiFunction<? super K, ? super V, ? extends V> function) {
+        ConcurrentMap.super.replaceAll(function);
+    }
+
 }

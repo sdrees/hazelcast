@@ -39,6 +39,9 @@ hazelcast:
 
   management-center:
     scripting-enabled: false
+    trusted-interfaces:
+      - 10.10.1.*
+      - 10.10.2.*
 
   properties:
     foo: bar
@@ -83,12 +86,14 @@ hazelcast:
             zones: us-east1-b,us-east1-c
           azure:
             enabled: false
+            instance-metadata-available: false
             client-id: CLIENT_ID
-            client-secret: CLIENT_SECRET
             tenant-id: TENANT_ID
+            client-secret: CLIENT_SECRET
             subscription-id: SUB_ID
-            cluster-id: HZLCAST001
-            group-name: RESOURCE-GROUP-NAME
+            resource-group: RESOURCE-GROUP-NAME
+            scale-set: SCALE-SET-NAME
+            tag: TAG-NAME=HZLCAST001
           kubernetes:
             enabled: false
             namespace: MY-KUBERNETES-NAMESPACE
@@ -139,6 +144,7 @@ hazelcast:
 
   durable-executor-service:
     dummy:
+      statistics-enabled: false
       pool-size: 10
       durability: 2
       capacity: 10
@@ -146,6 +152,7 @@ hazelcast:
 
   scheduled-executor-service:
     dummy:
+      statistics-enabled: false
       pool-size: 10
       durability: 2
       capacity: 50
@@ -191,6 +198,7 @@ hazelcast:
       merge-policy:
         batch-size: 100
         class-name: PutIfAbsentMergePolicy
+      priority-comparator-class-name: com.hazelcast.collection.impl.queue.model.PriorityElementComparator
 
   map:
     default:
@@ -584,6 +592,14 @@ hazelcast:
     min-block-size: 123
     page-size: 123
     metadata-space-percentage: 12.5
+    persistent-memory:
+      enabled: true
+      mode: MOUNTED
+      directories:
+        - directory: /mnt/pmem0
+          numa-node: 0
+        - directory: /mnt/pmem1
+          numa-node: 1
 
   security:
     enabled: false
@@ -611,6 +627,99 @@ hazelcast:
               usage: REQUIRED
               properties:
                 property: value
+      - name: ldapRealm
+        authentication:
+          ldap:
+             url: ldap://ldap.my-company.example
+             socket-factory-class-name: socketFactoryClassName
+             parse-dn: true
+             role-context: roleContext
+             role-filter: roleFilter
+             role-mapping-attribute: roleMappingAttribute
+             role-mapping-mode: reverse
+             role-name-attribute: roleNameAttribute
+             role-recursion-max-depth: 25
+             role-search-scope: object
+             user-name-attribute: userNameAttribute
+             system-user-dn: systemUserDn
+             system-user-password: systemUserPassword
+             system-authentication: simple
+             security-realm: realmName
+             password-attribute: passwordAttribute
+             user-context: userContext
+             user-filter: userFilter
+             user-search-scope: one-level
+      - name: tlsRealm
+        authentication:
+          tls:
+             roleAttribute: cn
+      - name: usernamePasswordIdentityRealm
+        identity:
+          username-password:
+             username: user
+             password: Hazelcast
+      - name: tokenIdentityRealm
+        identity:
+          token:
+             encoding: base64
+             value: SGF6ZWxjYXN0
+      - name: kerberosRealm
+        authentication:
+          kerberos:
+            skip-role: true
+            relax-flags-check: true
+            use-name-without-realm: true
+            security-realm: krb5Acceptor
+            ldap:
+              url: ldap://127.0.0.1/
+              system-authentication: GSSAPI
+              security-realm: krb5Initiator
+              skip-authentication: true
+              user-filter: "(krb5PrincipalName={login})"
+              role-mapping-attribute: cn
+        identity:
+          kerberos:
+            realm: HAZELCAST.COM
+            security-realm: krb5Initiator
+            service-name-prefix: hz/
+            use-canonical-hostname: true
+            spn: hz/127.0.0.1@HAZELCAST.COM
+      - name: simpleKerberosRealm
+        authentication:
+          kerberos:
+            principal: hz/127.0.0.1@HAZELCAST.COM
+            keytab-file: /opt/localhost.keytab
+        identity:
+          kerberos:
+            realm: HAZELCAST.COM
+            principal: hz/127.0.0.1@HAZELCAST.COM
+            keytab-file: /opt/localhost.keytab
+      - name: krb5Acceptor
+        authentication:
+          jaas:
+            - class-name: com.sun.security.auth.module.Krb5LoginModule
+              usage: REQUIRED
+              properties:
+                isInitiator: false
+                useTicketCache: false
+                doNotPrompt: true
+                useKeyTab: true
+                storeKey: true
+                principal: hz/127.0.0.1@HAZELCAST.COM
+                keyTab: /opt/hz-localhost.keytab
+      - name: krb5Initiator
+        authentication:
+          jaas:
+            - class-name: com.sun.security.auth.module.Krb5LoginModule
+              usage: REQUIRED
+              properties:
+                isInitiator: true
+                useTicketCache: false
+                doNotPrompt: true
+                useKeyTab: true
+                storeKey: true
+                principal: hz/127.0.0.1@HAZELCAST.COM
+                keyTab: /opt/hz-localhost.keytab
     member-authentication:
       realm: mr
     client-authentication:
@@ -727,6 +836,21 @@ hazelcast:
           principal: "*"
           actions:
             - all
+      ring-buffer:
+        - name: "*"
+          principal: "*"
+          actions:
+            - all
+      replicatedmap:
+        - name: "*"
+          principal: "*"
+          actions:
+            - all
+      reliable-topic:
+        - name: "*"
+          principal: "*"
+          actions:
+            - all
     client-block-unmapped-actions: true
 
   member-attributes:
@@ -812,6 +936,14 @@ hazelcast:
       lock2:
         lock-acquire-limit: 2
 
+  auditlog:
+    enabled: false
+    factory-class-name: com.acme.AuditlogToSyslogFactory
+    properties:
+      host: syslogserver.acme.com
+      port: 514
+      type: tcp
+
   metrics:
     enabled: false
     management-center:
@@ -820,3 +952,11 @@ hazelcast:
     jmx:
       enabled: false
     collection-frequency-seconds: 24
+
+  instance-tracking:
+    enabled: false
+
+  sql:
+    executor-pool-size: 16
+    operation-pool-size: 8
+    statement-timeout-millis: 0

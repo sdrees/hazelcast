@@ -37,7 +37,7 @@ import static com.hazelcast.client.impl.protocol.codec.builtin.FixedSizeTypesCod
 /**
  * Adds a listener to be notified for the events fired on the underlying map on all nodes.
  */
-@Generated("1746ca9afe2a7659497473f92fb58124")
+@Generated("74eddcfaccd3c6457663999598f1ee19")
 public final class ContinuousQueryAddListenerCodec {
     //hex: 0x160400
     public static final int REQUEST_MESSAGE_TYPE = 1442816;
@@ -94,15 +94,6 @@ public final class ContinuousQueryAddListenerCodec {
         return request;
     }
 
-    @edu.umd.cs.findbugs.annotations.SuppressFBWarnings({"URF_UNREAD_PUBLIC_OR_PROTECTED_FIELD"})
-    public static class ResponseParameters {
-
-        /**
-         * Registration id for the listener.
-         */
-        public java.util.UUID response;
-    }
-
     public static ClientMessage encodeResponse(java.util.UUID response) {
         ClientMessage clientMessage = ClientMessage.createForEncode();
         ClientMessage.Frame initialFrame = new ClientMessage.Frame(new byte[RESPONSE_INITIAL_FRAME_SIZE], UNFRAGMENTED_MESSAGE);
@@ -113,12 +104,13 @@ public final class ContinuousQueryAddListenerCodec {
         return clientMessage;
     }
 
-    public static ContinuousQueryAddListenerCodec.ResponseParameters decodeResponse(ClientMessage clientMessage) {
+    /**
+     * Registration id for the listener.
+     */
+    public static java.util.UUID decodeResponse(ClientMessage clientMessage) {
         ClientMessage.ForwardFrameIterator iterator = clientMessage.frameIterator();
-        ResponseParameters response = new ResponseParameters();
         ClientMessage.Frame initialFrame = iterator.next();
-        response.response = decodeUUID(initialFrame.content, RESPONSE_RESPONSE_FIELD_OFFSET);
-        return response;
+        return decodeUUID(initialFrame.content, RESPONSE_RESPONSE_FIELD_OFFSET);
     }
 
     public static ClientMessage encodeQueryCacheSingleEvent(com.hazelcast.map.impl.querycache.event.QueryCacheEventData data) {
@@ -171,7 +163,7 @@ public final class ContinuousQueryAddListenerCodec {
 
         /**
          * @param data Data that holds the details of the event such as key, value, old value, new value and creation time.
-        */
+         */
         public abstract void handleQueryCacheSingleEvent(com.hazelcast.map.impl.querycache.event.QueryCacheEventData data);
 
         /**
@@ -179,7 +171,7 @@ public final class ContinuousQueryAddListenerCodec {
          *               new value and creation time.
          * @param source Source that dispathces this batch event.
          * @param partitionId Id of the partition that holds the keys of the batch event.
-        */
+         */
         public abstract void handleQueryCacheBatchEvent(java.util.Collection<com.hazelcast.map.impl.querycache.event.QueryCacheEventData> events, java.lang.String source, int partitionId);
     }
 }

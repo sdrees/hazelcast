@@ -31,6 +31,7 @@ import com.hazelcast.internal.partition.IPartitionService;
 import com.hazelcast.internal.util.ConcurrencyUtil;
 import com.hazelcast.internal.util.ConstructorFunction;
 import com.hazelcast.internal.util.ExceptionUtil;
+import com.hazelcast.internal.util.MapUtil;
 import com.hazelcast.logging.ILogger;
 import com.hazelcast.map.LocalMapStats;
 import com.hazelcast.map.impl.nearcache.MapNearCacheManager;
@@ -44,7 +45,6 @@ import com.hazelcast.spi.impl.NodeEngine;
 import java.util.Collection;
 import java.util.HashMap;
 import java.util.Map;
-import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 
 import static com.hazelcast.config.InMemoryFormat.NATIVE;
@@ -70,7 +70,7 @@ public class LocalMapStatsProvider {
     private final MapServiceContext mapServiceContext;
     private final MapNearCacheManager mapNearCacheManager;
     private final IPartitionService partitionService;
-    private final ConcurrentMap<String, LocalMapStatsImpl> statsMap = new ConcurrentHashMap<>(1000);
+    private final ConcurrentMap<String, LocalMapStatsImpl> statsMap;
     private final ConstructorFunction<String, LocalMapStatsImpl> constructorFunction =
             key -> new LocalMapStatsImpl();
 
@@ -82,6 +82,7 @@ public class LocalMapStatsProvider {
         this.clusterService = nodeEngine.getClusterService();
         this.partitionService = nodeEngine.getPartitionService();
         this.localAddress = clusterService.getThisAddress();
+        this.statsMap = MapUtil.createConcurrentHashMap(nodeEngine.getConfig().getMapConfigs().size());
     }
 
     protected MapServiceContext getMapServiceContext() {
@@ -110,7 +111,8 @@ public class LocalMapStatsProvider {
         Map statsPerMap = new HashMap();
 
         PartitionContainer[] partitionContainers = mapServiceContext.getPartitionContainers();
-        for (PartitionContainer partitionContainer : partitionContainers) {
+        for (int i = 0; i < partitionContainers.length; i++) {
+            PartitionContainer partitionContainer = partitionContainers[i];
             Collection<RecordStore> allRecordStores = partitionContainer.getAllRecordStores();
             for (RecordStore recordStore : allRecordStores) {
                 if (!isStatsCalculationEnabledFor(recordStore)) {
@@ -273,7 +275,7 @@ public class LocalMapStatsProvider {
     }
 
     private boolean isReplicaOnThisNode(Address replicaAddress) {
-        return replicaAddress != null && localAddress.equals(replicaAddress);
+        return localAddress.equals(replicaAddress);
     }
 
     private void printWarning(int partitionId, int replica) {

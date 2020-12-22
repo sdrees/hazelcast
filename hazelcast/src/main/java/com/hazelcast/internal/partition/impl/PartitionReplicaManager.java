@@ -26,6 +26,7 @@ import com.hazelcast.internal.partition.PartitionReplicaVersionManager;
 import com.hazelcast.internal.partition.operation.PartitionReplicaSyncRequest;
 import com.hazelcast.internal.services.ServiceNamespace;
 import com.hazelcast.internal.services.ServiceNamespaceAware;
+import com.hazelcast.internal.util.CollectionUtil;
 import com.hazelcast.internal.util.counters.MwCounter;
 import com.hazelcast.internal.util.scheduler.EntryTaskScheduler;
 import com.hazelcast.internal.util.scheduler.EntryTaskSchedulerFactory;
@@ -37,30 +38,32 @@ import com.hazelcast.spi.impl.NodeEngineImpl;
 import com.hazelcast.spi.impl.executionservice.ExecutionService;
 import com.hazelcast.spi.impl.executionservice.TaskScheduler;
 import com.hazelcast.spi.impl.operationservice.Operation;
-import com.hazelcast.spi.impl.operationservice.PartitionTaskFactory;
 import com.hazelcast.spi.properties.ClusterProperty;
 import com.hazelcast.spi.properties.HazelcastProperties;
 
+import javax.annotation.Nonnull;
+import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.BitSet;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.Iterator;
 import java.util.List;
+import java.util.Queue;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Semaphore;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import static com.hazelcast.internal.metrics.MetricDescriptorConstants.PARTITIONS_METRIC_PARTITION_REPLICA_MANAGER_REPLICA_SYNC_SEMAPHORE;
 import static com.hazelcast.internal.metrics.MetricDescriptorConstants.PARTITIONS_METRIC_PARTITION_REPLICA_MANAGER_SYNC_REQUEST_COUNTER;
 import static com.hazelcast.internal.util.counters.MwCounter.newMwCounter;
+import static java.lang.String.format;
 import static java.util.Collections.newSetFromMap;
 
 /**
- *
  * Maintains the version values for the partition replicas and manages the replica-related operations for partitions
- *
  */
 public class PartitionReplicaManager implements PartitionReplicaVersionManager {
 
@@ -71,7 +74,9 @@ public class PartitionReplicaManager implements PartitionReplicaVersionManager {
     private final PartitionStateManager partitionStateManager;
 
     private final PartitionReplicaVersions[] replicaVersions;
-    /** Replica sync requests that have been sent to the target and awaiting response */
+    /**
+     * Replica sync requests that have been sent to the target and awaiting response
+     */
     private final Set<ReplicaFragmentSyncInfo> replicaSyncRequests;
     private final EntryTaskScheduler<ReplicaFragmentSyncInfo, Void> replicaSyncTimeoutScheduler;
     @Probe(name = PARTITIONS_METRIC_PARTITION_REPLICA_MANAGER_REPLICA_SYNC_SEMAPHORE)
@@ -129,7 +134,7 @@ public class PartitionReplicaManager implements PartitionReplicaVersionManager {
      * </ul>
      *
      * @param partitionId  the partition which is being synchronized
-     * @param namespaces namespaces of partition replica fragments
+     * @param namespaces   namespaces of partition replica fragments
      * @param replicaIndex the index of the replica which is being synchronized
      * @throws IllegalArgumentException if the replica index is not between 0 and {@link InternalPartition#MAX_REPLICA_COUNT}
      */
@@ -158,7 +163,9 @@ public class PartitionReplicaManager implements PartitionReplicaVersionManager {
         sendSyncReplicaRequest(partitionId, namespaces, replicaIndex, target);
     }
 
-    /** Checks preconditions for replica sync - if we don't know the owner yet, if this node is the owner or not a replica */
+    /**
+     * Checks preconditions for replica sync - if we don't know the owner yet, if this node is the owner or not a replica
+     */
     PartitionReplica checkAndGetPrimaryReplicaOwner(int partitionId, int replicaIndex) {
         InternalPartitionImpl partition = partitionStateManager.getPartitionImpl(partitionId);
         PartitionReplica owner = partition.getOwnerReplicaOrNull();
@@ -194,7 +201,7 @@ public class PartitionReplicaManager implements PartitionReplicaVersionManager {
      * partition and schedule a new sync request that is to be run in the case of timeout
      */
     private void sendSyncReplicaRequest(int partitionId, Collection<ServiceNamespace> requestedNamespaces,
-            int replicaIndex, PartitionReplica target) {
+                                        int replicaIndex, PartitionReplica target) {
         if (node.clusterService.isMissingMember(target.address(), target.uuid())) {
             return;
         }
@@ -233,7 +240,8 @@ public class PartitionReplicaManager implements PartitionReplicaVersionManager {
     }
 
     private List<ServiceNamespace> registerSyncInfoForNamespaces(int partitionId,
-            Collection<ServiceNamespace> requestedNamespaces, int replicaIndex, PartitionReplica target, int permits) {
+                                                                 Collection<ServiceNamespace> requestedNamespaces,
+                                                                 int replicaIndex, PartitionReplica target, int permits) {
 
         List<ServiceNamespace> namespaces = new ArrayList<>(permits);
         for (ServiceNamespace namespace : requestedNamespaces) {
@@ -320,9 +328,9 @@ public class PartitionReplicaManager implements PartitionReplicaVersionManager {
      * Set the new replica versions for the partition with the {@code partitionId} and reset any ongoing replica
      * synchronization request for this partition and replica index.
      *
-     * @param partitionId the partition ID
+     * @param partitionId  the partition ID
      * @param replicaIndex the index of the replica
-     * @param versions the new replica versions for the partition
+     * @param versions     the new replica versions for the partition
      */
     // called in operation threads
     public void finalizeReplicaSync(int partitionId, int replicaIndex, ServiceNamespace namespace, long[] versions) {
@@ -337,7 +345,7 @@ public class PartitionReplicaManager implements PartitionReplicaVersionManager {
      * scheduled synchronization, clear the ongoing sync flag and release a synchronization permit.
      *
      * @param partitionId  the partition being synchronized
-     * @param namespace namespace
+     * @param namespace    namespace
      * @param replicaIndex the index of the replica being synchronized
      */
     // called in operation threads
@@ -405,17 +413,33 @@ public class PartitionReplicaManager implements PartitionReplicaVersionManager {
     /**
      * Releases the previously acquired permits.
      *
-     * @param permits number of permits
+     * @param permitsToRelease number of permits
      */
-    public void releaseReplicaSyncPermits(int permits) {
-        assert permits > 0 : "Invalid permits: " + permits;
-        replicaSyncSemaphore.release(permits);
-        if (logger.isFinestEnabled()) {
-            logger.finest("Released " + permits + " replica sync permits. Available permits: "
-                        + replicaSyncSemaphore.availablePermits());
+    public void releaseReplicaSyncPermits(int permitsToRelease) {
+        assert permitsToRelease > 0 : "Invalid permits: " + permitsToRelease;
+
+        int availablePermits = availableReplicaSyncPermits();
+        int acquiredPermits = maxParallelReplications - availablePermits;
+
+        if (logger.isWarningEnabled() && acquiredPermits < permitsToRelease) {
+            logger.warning(format("Found more replica sync permits than configured max number!"
+                            + " (permitsToRelease: %d, acquired: %d, available: %d, max: %d)",
+                    permitsToRelease, acquiredPermits, availablePermits, maxParallelReplications));
         }
-        assert availableReplicaSyncPermits() <= maxParallelReplications
-                : "Number of replica sync permits exceeded the configured number!";
+
+        int permits = Math.min(acquiredPermits, permitsToRelease);
+        if (permits <= 0) {
+            return;
+        }
+
+        replicaSyncSemaphore.release(permits);
+
+        if (logger.isFinestEnabled()) {
+            int currentAvailable = availableReplicaSyncPermits();
+            logger.finest(format("Released %d replica sync permits. (acquired: %d, available: %d, max: %d)",
+                    permits, maxParallelReplications - currentAvailable,
+                    currentAvailable, maxParallelReplications));
+        }
     }
 
     /**
@@ -453,14 +477,17 @@ public class PartitionReplicaManager implements PartitionReplicaVersionManager {
         // permit count can exceed allowed parallelization count.
         replicaSyncSemaphore.drainPermits();
         replicaSyncSemaphore.release(maxParallelReplications);
+
+        if (logger.isFinestEnabled()) {
+            logger.finest(format("Reset replica sync permits to %d", maxParallelReplications));
+        }
     }
 
     void scheduleReplicaVersionSync(ExecutionService executionService) {
         long definedBackupSyncCheckInterval = node.getProperties().getSeconds(ClusterProperty.PARTITION_BACKUP_SYNC_INTERVAL);
         long backupSyncCheckInterval = definedBackupSyncCheckInterval > 0 ? definedBackupSyncCheckInterval : 1;
 
-        executionService.scheduleWithRepetition(new AntiEntropyTask(),
-                backupSyncCheckInterval, backupSyncCheckInterval, TimeUnit.SECONDS);
+        executionService.schedule(new AntiEntropyTask(backupSyncCheckInterval), backupSyncCheckInterval, TimeUnit.SECONDS);
     }
 
     @Override
@@ -468,7 +495,7 @@ public class PartitionReplicaManager implements PartitionReplicaVersionManager {
         return replicaVersions[partitionId].getNamespaces();
     }
 
-    public void retainNamespaces(int partitionId, Set<ServiceNamespace> namespaces) {
+    public void retainNamespaces(int partitionId, Collection<ServiceNamespace> namespaces) {
         PartitionReplicaVersions versions = replicaVersions[partitionId];
         versions.retainNamespaces(namespaces);
     }
@@ -477,7 +504,7 @@ public class PartitionReplicaManager implements PartitionReplicaVersionManager {
 
         @Override
         public void process(EntryTaskScheduler<ReplicaFragmentSyncInfo, Void> scheduler,
-                Collection<ScheduledEntry<ReplicaFragmentSyncInfo, Void>> entries) {
+                            Collection<ScheduledEntry<ReplicaFragmentSyncInfo, Void>> entries) {
 
             for (ScheduledEntry<ReplicaFragmentSyncInfo, Void> entry : entries) {
                 ReplicaFragmentSyncInfo syncInfo = entry.getKey();
@@ -489,31 +516,114 @@ public class PartitionReplicaManager implements PartitionReplicaVersionManager {
     }
 
     private class AntiEntropyTask implements Runnable {
-        @Override
-        public void run() {
-            if (!node.isRunning() || !node.getNodeExtension().isStartCompleted()
-                    || !partitionService.areMigrationTasksAllowed()) {
-                return;
-            }
-            nodeEngine.getOperationService().executeOnPartitions(new PartitionAntiEntropyTaskFactory(), getLocalPartitions());
+
+        private static final int UNSET = -1;
+
+        private final long firstRunNanos;
+        private final long backupSyncCheckIntervalSeconds;
+        private final AtomicInteger taskCounter = new AtomicInteger();
+
+        private int taskCountPerSecond;
+        private Queue<Integer> localPartitionIds;
+
+        AntiEntropyTask(long backupSyncCheckIntervalSeconds) {
+            this(backupSyncCheckIntervalSeconds, null, UNSET, UNSET);
         }
 
-        private BitSet getLocalPartitions() {
-            BitSet localPartitions = new BitSet(partitionService.getPartitionCount());
+        AntiEntropyTask(long backupSyncCheckIntervalSeconds, Queue<Integer> localPartitionIds,
+                        long firstRunNanos, int taskCountPerSecond) {
+            this.backupSyncCheckIntervalSeconds = backupSyncCheckIntervalSeconds;
+            this.localPartitionIds = localPartitionIds;
+            this.firstRunNanos = firstRunNanos;
+            this.taskCountPerSecond = taskCountPerSecond;
+        }
+
+        @Override
+        public void run() {
+            long initialStartTimeInNanos = firstRunNanos == UNSET ? System.nanoTime() : firstRunNanos;
+
+            if (!node.isRunning() || !node.getNodeExtension().isStartCompleted()
+                    || !partitionService.areMigrationTasksAllowed()) {
+                scheduleNextRun(initialStartTimeInNanos, null, UNSET);
+                return;
+            }
+
+            initLocalPartitionsIfNull();
+
+            BitSet partitionsBitSet = convertLocalPartitionsToBitSet();
+
+            if (partitionsBitSet.cardinality() != 0) {
+                runAntiEntropyTask(partitionsBitSet, () -> {
+                    if (taskCounter.incrementAndGet() == partitionsBitSet.cardinality()) {
+                        scheduleNextRun(initialStartTimeInNanos, localPartitionIds, taskCountPerSecond);
+                    }
+                });
+            } else {
+                scheduleNextRun(initialStartTimeInNanos, localPartitionIds, taskCountPerSecond);
+            }
+
+        }
+
+        private void runAntiEntropyTask(BitSet partitionsBitSet, Runnable afterRun) {
+            nodeEngine.getOperationService().executeOnPartitions(partitionId
+                            -> new PartitionPrimaryReplicaAntiEntropyTask(nodeEngine, partitionId, afterRun),
+                    partitionsBitSet);
+        }
+
+        private void scheduleNextRun(long initialStartTimeInNanos,
+                                     Queue<Integer> localPartitionIds, int numInOneGo) {
+
+            ExecutionService executionService = nodeEngine.getExecutionService();
+
+            if (CollectionUtil.isEmpty(localPartitionIds)) {
+                // we have finished checking of all local partitions, time to decide when to commence next run.
+                long elapsedSeconds = TimeUnit.NANOSECONDS.toSeconds(System.nanoTime() - initialStartTimeInNanos);
+                long delayBeforeNextRunSeconds = Math.max(1, backupSyncCheckIntervalSeconds - elapsedSeconds);
+                executionService.schedule(new AntiEntropyTask(backupSyncCheckIntervalSeconds),
+                        delayBeforeNextRunSeconds, TimeUnit.SECONDS);
+            } else {
+                // we still have local partitions to check
+                executionService.schedule(new AntiEntropyTask(backupSyncCheckIntervalSeconds,
+                        localPartitionIds, initialStartTimeInNanos, numInOneGo), 1, TimeUnit.SECONDS);
+            }
+        }
+
+        private void initLocalPartitionsIfNull() {
+            if (localPartitionIds != null) {
+                return;
+            }
+
+            localPartitionIds = getLocalPartitionIds();
+            taskCountPerSecond = Math.max(1, (int) Math.ceil(1D * localPartitionIds.size() / backupSyncCheckIntervalSeconds));
+        }
+
+        @Nonnull
+        private BitSet convertLocalPartitionsToBitSet() {
+            BitSet bitSet = new BitSet(partitionService.getPartitionCount());
+
+            do {
+                Integer partitionId = localPartitionIds.poll();
+                if (partitionId == null) {
+                    break;
+                }
+
+                bitSet.set(partitionId);
+
+            } while (bitSet.cardinality() < taskCountPerSecond);
+
+            return bitSet;
+        }
+
+        private Queue<Integer> getLocalPartitionIds() {
+            Queue<Integer> localPartitions = new ArrayDeque<>(partitionService.getPartitionCount());
 
             for (InternalPartition partition : partitionService.getInternalPartitions()) {
                 if (partition.isLocal()) {
-                    localPartitions.set(partition.getPartitionId());
+                    localPartitions.offer(partition.getPartitionId());
                 }
             }
             return localPartitions;
         }
-    }
 
-    private class PartitionAntiEntropyTaskFactory implements PartitionTaskFactory<Runnable> {
-        @Override
-        public Runnable create(int partitionId) {
-            return new PartitionPrimaryReplicaAntiEntropyTask(nodeEngine, partitionId);
-        }
     }
 }

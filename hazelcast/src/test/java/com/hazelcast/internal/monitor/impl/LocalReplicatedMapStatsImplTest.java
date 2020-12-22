@@ -16,7 +16,6 @@
 
 package com.hazelcast.internal.monitor.impl;
 
-import com.hazelcast.internal.json.JsonObject;
 import com.hazelcast.test.HazelcastParallelClassRunner;
 import com.hazelcast.test.annotation.ParallelJVMTest;
 import com.hazelcast.test.annotation.QuickTest;
@@ -25,6 +24,7 @@ import org.junit.Test;
 import org.junit.experimental.categories.Category;
 import org.junit.runner.RunWith;
 
+import static com.hazelcast.internal.util.TimeUtil.convertMillisToNanos;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertTrue;
@@ -50,12 +50,12 @@ public class LocalReplicatedMapStatsImplTest {
         localReplicatedMapStats.setLockedEntryCount(1231);
         localReplicatedMapStats.setDirtyEntryCount(4252);
 
-        localReplicatedMapStats.incrementPuts(5631);
-        localReplicatedMapStats.incrementPuts(1);
-        localReplicatedMapStats.incrementGets(1233);
-        localReplicatedMapStats.incrementGets(5);
-        localReplicatedMapStats.incrementGets(9);
-        localReplicatedMapStats.incrementRemoves(1238);
+        localReplicatedMapStats.incrementPutsNanos(convertMillisToNanos(5631));
+        localReplicatedMapStats.incrementPutsNanos(convertMillisToNanos(1));
+        localReplicatedMapStats.incrementGetsNanos(convertMillisToNanos(1233));
+        localReplicatedMapStats.incrementGetsNanos(convertMillisToNanos(5));
+        localReplicatedMapStats.incrementGetsNanos(convertMillisToNanos(9));
+        localReplicatedMapStats.incrementRemovesNanos(convertMillisToNanos(1238));
         localReplicatedMapStats.incrementOtherOperations();
         localReplicatedMapStats.incrementOtherOperations();
         localReplicatedMapStats.incrementOtherOperations();
@@ -98,42 +98,6 @@ public class LocalReplicatedMapStatsImplTest {
         assertEquals(0, localReplicatedMapStats.getHeapCost());
         assertEquals(0, localReplicatedMapStats.getMerkleTreesCost());
         assertNotNull(localReplicatedMapStats.toString());
-    }
-
-    @Test
-    public void testSerialization() {
-        JsonObject serialized = localReplicatedMapStats.toJson();
-        LocalReplicatedMapStatsImpl deserialized = new LocalReplicatedMapStatsImpl();
-        deserialized.fromJson(serialized);
-
-        assertTrue(deserialized.getCreationTime() > 0);
-        assertEquals(5, deserialized.getOwnedEntryCount());
-        assertEquals(0, deserialized.getBackupEntryCount());
-        assertEquals(0, deserialized.getBackupCount());
-        assertEquals(1234, deserialized.getOwnedEntryMemoryCost());
-        assertEquals(0, deserialized.getBackupEntryMemoryCost());
-        assertEquals(1231241512, deserialized.getLastAccessTime());
-        assertEquals(1341412343, deserialized.getLastUpdateTime());
-        assertEquals(12314, deserialized.getHits());
-        assertEquals(0, deserialized.getLockedEntryCount());
-        assertEquals(0, deserialized.getDirtyEntryCount());
-
-        assertEquals(11, deserialized.total());
-        assertEquals(2, deserialized.getPutOperationCount());
-        assertEquals(3, deserialized.getGetOperationCount());
-        assertEquals(1, deserialized.getRemoveOperationCount());
-        assertEquals(5632, deserialized.getTotalPutLatency());
-        assertEquals(1247, deserialized.getTotalGetLatency());
-        assertEquals(1238, deserialized.getTotalRemoveLatency());
-        assertEquals(5631, deserialized.getMaxPutLatency());
-        assertEquals(1233, deserialized.getMaxGetLatency());
-        assertEquals(1238, deserialized.getMaxRemoveLatency());
-        assertEquals(5, deserialized.getOtherOperationCount());
-        assertEquals(2, deserialized.getEventOperationCount());
-
-        assertEquals(0, deserialized.getHeapCost());
-        assertEquals(0, deserialized.getMerkleTreesCost());
-        assertNotNull(deserialized.toString());
     }
 
     @Test(expected = UnsupportedOperationException.class)

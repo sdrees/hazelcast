@@ -36,7 +36,7 @@ import static com.hazelcast.client.impl.protocol.codec.builtin.FixedSizeTypesCod
 /**
  * Ask a member to prepare for a transaction commit of the transaction specified in xid.
  */
-@Generated("f65a952d8cc28c2671005d3ca546897c")
+@Generated("1f1f8afb54a9a659efad555f87cbbb95")
 public final class XATransactionPrepareCodec {
     //hex: 0x140600
     public static final int REQUEST_MESSAGE_TYPE = 1312256;
@@ -47,15 +47,6 @@ public final class XATransactionPrepareCodec {
     private static final int RESPONSE_INITIAL_FRAME_SIZE = RESPONSE_BACKUP_ACKS_FIELD_OFFSET + BYTE_SIZE_IN_BYTES;
 
     private XATransactionPrepareCodec() {
-    }
-
-    @edu.umd.cs.findbugs.annotations.SuppressFBWarnings({"URF_UNREAD_PUBLIC_OR_PROTECTED_FIELD"})
-    public static class RequestParameters {
-
-        /**
-         * The id of the transaction to prepare.
-         */
-        public java.util.UUID transactionId;
     }
 
     public static ClientMessage encodeRequest(java.util.UUID transactionId) {
@@ -70,16 +61,13 @@ public final class XATransactionPrepareCodec {
         return clientMessage;
     }
 
-    public static XATransactionPrepareCodec.RequestParameters decodeRequest(ClientMessage clientMessage) {
+    /**
+     * The id of the transaction to prepare.
+     */
+    public static java.util.UUID decodeRequest(ClientMessage clientMessage) {
         ClientMessage.ForwardFrameIterator iterator = clientMessage.frameIterator();
-        RequestParameters request = new RequestParameters();
         ClientMessage.Frame initialFrame = iterator.next();
-        request.transactionId = decodeUUID(initialFrame.content, REQUEST_TRANSACTION_ID_FIELD_OFFSET);
-        return request;
-    }
-
-    @edu.umd.cs.findbugs.annotations.SuppressFBWarnings({"URF_UNREAD_PUBLIC_OR_PROTECTED_FIELD"})
-    public static class ResponseParameters {
+        return decodeUUID(initialFrame.content, REQUEST_TRANSACTION_ID_FIELD_OFFSET);
     }
 
     public static ClientMessage encodeResponse() {
@@ -91,12 +79,5 @@ public final class XATransactionPrepareCodec {
         return clientMessage;
     }
 
-    public static XATransactionPrepareCodec.ResponseParameters decodeResponse(ClientMessage clientMessage) {
-        ClientMessage.ForwardFrameIterator iterator = clientMessage.frameIterator();
-        ResponseParameters response = new ResponseParameters();
-        //empty initial frame
-        iterator.next();
-        return response;
-    }
 
 }

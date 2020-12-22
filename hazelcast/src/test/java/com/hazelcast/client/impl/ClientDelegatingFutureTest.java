@@ -81,7 +81,7 @@ public class ClientDelegatingFutureTest {
                 logger,
                 callIdSequence);
         delegatingFuture = new ClientDelegatingFuture<>(invocationFuture, serializationService,
-                clientMessage -> MapGetCodec.decodeResponse(clientMessage).response, true);
+                MapGetCodec::decodeResponse, true);
     }
 
     @Test
@@ -117,7 +117,6 @@ public class ClientDelegatingFutureTest {
         invocationFuture.completeExceptionally(new IllegalArgumentException());
 
         expected.expect(IllegalArgumentException.class);
-        expected.expectCause(new RootCauseMatcher(IllegalArgumentException.class));
         delegatingFuture.joinInternal();
     }
 

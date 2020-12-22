@@ -18,13 +18,13 @@ package com.hazelcast.instance.impl;
 
 import com.hazelcast.config.Config;
 import com.hazelcast.core.HazelcastInstance;
-import com.hazelcast.spi.properties.ClusterProperty;
 import com.hazelcast.instance.TestNodeContext;
+import com.hazelcast.spi.properties.ClusterProperty;
 import com.hazelcast.test.ExpectedRuntimeException;
 import com.hazelcast.test.HazelcastParallelClassRunner;
 import com.hazelcast.test.HazelcastTestSupport;
 import com.hazelcast.test.TestHazelcastInstanceFactory;
-import com.hazelcast.test.annotation.QuickTest;
+import com.hazelcast.test.annotation.SlowTest;
 import org.junit.After;
 import org.junit.AfterClass;
 import org.junit.BeforeClass;
@@ -44,7 +44,7 @@ import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.doThrow;
 
 @RunWith(HazelcastParallelClassRunner.class)
-@Category(QuickTest.class)
+@Category(SlowTest.class)
 public class HazelcastInstanceFactoryTest extends HazelcastTestSupport {
 
     private static Set<Thread> oldThreads;
@@ -109,6 +109,13 @@ public class HazelcastInstanceFactoryTest extends HazelcastTestSupport {
         }
     }
 
+    @Test
+    public void test_NewInstance_configLoaded() {
+        hazelcastInstance = HazelcastInstanceFactory.newHazelcastInstance(null);
+
+        assertNotNull(hazelcastInstance.getConfig());
+    }
+
     @Test(expected = ExpectedRuntimeException.class)
     public void test_NewInstance_failed_beforeNodeStart() throws Exception {
         NodeContext context = new TestNodeContext() {
@@ -121,7 +128,7 @@ public class HazelcastInstanceFactoryTest extends HazelcastTestSupport {
         };
 
         Config config = new Config();
-        config.getNetworkConfig().getJoin().getMulticastConfig().setEnabled(false);
+        config.getNetworkConfig().getJoin().getAutoDetectionConfig().setEnabled(false);
 
         hazelcastInstance = HazelcastInstanceFactory.newHazelcastInstance(config, randomString(), context);
     }
@@ -138,7 +145,7 @@ public class HazelcastInstanceFactoryTest extends HazelcastTestSupport {
         };
 
         Config config = new Config();
-        config.getNetworkConfig().getJoin().getMulticastConfig().setEnabled(false);
+        config.getNetworkConfig().getJoin().getAutoDetectionConfig().setEnabled(false);
 
         hazelcastInstance = HazelcastInstanceFactory.newHazelcastInstance(config, randomString(), context);
     }
@@ -155,7 +162,7 @@ public class HazelcastInstanceFactoryTest extends HazelcastTestSupport {
         };
 
         Config config = new Config();
-        config.getNetworkConfig().getJoin().getMulticastConfig().setEnabled(false);
+        config.getNetworkConfig().getJoin().getAutoDetectionConfig().setEnabled(false);
 
         hazelcastInstance = HazelcastInstanceFactory.newHazelcastInstance(config, randomString(), context);
     }
@@ -182,7 +189,7 @@ public class HazelcastInstanceFactoryTest extends HazelcastTestSupport {
         };
 
         Config config = new Config();
-        config.getNetworkConfig().getJoin().getMulticastConfig().setEnabled(false);
+        config.getNetworkConfig().getJoin().getAutoDetectionConfig().setEnabled(false);
 
         hazelcastInstance = HazelcastInstanceFactory.newHazelcastInstance(config, randomString(), context);
         try {
@@ -213,7 +220,7 @@ public class HazelcastInstanceFactoryTest extends HazelcastTestSupport {
         };
 
         Config config = new Config();
-        config.getNetworkConfig().getJoin().getMulticastConfig().setEnabled(false);
+        config.getNetworkConfig().getJoin().getAutoDetectionConfig().setEnabled(false);
 
         hazelcastInstance = HazelcastInstanceFactory.newHazelcastInstance(config, randomString(), context);
     }

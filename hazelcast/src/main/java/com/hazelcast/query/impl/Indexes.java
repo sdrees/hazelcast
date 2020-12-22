@@ -16,16 +16,18 @@
 
 package com.hazelcast.query.impl;
 
+import com.hazelcast.config.InMemoryFormat;
 import com.hazelcast.config.IndexConfig;
 import com.hazelcast.config.IndexType;
 import com.hazelcast.core.TypeConverter;
 import com.hazelcast.internal.monitor.impl.GlobalIndexesStats;
+import com.hazelcast.internal.monitor.impl.HDGlobalIndexesStats;
 import com.hazelcast.internal.monitor.impl.IndexesStats;
 import com.hazelcast.internal.monitor.impl.PartitionIndexesStats;
 import com.hazelcast.internal.serialization.Data;
 import com.hazelcast.internal.serialization.InternalSerializationService;
 import com.hazelcast.internal.serialization.SerializationService;
-import com.hazelcast.map.impl.StoreAdapter;
+import com.hazelcast.internal.util.IterableUtil;
 import com.hazelcast.query.Predicate;
 import com.hazelcast.query.impl.getters.Extractors;
 import com.hazelcast.query.impl.predicates.IndexAwarePredicate;
@@ -37,6 +39,8 @@ import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 
+import static com.hazelcast.config.InMemoryFormat.NATIVE;
+import static com.hazelcast.internal.util.ExceptionUtil.rethrow;
 import static com.hazelcast.internal.util.Preconditions.checkNotNull;
 
 /**
@@ -55,6 +59,7 @@ public class Indexes {
 
     private final boolean global;
     private final boolean usesCachedQueryableEntries;
+    private final java.util.function.Predicate<QueryableEntry> resultFilter;
     private final IndexesStats stats;
     private final Extractors extractors;
     private final IndexProvider indexProvider;
@@ -68,19 +73,30 @@ public class Indexes {
     private final ConverterCache converterCache = new ConverterCache(this);
     private final Map<String, IndexConfig> definitions = new ConcurrentHashMap<>();
 
+    private final int partitionCount;
+
     private volatile InternalIndex[] indexes = EMPTY_INDEXES;
     private volatile InternalIndex[] compositeIndexes = EMPTY_INDEXES;
 
     private Indexes(InternalSerializationService serializationService, IndexCopyBehavior indexCopyBehavior, Extractors extractors,
-                    IndexProvider indexProvider, boolean usesCachedQueryableEntries, boolean statisticsEnabled, boolean global) {
+                    IndexProvider indexProvider, boolean usesCachedQueryableEntries, boolean statisticsEnabled, boolean global,
+                    InMemoryFormat inMemoryFormat, int partitionCount, java.util.function.Predicate resultFilter) {
         this.global = global;
         this.indexCopyBehavior = indexCopyBehavior;
         this.serializationService = serializationService;
         this.usesCachedQueryableEntries = usesCachedQueryableEntries;
-        this.stats = createStats(global, statisticsEnabled);
+        this.stats = createStats(global, inMemoryFormat, statisticsEnabled);
         this.extractors = extractors == null ? Extractors.newBuilder(serializationService).build() : extractors;
         this.indexProvider = indexProvider == null ? new DefaultIndexProvider() : indexProvider;
         this.queryContextProvider = createQueryContextProvider(this, global, statisticsEnabled);
+        this.partitionCount = partitionCount;
+        this.resultFilter = resultFilter;
+    }
+
+    public static void beginPartitionUpdate(InternalIndex[] indexes) {
+        for (InternalIndex index : indexes) {
+            index.beginPartitionUpdate();
+        }
     }
 
     /**
@@ -113,11 +129,12 @@ public class Indexes {
      * @return new builder instance which will be used to create Indexes object.
      * @see IndexCopyBehavior
      */
-    public static Builder newBuilder(SerializationService ss, IndexCopyBehavior indexCopyBehavior) {
-        return new Builder(ss, indexCopyBehavior);
+    public static Builder newBuilder(SerializationService ss, IndexCopyBehavior indexCopyBehavior,
+                                     InMemoryFormat inMemoryFormat) {
+        return new Builder(ss, indexCopyBehavior, inMemoryFormat);
     }
 
-    public synchronized InternalIndex addOrGetIndex(IndexConfig indexConfig, StoreAdapter partitionStoreAdapter) {
+    public synchronized InternalIndex addOrGetIndex(IndexConfig indexConfig) {
         String name = indexConfig.getName();
 
         assert name != null;
@@ -134,8 +151,7 @@ public class Indexes {
                 serializationService,
                 indexCopyBehavior,
                 stats.createPerIndexStats(indexConfig.getType() == IndexType.SORTED, usesCachedQueryableEntries),
-                partitionStoreAdapter
-        );
+                partitionCount);
 
         indexesByName.put(name, index);
         if (index.isEvaluateOnly()) {
@@ -177,9 +193,9 @@ public class Indexes {
      * Creates indexes according to the index definitions stored inside this
      * indexes.
      */
-    public void createIndexesFromRecordedDefinitions(StoreAdapter partitionStoreAdapter) {
+    public void createIndexesFromRecordedDefinitions() {
         definitions.forEach((name, indexConfig) -> {
-            addOrGetIndex(indexConfig, partitionStoreAdapter);
+            addOrGetIndex(indexConfig);
             definitions.compute(name, (k, v) -> {
                 return indexConfig == v ? null : v;
             });
@@ -267,8 +283,19 @@ public class Indexes {
      */
     public void putEntry(QueryableEntry queryableEntry, Object oldValue, Index.OperationSource operationSource) {
         InternalIndex[] indexes = getIndexes();
+        Throwable exception = null;
         for (InternalIndex index : indexes) {
-            index.putEntry(queryableEntry, oldValue, operationSource);
+            try {
+                index.putEntry(queryableEntry, oldValue, operationSource);
+            } catch (Throwable t) {
+                if (exception == null) {
+                    exception = t;
+                }
+            }
+        }
+
+        if (exception != null) {
+            rethrow(exception);
         }
     }
 
@@ -317,11 +344,11 @@ public class Indexes {
      * @param predicate           the predicate to evaluate.
      * @param ownedPartitionCount a count of owned partitions a query runs on.
      *                            Negative value indicates that the value is not defined.
-     * @return the produced result set or {@code null} if the query can't be
+     * @return the produced iterable result object or {@code null} if the query can't be
      * performed using the indexes known to this indexes instance.
      */
     @SuppressWarnings("unchecked")
-    public Set<QueryableEntry> query(Predicate predicate, int ownedPartitionCount) {
+    public Iterable<QueryableEntry> query(Predicate predicate, int ownedPartitionCount) {
         stats.incrementQueryCount();
 
         if (!haveAtLeastOneIndex() || !(predicate instanceof IndexAwarePredicate)) {
@@ -340,7 +367,11 @@ public class Indexes {
             queryContext.applyPerQueryStats();
         }
 
-        return result;
+        if (result != null && resultFilter != null) {
+            return IterableUtil.filter(result, resultFilter);
+        } else {
+            return result;
+        }
     }
 
     /**
@@ -437,9 +468,13 @@ public class Indexes {
         }
     }
 
-    private static IndexesStats createStats(boolean global, boolean statisticsEnabled) {
+    private static IndexesStats createStats(boolean global, InMemoryFormat inMemoryFormat, boolean statisticsEnabled) {
         if (statisticsEnabled) {
-            return global ? new GlobalIndexesStats() : new PartitionIndexesStats();
+            if (global) {
+                return inMemoryFormat.equals(NATIVE) ? new HDGlobalIndexesStats() : new GlobalIndexesStats();
+            } else {
+                return new PartitionIndexesStats();
+            }
         } else {
             return IndexesStats.EMPTY;
         }
@@ -456,12 +491,26 @@ public class Indexes {
         private boolean global = true;
         private boolean statsEnabled;
         private boolean usesCachedQueryableEntries;
+        private int partitionCount;
         private Extractors extractors;
         private IndexProvider indexProvider;
+        private InMemoryFormat inMemoryFormat;
+        private java.util.function.Predicate<QueryableEntry> resultFilter;
 
-        Builder(SerializationService ss, IndexCopyBehavior indexCopyBehavior) {
+        Builder(SerializationService ss, IndexCopyBehavior indexCopyBehavior, InMemoryFormat inMemoryFormat) {
             this.serializationService = checkNotNull((InternalSerializationService) ss, "serializationService cannot be null");
             this.indexCopyBehavior = checkNotNull(indexCopyBehavior, "indexCopyBehavior cannot be null");
+            this.inMemoryFormat = inMemoryFormat;
+        }
+
+        /**
+         * @param filter if filter returns {@code false}, entry
+         *               is filtered out from query result, otherwise it is included.
+         * @return this builder instance
+         */
+        public Builder resultFilter(java.util.function.Predicate<QueryableEntry> filter) {
+            this.resultFilter = filter;
+            return this;
         }
 
         /**
@@ -513,12 +562,18 @@ public class Indexes {
             return this;
         }
 
+        public Builder partitionCount(int partitionCount) {
+            this.partitionCount = partitionCount;
+            return this;
+        }
+
         /**
          * @return a new instance of Indexes
          */
         public Indexes build() {
-            return new Indexes(serializationService, indexCopyBehavior, extractors, indexProvider, usesCachedQueryableEntries,
-                    statsEnabled, global);
+            return new Indexes(serializationService, indexCopyBehavior, extractors,
+                    indexProvider, usesCachedQueryableEntries, statsEnabled, global,
+                    inMemoryFormat, partitionCount, resultFilter);
         }
 
     }

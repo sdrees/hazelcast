@@ -32,6 +32,7 @@ import com.hazelcast.query.impl.predicates.EvaluatePredicate;
 import com.hazelcast.query.impl.predicates.SkipIndexPredicate;
 import com.hazelcast.spi.annotation.PrivateApi;
 import com.hazelcast.spi.impl.operationservice.AbstractLocalOperation;
+import com.hazelcast.sql.impl.type.converter.Converter;
 import com.hazelcast.test.HazelcastParallelClassRunner;
 import com.hazelcast.test.annotation.QuickTest;
 import org.junit.Test;
@@ -65,7 +66,7 @@ import static org.junit.Assert.fail;
  * interface, then verifies that it's either annotated with {@link
  * BinaryInterface}, is excluded from conventions tests by being annotated
  * with {@link SerializableByConvention} or they also implement {@code
- * IdentifiedDataSerializable}. Additionally, tests whether IDS instanced
+ * IdentifiedDataSerializable}. Additionally, tests whether IDS instances
  * obtained from DS factories have the same ID as the one reported by
  * their `getClassId` method and that F_ID/ID combinations are unique.
  */
@@ -79,9 +80,11 @@ public class DataSerializableConventionsTest {
     // IdentifiedDataSerializable due to unavailability of default constructor.
     // - they purposefully break conventions to fix a known issue
     private final Set<Class> classWhiteList;
+    private final Set<String> packageWhiteList;
 
     public DataSerializableConventionsTest() {
         classWhiteList = Collections.unmodifiableSet(getWhitelistedClasses());
+        packageWhiteList = Collections.unmodifiableSet(getWhitelistedPackageNames());
     }
 
     /**
@@ -329,12 +332,24 @@ public class DataSerializableConventionsTest {
     }
 
     private boolean inheritsFromWhiteListedClass(Class klass) {
+        String className = klass.getName();
+
+        for (String packageName : packageWhiteList) {
+            if (className.startsWith(packageName)) {
+                return true;
+            }
+        }
+
         for (Class superclass : classWhiteList) {
             if (superclass.isAssignableFrom(klass)) {
                 return true;
             }
         }
         return false;
+    }
+
+    protected Set<String> getWhitelistedPackageNames() {
+        return Collections.emptySet();
     }
 
     /**
@@ -352,6 +367,7 @@ public class DataSerializableConventionsTest {
         whiteList.add(CompositeRangePredicate.class);
         whiteList.add(CompositeEqualPredicate.class);
         whiteList.add(EvaluatePredicate.class);
+        whiteList.add(Converter.class);
         try {
             // these can't be accessed through the meta class since they are private
             whiteList.add(Class.forName("com.hazelcast.query.impl.predicates.CompositeIndexVisitor$Output"));

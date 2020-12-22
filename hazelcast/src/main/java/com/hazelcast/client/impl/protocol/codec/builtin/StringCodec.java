@@ -17,11 +17,8 @@
 package com.hazelcast.client.impl.protocol.codec.builtin;
 
 import com.hazelcast.client.impl.protocol.ClientMessage;
-import com.hazelcast.internal.nio.Bits;
 
-import java.util.concurrent.TimeUnit;
-
-import static com.hazelcast.config.CacheSimpleConfig.ExpiryPolicyFactoryConfig.TimedExpiryPolicyFactoryConfig.ExpiryPolicyType;
+import java.nio.charset.StandardCharsets;
 
 public final class StringCodec {
 
@@ -29,23 +26,10 @@ public final class StringCodec {
     }
 
     public static void encode(ClientMessage clientMessage, String value) {
-        clientMessage.add(new ClientMessage.Frame(value.getBytes(Bits.UTF_8)));
-    }
-
-    public static void encode(ClientMessage clientMessage, TimeUnit timeUnit) {
-        encode(clientMessage, timeUnit.name());
-    }
-
-    public static void encode(ClientMessage clientMessage, ExpiryPolicyType expiryPolicyType) {
-        encode(clientMessage, expiryPolicyType.name());
+        clientMessage.add(new ClientMessage.Frame(value.getBytes(StandardCharsets.UTF_8)));
     }
 
     public static String decode(ClientMessage.ForwardFrameIterator iterator) {
-        return decode(iterator.next());
+        return new String(iterator.next().content, StandardCharsets.UTF_8);
     }
-
-    public static String decode(ClientMessage.Frame frame) {
-        return new String(frame.content, Bits.UTF_8);
-    }
-
 }

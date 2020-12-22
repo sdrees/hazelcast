@@ -129,11 +129,17 @@ public final class ConfigUtils {
         }
     }
 
-    public static InvalidConfigurationException createAmbigiousConfigrationException(
-            String itemName, String candidate, String duplicate) {
+    public static InvalidConfigurationException createAmbiguousConfigurationException(
+      String itemName, String candidate, String duplicate) {
         return new InvalidConfigurationException(
-                format("Found ambiguous configurations for item\"%s\": \"%s\" vs. \"%s\"%n"
-                        + "Please specify your configuration.", itemName, candidate, duplicate));
+          format("Found ambiguous configurations for item\"%s\": \"%s\" vs. \"%s\"%n"
+            + "Please specify your configuration.", itemName, candidate, duplicate));
     }
 
+    public static boolean matches(String configName, String configName2) {
+        return configName != null
+          && configName2 != null
+          && configName.replace("-", "").equals(configName2.replace("-", ""));
+    }
 }
+

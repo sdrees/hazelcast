@@ -24,13 +24,13 @@ import com.hazelcast.internal.cluster.Joiner;
 import com.hazelcast.internal.metrics.MetricsRegistry;
 import com.hazelcast.internal.networking.ChannelErrorHandler;
 import com.hazelcast.internal.networking.Networking;
-import com.hazelcast.internal.networking.ServerSocketRegistry;
+import com.hazelcast.internal.server.tcp.ServerSocketRegistry;
 import com.hazelcast.internal.networking.nio.NioNetworking;
 import com.hazelcast.internal.nio.ClassLoaderUtil;
-import com.hazelcast.internal.nio.NetworkingService;
-import com.hazelcast.internal.nio.NodeIOService;
-import com.hazelcast.internal.nio.tcp.TcpIpConnectionChannelErrorHandler;
-import com.hazelcast.internal.nio.tcp.TcpIpNetworkingService;
+import com.hazelcast.internal.server.Server;
+import com.hazelcast.internal.server.tcp.TcpServerContext;
+import com.hazelcast.internal.server.tcp.TcpServerConnectionChannelErrorHandler;
+import com.hazelcast.internal.server.tcp.TcpServer;
 import com.hazelcast.internal.util.InstantiationUtils;
 import com.hazelcast.logging.ILogger;
 import com.hazelcast.logging.impl.LoggingServiceImpl;
@@ -41,6 +41,7 @@ import java.util.List;
 import java.util.Properties;
 
 import static com.hazelcast.config.ConfigAccessor.getActiveMemberNetworkConfig;
+import static com.hazelcast.internal.util.ThreadAffinity.newSystemThreadAffinity;
 import static com.hazelcast.spi.properties.ClusterProperty.IO_BALANCER_INTERVAL_SECONDS;
 import static com.hazelcast.spi.properties.ClusterProperty.IO_INPUT_THREAD_COUNT;
 import static com.hazelcast.spi.properties.ClusterProperty.IO_OUTPUT_THREAD_COUNT;
@@ -142,30 +143,24 @@ public class DefaultNodeContext implements NodeContext {
     }
 
     @Override
-    public NetworkingService createNetworkingService(Node node, ServerSocketRegistry registry) {
-        NodeIOService ioService = new NodeIOService(node, node.nodeEngine);
+    public Server createServer(Node node, ServerSocketRegistry registry) {
+        TcpServerContext context = new TcpServerContext(node, node.nodeEngine);
         Networking networking = createNetworking(node);
         Config config = node.getConfig();
 
         MetricsRegistry metricsRegistry = node.nodeEngine.getMetricsRegistry();
-        TcpIpNetworkingService tcpIpNetworkingService = new TcpIpNetworkingService(config,
-                ioService,
+        return new TcpServer(config,
+                context,
                 registry,
-                node.loggingService,
                 metricsRegistry,
                 networking,
-                node.getNodeExtension().createChannelInitializerProvider(ioService),
-                node.getProperties());
-        return tcpIpNetworkingService;
+                node.getNodeExtension().createChannelInitializerFn(context));
     }
 
     private Networking createNetworking(Node node) {
-
         LoggingServiceImpl loggingService = node.loggingService;
-
-        ChannelErrorHandler errorHandler
-                = new TcpIpConnectionChannelErrorHandler(loggingService.getLogger(TcpIpConnectionChannelErrorHandler.class));
-
+        ILogger logger = loggingService.getLogger(TcpServerConnectionChannelErrorHandler.class);
+        ChannelErrorHandler errorHandler = new TcpServerConnectionChannelErrorHandler(logger);
         HazelcastProperties props = node.getProperties();
 
         return new NioNetworking(
@@ -175,9 +170,12 @@ public class DefaultNodeContext implements NodeContext {
                         .threadNamePrefix(node.hazelcastInstance.getName())
                         .errorHandler(errorHandler)
                         .inputThreadCount(props.getInteger(IO_INPUT_THREAD_COUNT))
+                        .inputThreadAffinity(newSystemThreadAffinity("hazelcast.io.input.thread.affinity"))
                         .outputThreadCount(props.getInteger(IO_OUTPUT_THREAD_COUNT))
+                        .outputThreadAffinity(newSystemThreadAffinity("hazelcast.io.output.thread.affinity"))
                         .balancerIntervalSeconds(props.getInteger(IO_BALANCER_INTERVAL_SECONDS))
                         .writeThroughEnabled(props.getBoolean(IO_WRITE_THROUGH_ENABLED))
-                        .concurrencyDetection(node.nodeEngine.getConcurrencyDetection()));
+                        .concurrencyDetection(node.nodeEngine.getConcurrencyDetection())
+        );
     }
 }

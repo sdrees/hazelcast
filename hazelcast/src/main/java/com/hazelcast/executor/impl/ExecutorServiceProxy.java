@@ -16,27 +16,27 @@
 
 package com.hazelcast.executor.impl;
 
+import com.hazelcast.cluster.Address;
 import com.hazelcast.cluster.Member;
 import com.hazelcast.cluster.MemberSelector;
 import com.hazelcast.core.ExecutionCallback;
 import com.hazelcast.core.HazelcastInstanceNotActiveException;
 import com.hazelcast.core.IExecutorService;
 import com.hazelcast.core.MultiExecutionCallback;
+import com.hazelcast.executor.LocalExecutorStats;
 import com.hazelcast.executor.impl.operations.CallableTaskOperation;
 import com.hazelcast.executor.impl.operations.MemberCallableTaskOperation;
 import com.hazelcast.executor.impl.operations.ShutdownOperation;
+import com.hazelcast.internal.serialization.Data;
 import com.hazelcast.internal.serialization.SerializationService;
 import com.hazelcast.internal.util.Clock;
 import com.hazelcast.internal.util.FutureUtil.ExceptionHandler;
+import com.hazelcast.internal.util.Timer;
 import com.hazelcast.logging.ILogger;
-import com.hazelcast.executor.LocalExecutorStats;
-import com.hazelcast.cluster.Address;
-import com.hazelcast.internal.serialization.Data;
 import com.hazelcast.partition.PartitionAware;
 import com.hazelcast.spi.impl.AbstractDistributedObject;
 import com.hazelcast.spi.impl.InternalCompletableFuture;
 import com.hazelcast.spi.impl.NodeEngine;
-import com.hazelcast.spi.impl.executionservice.ExecutionService;
 import com.hazelcast.spi.impl.operationservice.Operation;
 import com.hazelcast.spi.impl.operationservice.OperationService;
 import com.hazelcast.spi.impl.operationservice.impl.InvocationFuture;
@@ -55,7 +55,6 @@ import java.util.UUID;
 import java.util.concurrent.Callable;
 import java.util.concurrent.CancellationException;
 import java.util.concurrent.ExecutionException;
-import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Future;
 import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.TimeUnit;
@@ -422,11 +421,11 @@ public class ExecutorServiceProxy
                 .invoke();
         if (callback != null) {
             future.whenCompleteAsync(new ExecutionCallbackAdapter<>(callback))
-                  .whenCompleteAsync((v, t) -> {
-                      if (t instanceof RejectedExecutionException) {
-                          callback.onFailure(t);
-                      }
-                  });
+                    .whenCompleteAsync((v, t) -> {
+                        if (t instanceof RejectedExecutionException) {
+                            callback.onFailure(t);
+                        }
+                    });
         }
     }
 
@@ -464,7 +463,7 @@ public class ExecutorServiceProxy
                 .invoke();
         if (callback != null) {
             future.whenCompleteAsync(new ExecutionCallbackAdapter<>(callback))
-                  .whenCompleteAsync((v, t) -> {
+                    .whenCompleteAsync((v, t) -> {
                         if (t instanceof RejectedExecutionException) {
                             callback.onFailure(t);
                         }
@@ -540,10 +539,10 @@ public class ExecutorServiceProxy
         boolean done = false;
         try {
             for (Callable<T> task : tasks) {
-                long start = System.nanoTime();
+                long startNanos = Timer.nanos();
                 int partitionId = getTaskPartitionId(task);
                 futures.add(submitToPartitionOwner(task, partitionId, true));
-                timeoutNanos -= System.nanoTime() - start;
+                timeoutNanos -= Timer.nanosElapsed(startNanos);
             }
             if (timeoutNanos <= 0L) {
                 return futures;
@@ -565,7 +564,7 @@ public class ExecutorServiceProxy
     private <T> boolean wait(long timeoutNanos, List<Future<T>> futures) throws InterruptedException {
         boolean done = true;
         for (int i = 0, size = futures.size(); i < size; i++) {
-            long start = System.nanoTime();
+            long startNanos = Timer.nanos();
             Object value;
             try {
                 Future<T> future = futures.get(i);
@@ -577,14 +576,14 @@ public class ExecutorServiceProxy
                 for (int l = i; l < size; l++) {
                     Future<T> f = futures.get(i);
                     if (f.isDone()) {
-                        futures.set(l, completedSynchronously(f,  getNodeEngine().getSerializationService()));
+                        futures.set(l, completedSynchronously(f, getNodeEngine().getSerializationService()));
                     }
                 }
                 break;
             }
 
             futures.set(i, InternalCompletableFuture.newCompletedFuture(value));
-            timeoutNanos -= System.nanoTime() - start;
+            timeoutNanos -= Timer.nanosElapsed(startNanos);
         }
         return done;
     }
@@ -671,10 +670,6 @@ public class ExecutorServiceProxy
     @Override
     public String getName() {
         return name;
-    }
-
-    private ExecutorService getAsyncExecutor() {
-        return getNodeEngine().getExecutionService().getExecutor(ExecutionService.ASYNC_EXECUTOR);
     }
 
     private List<Member> selectMembers(@Nonnull MemberSelector memberSelector) {

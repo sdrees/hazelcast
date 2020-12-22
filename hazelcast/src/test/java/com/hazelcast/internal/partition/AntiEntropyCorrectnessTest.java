@@ -17,18 +17,22 @@
 package com.hazelcast.internal.partition;
 
 import com.hazelcast.cluster.Address;
+import com.hazelcast.config.Config;
 import com.hazelcast.core.HazelcastInstance;
+import com.hazelcast.instance.EndpointQualifier;
 import com.hazelcast.instance.impl.Node;
-import com.hazelcast.internal.nio.tcp.FirewallingNetworkingService;
-import com.hazelcast.internal.nio.tcp.OperationPacketFilter;
-import com.hazelcast.internal.nio.tcp.PacketFilter;
+import com.hazelcast.internal.server.FirewallingServer;
+import com.hazelcast.internal.server.OperationPacketFilter;
+import com.hazelcast.internal.server.PacketFilter;
 import com.hazelcast.internal.partition.impl.InternalPartitionServiceImpl;
 import com.hazelcast.internal.serialization.InternalSerializationService;
 import com.hazelcast.spi.impl.SpiDataSerializerHook;
 import com.hazelcast.test.AssertTask;
+import com.hazelcast.test.ChangeLoggingRule;
 import com.hazelcast.test.HazelcastParallelParametersRunnerFactory;
 import com.hazelcast.test.annotation.ParallelJVMTest;
 import com.hazelcast.test.annotation.QuickTest;
+import org.junit.ClassRule;
 import org.junit.Test;
 import org.junit.experimental.categories.Category;
 import org.junit.runner.RunWith;
@@ -49,6 +53,9 @@ public class AntiEntropyCorrectnessTest extends PartitionCorrectnessTestSupport 
 
     private static final float BACKUP_BLOCK_RATIO = 0.65f;
 
+    @ClassRule
+    public static ChangeLoggingRule changeLoggingRule = new ChangeLoggingRule("log4j2-debug.xml");
+
     @Parameters(name = "backups:{0},nodes:{1}")
     public static Collection<Object[]> parameters() {
         return Arrays.asList(new Object[][]{
@@ -59,6 +66,13 @@ public class AntiEntropyCorrectnessTest extends PartitionCorrectnessTestSupport 
                 {3, 4},
                 {3, InternalPartition.MAX_REPLICA_COUNT},
         });
+    }
+
+    @Override
+    protected Config getConfig() {
+        // Partition count is overwritten back to PartitionCorrectnessTestSupport.partitionCount
+        // in PartitionCorrectnessTestSupport.getConfig(boolean, boolean).
+        return smallInstanceConfig();
     }
 
     @Test
@@ -84,14 +98,14 @@ public class AntiEntropyCorrectnessTest extends PartitionCorrectnessTestSupport 
                     assertEquals(PARALLEL_REPLICATIONS, availablePermits);
                 }
             }
-        }, 10);
+        }, 30);
     }
 
     public static void setBackupPacketDropFilter(HazelcastInstance instance, float blockRatio) {
         Node node = getNode(instance);
-        FirewallingNetworkingService.FirewallingEndpointManager
-                em = (FirewallingNetworkingService.FirewallingEndpointManager) node.getEndpointManager();
-        em.setPacketFilter(new BackupPacketDropFilter(node.getSerializationService(), blockRatio));
+        FirewallingServer.FirewallingServerConnectionManager cm = (FirewallingServer.FirewallingServerConnectionManager)
+                node.getServer().getConnectionManager(EndpointQualifier.MEMBER);
+        cm.setPacketFilter(new BackupPacketDropFilter(node.getSerializationService(), blockRatio));
     }
 
     private static class BackupPacketDropFilter extends OperationPacketFilter implements PacketFilter {

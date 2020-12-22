@@ -26,6 +26,7 @@ import org.junit.rules.ExpectedException;
 import java.io.IOException;
 import java.util.Arrays;
 import java.util.Iterator;
+import java.util.Properties;
 
 import static com.hazelcast.config.RestEndpointGroup.CLUSTER_READ;
 import static com.hazelcast.config.RestEndpointGroup.HEALTH_CHECK;
@@ -34,6 +35,7 @@ import static com.hazelcast.instance.ProtocolType.MEMCACHE;
 import static com.hazelcast.instance.ProtocolType.WAN;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertTrue;
 
 /**
@@ -183,6 +185,9 @@ public abstract class AbstractConfigBuilderTest extends HazelcastTestSupport {
 
     @Test
     public abstract void testPartitionGroupZoneAware();
+
+    @Test
+    public abstract void testPartitionGroupNodeAware();
 
     @Test
     public abstract void testPartitionGroupSPI();
@@ -529,11 +534,29 @@ public abstract class AbstractConfigBuilderTest extends HazelcastTestSupport {
 
     public abstract void testMetricsConfig();
 
+    public abstract void testInstanceTrackingConfig();
+
     public abstract void testMetricsConfigMasterSwitchDisabled();
 
     public abstract void testMetricsConfigMcDisabled();
 
     public abstract void testMetricsConfigJmxDisabled();
+
+    @Test
+    public void testAuditlogConfig() {
+        Config config = buildAuditlogConfig();
+        AuditlogConfig auditlogConfig = config.getAuditlogConfig();
+        assertNotNull(auditlogConfig);
+        assertTrue(auditlogConfig.isEnabled());
+
+        assertEquals("com.acme.auditlog.AuditlogToSyslogFactory", auditlogConfig.getFactoryClassName());
+        Properties properties = auditlogConfig.getProperties();
+        assertNotNull(properties);
+        assertEquals("syslogserver.acme.com", properties.get("host"));
+        assertEquals("514", properties.get("port"));
+    }
+
+    public abstract void testSqlConfig();
 
     protected static void assertAwsConfig(AwsConfig aws) {
         assertEquals("sample-access-key", aws.getProperties().get("access-key"));
@@ -556,5 +579,33 @@ public abstract class AbstractConfigBuilderTest extends HazelcastTestSupport {
         assertEquals(expected.getActions(), configured.getActions());
     }
 
+    @Test
     public abstract void testPersistentMemoryDirectoryConfiguration() throws IOException;
+
+    @Test
+    public abstract void testPersistentMemoryDirectoryConfigurationSimple();
+
+    @Test(expected = InvalidConfigurationException.class)
+    public abstract void testPersistentMemoryDirectoryConfiguration_uniqueDirViolationThrows();
+
+    @Test(expected = InvalidConfigurationException.class)
+    public abstract void testPersistentMemoryDirectoryConfiguration_uniqueNumaNodeViolationThrows();
+
+    @Test(expected = InvalidConfigurationException.class)
+    public abstract void testPersistentMemoryDirectoryConfiguration_numaNodeConsistencyViolationThrows();
+
+    @Test
+    public abstract void testPersistentMemoryDirectoryConfiguration_simpleAndAdvancedPasses();
+
+    @Test
+    public abstract void testPersistentMemoryConfiguration_SystemMemoryMode();
+
+    @Test(expected = InvalidConfigurationException.class)
+    public abstract void testPersistentMemoryConfiguration_NotExistingModeThrows();
+
+    @Test(expected = InvalidConfigurationException.class)
+    public abstract void testPersistentMemoryDirectoryConfiguration_SystemMemoryModeThrows();
+
+    protected abstract Config buildAuditlogConfig();
+
 }

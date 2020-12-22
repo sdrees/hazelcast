@@ -142,7 +142,7 @@ public class FrozenPartitionTableTest extends HazelcastTestSupport {
             public void run() {
                 for (HazelcastInstance instance : instanceList) {
                     PartitionTableView newPartitionTable = getPartitionTable(instance);
-                    for (int i = 0; i < newPartitionTable.getLength(); i++) {
+                    for (int i = 0; i < newPartitionTable.length(); i++) {
                         for (int j = 0; j < InternalPartition.MAX_REPLICA_COUNT; j++) {
                             PartitionReplica replica = partitionTable.getReplica(i, j);
                             PartitionReplica newReplica = newPartitionTable.getReplica(i, j);
@@ -193,7 +193,7 @@ public class FrozenPartitionTableTest extends HazelcastTestSupport {
 
         for (HazelcastInstance instance : instancesList) {
             PartitionTableView partitionTable = getPartitionTable(instance);
-            for (int i = 0; i < partitionTable.getLength(); i++) {
+            for (int i = 0; i < partitionTable.length(); i++) {
                 for (PartitionReplica replica : partitionTable.getReplicas(i)) {
                     if (replica == null) {
                         continue;
@@ -223,9 +223,10 @@ public class FrozenPartitionTableTest extends HazelcastTestSupport {
         hz3.shutdown();
         assertClusterSizeEventually(2, hz1, hz2);
 
-        newHazelcastInstance(initOrCreateConfig(new Config()),
+        hz3 = newHazelcastInstance(initOrCreateConfig(new Config()),
                 randomName(), new StaticMemberNodeContext(factory, newUnsecureUUID(), member3.getAddress()));
         assertClusterSizeEventually(3, hz1, hz2);
+        waitAllForSafeState(hz1, hz2, hz3);
 
         OperationServiceImpl operationService = getOperationService(hz1);
         operationService.invokeOnPartition(null, new NonRetryablePartitionOperation(), member3PartitionId).join();

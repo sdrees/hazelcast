@@ -86,6 +86,8 @@ hazelcast-client:
         keyStorePassword: keystorePassword123
         keyStoreType: JKS
 
+    auto-detection:
+      enabled: false
     aws:
       enabled: true
       connection-timeout-seconds: 11
@@ -102,12 +104,14 @@ hazelcast-client:
       zones: us-east1-b,us-east1-c
     azure:
       enabled: false
+      instance-metadata-available: false
       client-id: CLIENT_ID
-      client-secret: CLIENT_SECRET
       tenant-id: TENANT_ID
+      client-secret: CLIENT_SECRET
       subscription-id: SUB_ID
-      cluster-id: HZLCAST001
-      group-name: RESOURCE-GROUP-NAME
+      resource-group: RESOURCE-GROUP-NAME
+      scale-set: SCALE-SET-NAME
+      tag: TAG-NAME=HZLCAST001
     kubernetes:
       enabled: false
       namespace: MY-KUBERNETES-NAMESPACE
@@ -140,11 +144,24 @@ hazelcast-client:
             key-boolean: true
 
   security:
-    credentials: com.hazelcast.security.UsernamePasswordCredentials
     credentials-factory:
       class-name: com.hazelcast.examples.MyCredentialsFactory
       properties:
         property: value
+    realms:
+      - name: krb5Initiator
+        authentication:
+          jaas:
+            - class-name: com.sun.security.auth.module.Krb5LoginModule
+              usage: REQUIRED
+              properties:
+                isInitiator: true
+                useTicketCache: false
+                doNotPrompt: true
+                useKeyTab: true
+                storeKey: true
+                principal: jduke@HAZELCAST.COM
+                keyTab: /opt/jduke.keytab
 
   listeners:
     - com.hazelcast.examples.MembershipListener
@@ -195,6 +212,12 @@ hazelcast-client:
     min-block-size: 1
     page-size: 1
     metadata-space-percentage: 40.5
+    persistent-memory:
+      directories:
+        - directory: /mnt/pmem0
+          numa-node: 0
+        - directory: /mnt/pmem1
+          numa-node: 1
 
   proxy-factories:
     - class-name: com.hazelcast.examples.ProxyXYZ1
@@ -292,3 +315,6 @@ hazelcast-client:
     jmx:
       enabled: false
     collection-frequency-seconds: 42
+
+  instance-tracking:
+    enabled: false

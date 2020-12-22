@@ -22,6 +22,9 @@ import com.hazelcast.config.cp.CPSubsystemConfig;
 import com.hazelcast.config.cp.FencedLockConfig;
 import com.hazelcast.config.cp.RaftAlgorithmConfig;
 import com.hazelcast.config.cp.SemaphoreConfig;
+import com.hazelcast.config.security.KerberosAuthenticationConfig;
+import com.hazelcast.config.security.KerberosIdentityConfig;
+import com.hazelcast.config.security.LdapAuthenticationConfig;
 import com.hazelcast.config.security.RealmConfig;
 import com.hazelcast.instance.EndpointQualifier;
 import com.hazelcast.internal.nio.IOUtil;
@@ -40,7 +43,6 @@ import org.junit.runner.RunWith;
 
 import java.io.ByteArrayInputStream;
 import java.io.File;
-import java.io.IOException;
 import java.io.InputStream;
 import java.io.PrintWriter;
 import java.io.Writer;
@@ -59,9 +61,10 @@ import static com.hazelcast.config.EvictionPolicy.LRU;
 import static com.hazelcast.config.MaxSizePolicy.ENTRY_COUNT;
 import static com.hazelcast.config.PermissionConfig.PermissionType.CACHE;
 import static com.hazelcast.config.PermissionConfig.PermissionType.CONFIG;
+import static com.hazelcast.config.PersistentMemoryMode.MOUNTED;
+import static com.hazelcast.config.PersistentMemoryMode.SYSTEM_MEMORY;
 import static com.hazelcast.config.WanQueueFullBehavior.DISCARD_AFTER_MUTATION;
 import static com.hazelcast.config.WanQueueFullBehavior.THROW_EXCEPTION;
-import static com.hazelcast.config.XmlYamlConfigBuilderEqualsTest.readResourceToString;
 import static java.io.File.createTempFile;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
@@ -196,6 +199,24 @@ public class YamlConfigBuilderTest extends AbstractConfigBuilderTest {
                 + "              usage: REQUIRED\n"
                 + "              properties:\n"
                 + "                client-property2: client-value2\n"
+                + "      - name: kerberos\n"
+                + "        authentication:\n"
+                + "          kerberos:\n"
+                + "            skip-role: false\n"
+                + "            relax-flags-check: true\n"
+                + "            use-name-without-realm: true\n"
+                + "            security-realm: krb5Acceptor\n"
+                + "            principal: jduke@HAZELCAST.COM\n"
+                + "            keytab-file: /opt/jduke.keytab\n"
+                + "            ldap:\n"
+                + "              url: ldap://127.0.0.1\n"
+                + "        identity:\n"
+                + "          kerberos:\n"
+                + "            realm: HAZELCAST.COM\n"
+                + "            security-realm: krb5Initializer\n"
+                + "            principal: jduke@HAZELCAST.COM\n"
+                + "            keytab-file: /opt/jduke.keytab\n"
+                + "            use-canonical-hostname: true\n"
                 + "    client-permission-policy:\n"
                 + "      class-name: MyPermissionPolicy\n"
                 + "      properties:\n"
@@ -248,6 +269,31 @@ public class YamlConfigBuilderTest extends AbstractConfigBuilderTest {
         assertEquals(LoginModuleUsage.REQUIRED, clientLoginModuleCfg2.getUsage());
         assertEquals(1, clientLoginModuleCfg2.getProperties().size());
         assertEquals("client-value2", clientLoginModuleCfg2.getProperties().getProperty("client-property2"));
+
+        RealmConfig kerberosRealm = securityConfig.getRealmConfig("kerberos");
+        assertNotNull(kerberosRealm);
+        KerberosIdentityConfig kerbIdentity = kerberosRealm.getKerberosIdentityConfig();
+        assertNotNull(kerbIdentity);
+        assertEquals("HAZELCAST.COM", kerbIdentity.getRealm());
+        assertEquals("krb5Initializer", kerbIdentity.getSecurityRealm());
+        assertEquals("jduke@HAZELCAST.COM", kerbIdentity.getPrincipal());
+        assertEquals("/opt/jduke.keytab", kerbIdentity.getKeytabFile());
+        assertTrue(kerbIdentity.getUseCanonicalHostname());
+
+        KerberosAuthenticationConfig kerbAuthentication = kerberosRealm.getKerberosAuthenticationConfig();
+        assertNotNull(kerbAuthentication);
+        assertEquals(Boolean.TRUE, kerbAuthentication.getRelaxFlagsCheck());
+        assertEquals(Boolean.FALSE, kerbAuthentication.getSkipRole());
+        assertNull(kerbAuthentication.getSkipIdentity());
+        assertEquals("krb5Acceptor", kerbAuthentication.getSecurityRealm());
+        assertEquals("jduke@HAZELCAST.COM", kerbAuthentication.getPrincipal());
+        assertEquals("/opt/jduke.keytab", kerbAuthentication.getKeytabFile());
+        assertTrue(kerbAuthentication.getUseNameWithoutRealm());
+
+        LdapAuthenticationConfig kerbLdapAuthentication = kerbAuthentication.getLdapAuthenticationConfig();
+        assertNotNull(kerbLdapAuthentication);
+        assertEquals("ldap://127.0.0.1", kerbLdapAuthentication.getUrl());
+
         // client-permission-policy
         PermissionPolicyConfig permissionPolicyConfig = securityConfig.getClientPolicyConfig();
         assertEquals("MyPermissionPolicy", permissionPolicyConfig.getClassName());
@@ -369,6 +415,8 @@ public class YamlConfigBuilderTest extends AbstractConfigBuilderTest {
                 + "      eureka:\n"
                 + "        enabled: true\n"
                 + "        use-public-ip: true\n"
+                + "        shouldUseDns: false\n"
+                + "        serviceUrl.default: http://localhost:8082/eureka\n"
                 + "        namespace: hazelcast\n";
 
         Config config = buildConfig(yaml);
@@ -378,6 +426,8 @@ public class YamlConfigBuilderTest extends AbstractConfigBuilderTest {
         assertTrue(eurekaConfig.isEnabled());
         assertTrue(eurekaConfig.isUsePublicIp());
         assertEquals("hazelcast", eurekaConfig.getProperty("namespace"));
+        assertEquals("false", eurekaConfig.getProperty("shouldUseDns"));
+        assertEquals("http://localhost:8082/eureka", eurekaConfig.getProperty("serviceUrl.default"));
     }
 
     @Override
@@ -507,6 +557,7 @@ public class YamlConfigBuilderTest extends AbstractConfigBuilderTest {
                 + "hazelcast:\n"
                 + "  queue:\n"
                 + "    custom:\n"
+                + "      priority-comparator-class-name: com.hazelcast.collection.impl.queue.model.PriorityElementComparator\n"
                 + "      statistics-enabled: false\n"
                 + "      max-size: 100\n"
                 + "      backup-count: 2\n"
@@ -538,6 +589,7 @@ public class YamlConfigBuilderTest extends AbstractConfigBuilderTest {
         assertEquals(2, customQueueConfig.getBackupCount());
         assertEquals(1, customQueueConfig.getAsyncBackupCount());
         assertEquals(1, customQueueConfig.getEmptyQueueTtl());
+        assertEquals("com.hazelcast.collection.impl.queue.model.PriorityElementComparator", customQueueConfig.getPriorityComparatorClassName());
 
         MergePolicyConfig mergePolicyConfig = customQueueConfig.getMergePolicyConfig();
         assertEquals("CustomMergePolicy", mergePolicyConfig.getPolicy());
@@ -788,12 +840,17 @@ public class YamlConfigBuilderTest extends AbstractConfigBuilderTest {
         String yaml = ""
                 + "hazelcast:\n"
                 + "  management-center:\n"
-                + "    scripting-enabled: true\n";
+                + "    scripting-enabled: true\n"
+                + "    trusted-interfaces:\n"
+                + "      - 127.0.0.1\n"
+                + "      - 192.168.1.*\n";
 
         Config config = buildConfig(yaml);
         ManagementCenterConfig mcConfig = config.getManagementCenterConfig();
 
         assertTrue(mcConfig.isScriptingEnabled());
+        assertEquals(2, mcConfig.getTrustedInterfaces().size());
+        assertTrue(mcConfig.getTrustedInterfaces().containsAll(ImmutableSet.of("127.0.0.1", "192.168.1.*")));
     }
 
     @Override
@@ -1116,6 +1173,21 @@ public class YamlConfigBuilderTest extends AbstractConfigBuilderTest {
         PartitionGroupConfig partitionGroupConfig = config.getPartitionGroupConfig();
         assertTrue(partitionGroupConfig.isEnabled());
         assertEquals(PartitionGroupConfig.MemberGroupType.ZONE_AWARE, partitionGroupConfig.getGroupType());
+    }
+
+    @Override
+    @Test
+    public void testPartitionGroupNodeAware() {
+        String yaml = ""
+                + "hazelcast:\n"
+                + "  partition-group:\n"
+                + "    enabled: true\n"
+                + "    group-type: NODE_AWARE\n";
+
+        Config config = buildConfig(yaml);
+        PartitionGroupConfig partitionGroupConfig = config.getPartitionGroupConfig();
+        assertTrue(partitionGroupConfig.isEnabled());
+        assertEquals(PartitionGroupConfig.MemberGroupType.NODE_AWARE, partitionGroupConfig.getGroupType());
     }
 
     @Override
@@ -1921,7 +1993,7 @@ public class YamlConfigBuilderTest extends AbstractConfigBuilderTest {
                 + "    foobar:\n"
                 + "      pool-size: 2\n"
                 + "      split-brain-protection-ref: customSplitBrainProtectionRule\n"
-                + "      statistics-enabled: true\n"
+                + "      statistics-enabled: false\n"
                 + "      queue-capacity: 0\n";
 
         Config config = buildConfig(yaml);
@@ -1930,7 +2002,7 @@ public class YamlConfigBuilderTest extends AbstractConfigBuilderTest {
         assertFalse(config.getExecutorConfigs().isEmpty());
         assertEquals(2, executorConfig.getPoolSize());
         assertEquals("customSplitBrainProtectionRule", executorConfig.getSplitBrainProtectionName());
-        assertTrue(executorConfig.isStatisticsEnabled());
+        assertFalse(executorConfig.isStatisticsEnabled());
         assertEquals(0, executorConfig.getQueueCapacity());
     }
 
@@ -1944,7 +2016,8 @@ public class YamlConfigBuilderTest extends AbstractConfigBuilderTest {
                 + "      pool-size: 2\n"
                 + "      durability: 3\n"
                 + "      capacity: 4\n"
-                + "      split-brain-protection-ref: customSplitBrainProtectionRule\n";
+                + "      split-brain-protection-ref: customSplitBrainProtectionRule\n"
+                + "      statistics-enabled: false\n";
 
         Config config = buildConfig(yaml);
         DurableExecutorConfig durableExecutorConfig = config.getDurableExecutorConfig("foobar");
@@ -1954,6 +2027,7 @@ public class YamlConfigBuilderTest extends AbstractConfigBuilderTest {
         assertEquals(3, durableExecutorConfig.getDurability());
         assertEquals(4, durableExecutorConfig.getCapacity());
         assertEquals("customSplitBrainProtectionRule", durableExecutorConfig.getSplitBrainProtectionName());
+        assertFalse(durableExecutorConfig.isStatisticsEnabled());
     }
 
     @Override
@@ -1967,6 +2041,7 @@ public class YamlConfigBuilderTest extends AbstractConfigBuilderTest {
                 + "      pool-size: 5\n"
                 + "      capacity: 2\n"
                 + "      split-brain-protection-ref: customSplitBrainProtectionRule\n"
+                + "      statistics-enabled: false\n"
                 + "      merge-policy:\n"
                 + "        batch-size: 99\n"
                 + "        class-name: PutIfAbsent";
@@ -1981,6 +2056,7 @@ public class YamlConfigBuilderTest extends AbstractConfigBuilderTest {
         assertEquals("customSplitBrainProtectionRule", scheduledExecutorConfig.getSplitBrainProtectionName());
         assertEquals(99, scheduledExecutorConfig.getMergePolicyConfig().getBatchSize());
         assertEquals("PutIfAbsent", scheduledExecutorConfig.getMergePolicyConfig().getPolicy());
+        assertFalse(scheduledExecutorConfig.isStatisticsEnabled());
     }
 
     @Override
@@ -3124,7 +3200,7 @@ public class YamlConfigBuilderTest extends AbstractConfigBuilderTest {
         MemberAddressProviderConfig providerConfig = advancedNetworkConfig.getMemberAddressProviderConfig();
 
         assertFalse(advancedNetworkConfig.isEnabled());
-        assertTrue(joinConfig.getMulticastConfig().isEnabled());
+        assertTrue(joinConfig.getAutoDetectionConfig().isEnabled());
         assertNull(fdConfig);
         assertFalse(providerConfig.isEnabled());
 
@@ -3279,6 +3355,7 @@ public class YamlConfigBuilderTest extends AbstractConfigBuilderTest {
     }
 
     @Override
+    @Test
     public void testCPSubsystemConfig() {
         String yaml = ""
                 + "hazelcast:\n"
@@ -3348,6 +3425,23 @@ public class YamlConfigBuilderTest extends AbstractConfigBuilderTest {
     }
 
     @Override
+    @Test
+    public void testSqlConfig() {
+        String yaml = ""
+            + "hazelcast:\n"
+            + "  sql:\n"
+            + "    executor-pool-size: 10\n"
+            + "    operation-pool-size: 20\n"
+            + "    statement-timeout-millis: 30\n";
+        Config config = buildConfig(yaml);
+        SqlConfig sqlConfig = config.getSqlConfig();
+        assertEquals(10, sqlConfig.getExecutorPoolSize());
+        assertEquals(20, sqlConfig.getOperationPoolSize());
+        assertEquals(30L, sqlConfig.getStatementTimeoutMillis());
+    }
+
+    @Override
+    @Test
     public void testWhitespaceInNonSpaceStrings() {
         String yaml = ""
                 + "hazelcast:\n"
@@ -3361,16 +3455,171 @@ public class YamlConfigBuilderTest extends AbstractConfigBuilderTest {
 
     @Override
     @Test
-    public void testPersistentMemoryDirectoryConfiguration() throws IOException {
-        String fullExampleYaml = readResourceToString("hazelcast-full-example.yaml");
+    public void testPersistentMemoryDirectoryConfiguration() {
+        String yaml = ""
+                + "hazelcast:\n"
+                + "  native-memory:\n"
+                + "    persistent-memory:\n"
+                + "      directories:\n"
+                + "        - directory: /mnt/pmem0\n"
+                + "          numa-node: 0\n"
+                + "        - directory: /mnt/pmem1\n"
+                + "          numa-node: 1\n";
 
-        fullExampleYaml = fullExampleYaml
-                .replace("\r", "")
-                .replace("import:\n    - your-configuration-YAML-file", "");
+        Config yamlConfig = new InMemoryYamlConfig(yaml);
 
+        PersistentMemoryConfig pmemConfig = yamlConfig.getNativeMemoryConfig()
+                .getPersistentMemoryConfig();
+        List<PersistentMemoryDirectoryConfig> directoryConfigs = pmemConfig
+                                                                           .getDirectoryConfigs();
+        assertFalse(pmemConfig.isEnabled());
+        assertEquals(MOUNTED, pmemConfig.getMode());
+        assertEquals(2, directoryConfigs.size());
+        PersistentMemoryDirectoryConfig dir0Config = directoryConfigs.get(0);
+        PersistentMemoryDirectoryConfig dir1Config = directoryConfigs.get(1);
+        assertEquals("/mnt/pmem0", dir0Config.getDirectory());
+        assertEquals(0, dir0Config.getNumaNode());
+        assertEquals("/mnt/pmem1", dir1Config.getDirectory());
+        assertEquals(1, dir1Config.getNumaNode());
+    }
 
-        Config yamlConfig = new InMemoryYamlConfig(fullExampleYaml);
-        assertEquals("/mnt/optane", yamlConfig.getNativeMemoryConfig().getPersistentMemoryDirectory());
+    @Override
+    @Test
+    public void testPersistentMemoryDirectoryConfigurationSimple() {
+        String yaml = ""
+                + "hazelcast:\n"
+                + "  native-memory:\n"
+                + "    persistent-memory-directory: /mnt/pmem0";
+
+        Config config = buildConfig(yaml);
+        PersistentMemoryConfig pmemConfig = config.getNativeMemoryConfig().getPersistentMemoryConfig();
+        assertTrue(pmemConfig.isEnabled());
+
+        List<PersistentMemoryDirectoryConfig> directoryConfigs = pmemConfig.getDirectoryConfigs();
+        assertEquals(1, directoryConfigs.size());
+        PersistentMemoryDirectoryConfig dir0Config = directoryConfigs.get(0);
+        assertEquals("/mnt/pmem0", dir0Config.getDirectory());
+        assertFalse(dir0Config.isNumaNodeSet());
+    }
+
+    @Override
+    @Test(expected = InvalidConfigurationException.class)
+    public void testPersistentMemoryDirectoryConfiguration_uniqueDirViolationThrows() {
+        String yaml = ""
+                + "hazelcast:\n"
+                + "  native-memory:\n"
+                + "    persistent-memory:\n"
+                + "      directories:\n"
+                + "        - directory: /mnt/pmem0\n"
+                + "          numa-node: 0\n"
+                + "        - directory: /mnt/pmem0\n"
+                + "          numa-node: 1\n";
+
+        buildConfig(yaml);
+    }
+
+    @Override
+    @Test(expected = InvalidConfigurationException.class)
+    public void testPersistentMemoryDirectoryConfiguration_uniqueNumaNodeViolationThrows() {
+        String yaml = ""
+                + "hazelcast:\n"
+                + "  native-memory:\n"
+                + "    persistent-memory:\n"
+                + "      directories:\n"
+                + "        - directory: /mnt/pmem0\n"
+                + "          numa-node: 0\n"
+                + "        - directory: /mnt/pmem1\n"
+                + "          numa-node: 0\n";
+
+        buildConfig(yaml);
+    }
+
+    @Override
+    @Test(expected = InvalidConfigurationException.class)
+    public void testPersistentMemoryDirectoryConfiguration_numaNodeConsistencyViolationThrows() {
+        String yaml = ""
+                + "hazelcast:\n"
+                + "  native-memory:\n"
+                + "    persistent-memory:\n"
+                + "      directories:\n"
+                + "        - directory: /mnt/pmem0\n"
+                + "          numa-node: 0\n"
+                + "        - directory: /mnt/pmem1\n";
+
+        buildConfig(yaml);
+    }
+
+    @Override
+    @Test
+    public void testPersistentMemoryDirectoryConfiguration_simpleAndAdvancedPasses() {
+        String yaml = ""
+                + "hazelcast:\n"
+                + "  native-memory:\n"
+                + "    persistent-memory-directory: /mnt/optane\n"
+                + "    persistent-memory:\n"
+                + "      directories:\n"
+                + "        - directory: /mnt/pmem0\n"
+                + "        - directory: /mnt/pmem1\n";
+
+        Config config = buildConfig(yaml);
+
+        PersistentMemoryConfig pmemConfig = config.getNativeMemoryConfig().getPersistentMemoryConfig();
+        assertTrue(pmemConfig.isEnabled());
+        assertEquals(MOUNTED, pmemConfig.getMode());
+
+        List<PersistentMemoryDirectoryConfig> directoryConfigs = pmemConfig.getDirectoryConfigs();
+        assertEquals(3, directoryConfigs.size());
+        PersistentMemoryDirectoryConfig dir0Config = directoryConfigs.get(0);
+        PersistentMemoryDirectoryConfig dir1Config = directoryConfigs.get(1);
+        PersistentMemoryDirectoryConfig dir2Config = directoryConfigs.get(2);
+        assertEquals("/mnt/optane", dir0Config.getDirectory());
+        assertFalse(dir0Config.isNumaNodeSet());
+        assertEquals("/mnt/pmem0", dir1Config.getDirectory());
+        assertFalse(dir1Config.isNumaNodeSet());
+        assertEquals("/mnt/pmem1", dir2Config.getDirectory());
+        assertFalse(dir2Config.isNumaNodeSet());
+    }
+
+    @Override
+    @Test
+    public void testPersistentMemoryConfiguration_SystemMemoryMode() {
+        String yaml = ""
+                + "hazelcast:\n"
+                + "  native-memory:\n"
+                + "    persistent-memory:\n"
+                + "      enabled: true\n"
+                + "      mode: SYSTEM_MEMORY\n";
+
+        Config config = buildConfig(yaml);
+        PersistentMemoryConfig pmemConfig = config.getNativeMemoryConfig().getPersistentMemoryConfig();
+        assertTrue(pmemConfig.isEnabled());
+        assertEquals(SYSTEM_MEMORY, pmemConfig.getMode());
+    }
+
+    @Override
+    @Test(expected = InvalidConfigurationException.class)
+    public void testPersistentMemoryConfiguration_NotExistingModeThrows() {
+        String yaml = ""
+                + "hazelcast:\n"
+                + "  native-memory:\n"
+                + "    persistent-memory:\n"
+                + "      mode: NOT_EXISTING_MODE\n";
+
+        buildConfig(yaml);
+    }
+
+    @Override
+    @Test(expected = InvalidConfigurationException.class)
+    public void testPersistentMemoryDirectoryConfiguration_SystemMemoryModeThrows() {
+        String yaml = ""
+                + "hazelcast:\n"
+                + "  native-memory:\n"
+                + "    persistent-memory:\n"
+                + "      mode: SYSTEM_MEMORY\n"
+                + "      directories:\n"
+                + "        - directory: /mnt/pmem0\n";
+
+        buildConfig(yaml);
     }
 
     @Override
@@ -3394,6 +3643,23 @@ public class YamlConfigBuilderTest extends AbstractConfigBuilderTest {
         assertFalse(metricsConfig.getJmxConfig().isEnabled());
         assertEquals(10, metricsConfig.getCollectionFrequencySeconds());
         assertEquals(11, metricsMcConfig.getRetentionSeconds());
+    }
+
+    @Override
+    @Test
+    public void testInstanceTrackingConfig() {
+        String yaml = ""
+                + "hazelcast:\n"
+                + "  instance-tracking:\n"
+                + "    enabled: true\n"
+                + "    file-name: /dummy/file\n"
+                + "    format-pattern: dummy-pattern with $HZ_INSTANCE_TRACKING{placeholder} and $RND{placeholder}";
+        Config config = new InMemoryYamlConfig(yaml);
+        InstanceTrackingConfig trackingConfig = config.getInstanceTrackingConfig();
+        assertTrue(trackingConfig.isEnabled());
+        assertEquals("/dummy/file", trackingConfig.getFileName());
+        assertEquals("dummy-pattern with $HZ_INSTANCE_TRACKING{placeholder} and $RND{placeholder}",
+                trackingConfig.getFormatPattern());
     }
 
     @Override
@@ -3438,5 +3704,19 @@ public class YamlConfigBuilderTest extends AbstractConfigBuilderTest {
         assertTrue(metricsConfig.isEnabled());
         assertTrue(metricsConfig.getManagementCenterConfig().isEnabled());
         assertFalse(metricsConfig.getJmxConfig().isEnabled());
+    }
+
+    @Override
+    protected Config buildAuditlogConfig() {
+        String yaml = ""
+                + "hazelcast:\n"
+                + "  auditlog:\n"
+                + "    enabled: true\n"
+                + "    factory-class-name: com.acme.auditlog.AuditlogToSyslogFactory\n"
+                + "    properties:\n"
+                + "      host: syslogserver.acme.com\n"
+                + "      port: 514\n"
+                + "      type: tcp\n";
+        return new InMemoryYamlConfig(yaml);
     }
 }

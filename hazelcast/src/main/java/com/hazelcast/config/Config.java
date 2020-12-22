@@ -41,6 +41,9 @@ import com.hazelcast.internal.config.ScheduledExecutorConfigReadOnly;
 import com.hazelcast.internal.config.ServicesConfig;
 import com.hazelcast.internal.config.SetConfigReadOnly;
 import com.hazelcast.internal.config.TopicConfigReadOnly;
+import com.hazelcast.internal.config.XmlConfigLocator;
+import com.hazelcast.internal.config.YamlConfigLocator;
+import com.hazelcast.internal.config.override.ExternalConfigurationOverride;
 import com.hazelcast.internal.util.Preconditions;
 import com.hazelcast.map.IMap;
 import com.hazelcast.multimap.MultiMap;
@@ -64,6 +67,8 @@ import java.util.concurrent.ConcurrentMap;
 
 import static com.hazelcast.config.NearCacheConfigAccessor.initDefaultMaxSizeForOnHeapMaps;
 import static com.hazelcast.internal.config.ConfigUtils.lookupByPattern;
+import static com.hazelcast.internal.config.DeclarativeConfigUtil.SYSPROP_MEMBER_CONFIG;
+import static com.hazelcast.internal.config.DeclarativeConfigUtil.validateSuffixInSystemProperty;
 import static com.hazelcast.internal.util.Preconditions.checkNotNull;
 import static com.hazelcast.internal.util.Preconditions.isNotNull;
 import static com.hazelcast.partition.strategy.StringPartitioningStrategy.getBaseName;
@@ -172,13 +177,60 @@ public class Config {
 
     private CPSubsystemConfig cpSubsystemConfig = new CPSubsystemConfig();
 
+    private SqlConfig sqlConfig = new SqlConfig();
+
+    private AuditlogConfig auditlogConfig = new AuditlogConfig();
+
     private MetricsConfig metricsConfig = new MetricsConfig();
+
+    private InstanceTrackingConfig instanceTrackingConfig = new InstanceTrackingConfig();
 
     public Config() {
     }
 
     public Config(String instanceName) {
         this.instanceName = instanceName;
+    }
+
+    /**
+     * Populates Hazelcast {@link Config} object from an external configuration file.
+     * <p>
+     * It tries to load Hazelcast configuration from a list of well-known locations,
+     * and then applies overrides found in environment variables/system properties
+     *
+     * When no location contains Hazelcast configuration then it returns default.
+     * <p>
+     * Note that the same mechanism is used when calling {@link com.hazelcast.core.Hazelcast#newHazelcastInstance()}.
+     *
+     * @return Config created from a file when exists, otherwise default.
+     */
+    public static Config load() {
+        return new ExternalConfigurationOverride().overwriteMemberConfig(loadFromFile());
+    }
+
+    private static Config loadFromFile() {
+        validateSuffixInSystemProperty(SYSPROP_MEMBER_CONFIG);
+
+        XmlConfigLocator xmlConfigLocator = new XmlConfigLocator();
+        YamlConfigLocator yamlConfigLocator = new YamlConfigLocator();
+
+        if (xmlConfigLocator.locateFromSystemProperty()) {
+            // 1. Try loading XML config from the configuration provided in system property
+            return new XmlConfigBuilder(xmlConfigLocator).build();
+        } else if (yamlConfigLocator.locateFromSystemProperty()) {
+            // 2. Try loading YAML config from the configuration provided in system property
+            return new YamlConfigBuilder(yamlConfigLocator).build();
+        } else if (xmlConfigLocator.locateInWorkDirOrOnClasspath()) {
+            // 3. Try loading XML config from the working directory or from the classpath
+            return new XmlConfigBuilder(xmlConfigLocator).build();
+        } else if (yamlConfigLocator.locateInWorkDirOrOnClasspath()) {
+            // 4. Try loading YAML config from the working directory or from the classpath
+            return new YamlConfigBuilder(yamlConfigLocator).build();
+        } else {
+            // 5. Loading the default XML configuration file
+            xmlConfigLocator.locateDefault();
+            return new XmlConfigBuilder(xmlConfigLocator).build();
+        }
     }
 
     /**
@@ -2590,6 +2642,53 @@ public class Config {
         return this;
     }
 
+    @Nonnull
+    public AuditlogConfig getAuditlogConfig() {
+        return auditlogConfig;
+    }
+
+    @Nonnull
+    public Config setAuditlogConfig(@Nonnull AuditlogConfig auditlogConfig) {
+        this.auditlogConfig = checkNotNull(auditlogConfig, "auditlogConfig");
+        return this;
+    }
+
+    /**
+     * @return Return SQL config.
+     */
+    @Nonnull
+    public SqlConfig getSqlConfig() {
+        return sqlConfig;
+    }
+
+    /**
+     * Sets SQL config.
+     */
+    @Nonnull
+    public Config setSqlConfig(@Nonnull SqlConfig sqlConfig) {
+        Preconditions.checkNotNull(sqlConfig, "sqlConfig");
+        this.sqlConfig = sqlConfig;
+        return this;
+    }
+
+    /**
+     * Returns the configuration for tracking use of this Hazelcast instance.
+     */
+    @Nonnull
+    public InstanceTrackingConfig getInstanceTrackingConfig() {
+        return instanceTrackingConfig;
+    }
+
+    /**
+     * Returns the configuration for tracking use of this Hazelcast instance.
+     */
+    @Nonnull
+    public Config setInstanceTrackingConfig(@Nonnull InstanceTrackingConfig instanceTrackingConfig) {
+        Preconditions.checkNotNull(instanceTrackingConfig, "instanceTrackingConfig");
+        this.instanceTrackingConfig = instanceTrackingConfig;
+        return this;
+    }
+
     /**
      * Returns the configuration for the user services managed by this
      * hazelcast instance.
@@ -2646,7 +2745,9 @@ public class Config {
                 + ", crdtReplicationConfig=" + crdtReplicationConfig
                 + ", liteMember=" + liteMember
                 + ", cpSubsystemConfig=" + cpSubsystemConfig
+                + ", sqlConfig=" + sqlConfig
                 + ", metricsConfig=" + metricsConfig
+                + ", auditlogConfig=" + auditlogConfig
                 + '}';
     }
 }

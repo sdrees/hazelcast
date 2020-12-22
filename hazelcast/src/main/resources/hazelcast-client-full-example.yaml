@@ -271,28 +271,47 @@ hazelcast-client:
         keyStorePassword: keystorePassword123
         keyStoreType: JKS
 
+    auto-detection:
+      enabled: false
     aws:
-      enabled: true
-      connection-timeout-seconds: 11
-      inside-aws: true
-      access-key: TEST_ACCESS_KEY
-      secret-key: TEST_SECRET_KEY
-      region: us-east-1
+      enabled: false
+      access-key: my-access-key
+      secret-key: my-secret-key
+      region: us-west-1
       host-header: ec2.amazonaws.com
+      connection-timeout-seconds: 7
+      read-timeout-seconds: 7
+      connection-retries: 4
+      hz-port: 5701-5710
+      use-public-ip: true
       security-group-name: hazelcast-sg
       tag-key: type
       tag-value: hz-nodes
+      iam-role: dummy
+      # cluster: my-cluster
+      # family: test-family
+      # service-name: test-service
     gcp:
       enabled: false
-      zones: us-east1-b,us-east1-c
+      private-key-path: key-path
+      projects: project-1,project-2
+      region: us-central1
+      zones: us-central1-b,us-central1-c
+      label: key=value
+      hz-port: 5701-5710
+      use-public-ip: true
     azure:
       enabled: false
+      instance-metadata-available: false
       client-id: CLIENT_ID
-      client-secret: CLIENT_SECRET
       tenant-id: TENANT_ID
+      client-secret: CLIENT_SECRET
       subscription-id: SUB_ID
-      cluster-id: HZLCAST001
-      group-name: RESOURCE-GROUP-NAME
+      resource-group: RESOURCE-GROUP-NAME
+      scale-set: SCALE-SET-NAME
+      tag: TAG-NAME=HZLCAST001
+      hz-port: 5701-5707
+      use-public-ip: true
     kubernetes:
       enabled: false
       namespace: MY-KUBERNETES-NAMESPACE
@@ -342,12 +361,30 @@ hazelcast-client:
   # * "token"
   #     Defines a static TokenCredentials instance as the client's identity. It can have attribute "encoding".
   #     Content of the attribute "value" is token value in given encoding (or in plain text).
-  #
+  # * "kerberos"
+  #     Uses Kerberos service ticket (wrapped as GSS-API init token) as the identity.
+  #     It may reference a security realm  in the <realms> section. The realm is used for the Kerberos authentication.
+
   security:
     credentials-factory:
       class-name: com.hazelcast.examples.MyCredentialsFactory
       properties:
         property: value
+    realms:
+      - name: krb5Initiator
+        authentication:
+          jaas:
+            - class-name: com.sun.security.auth.module.Krb5LoginModule
+              usage: REQUIRED
+              properties:
+                isInitiator: true
+                useTicketCache: false
+                doNotPrompt: true
+                useKeyTab: true
+                storeKey: true
+                principal: jduke@HAZELCAST.COM
+                keyTab: /opt/jduke.keytab
+
   #
   # ===== HAZELCAST LISTENER CONFIGURATIONS =====
   #
@@ -471,6 +508,18 @@ hazelcast-client:
     min-block-size: 1
     page-size: 1
     metadata-space-percentage: 40.5
+    # Simple configuration for single-socket machines with non-volatile memory
+    # persistent-memory-directory: /mnt/optane
+    # Advanced configuration for non-volatile memory
+    persistent-memory:
+      enabled: true
+      mode: MOUNTED
+      directories:
+        - directory: /mnt/pmem0
+          numa-node: 0
+        - directory: /mnt/pmem1
+          numa-node: 1
+
   #
   # ===== HAZELCAST PROXY FACTORY CONFIGURATION =====
   #
@@ -493,6 +542,8 @@ hazelcast-client:
   # It has a scalar sub-node called "type". The valid values for the type of the load balancer are:
   # * "random": The member the operations to be sent to is chosen randomly.
   # * "round-robin": The member the operations to be sent to is chosen in a round-robin fashion.
+  # * "custom": The member the operations to be sent to is chosen by provided load balancer implementation.
+  #             The implementation class name is specified in additional "class-name" key.
   #
   load-balancer:
     type: random
@@ -501,7 +552,7 @@ hazelcast-client:
   #
   # Configuration element's name is "near-cache".
   # It has the following attribute:
-  #   - name: You can give a name for your Near Cache. It is optional and its default value is "default".
+  #   - name: You can give a name for your Near Cache. It is mandatory.
   #
   # It has the following sub-nodes:
   #   - "max-size":
@@ -844,3 +895,47 @@ hazelcast-client:
     jmx:
       enabled: false
     collection-frequency-seconds: 42
+
+  #
+  # ===== HAZELCAST INSTANCE TRACKING CONFIGURATION =====
+  #
+  # Configuration element's name is "instance-tracking".
+  #
+  # It has the following sub-elements:
+  #     * "enabled":
+  #         Enables or disables instance tracking.
+  #
+  # * "format-pattern":
+  #     Sets the pattern used to render the contents of the instance tracking file.
+  #     It may contain placeholders for these properties:
+  #     - "product": The instance product name, e.g. "Hazelcast" or "Hazelcast Enterprise".
+  #     - "version": The instance version.
+  #     - "mode": The instance mode which can be "server", "embedded" or "client".
+  #     - "start_timestamp": The timestamp of when the instance was started expressed the difference,
+  #     measured in milliseconds, between the current time and midnight, January 1, 1970 UTC
+  #     - "licensed": If this instance is using a license or not. The value 0 signifies
+  #     that there is no license set and the value 1 signifies that a license is in use.
+  #     - "pid": Attempts to get the process ID value. The algorithm does not guarantee to get the
+  #     process ID on all JVMs and operating systems so please test before use. In case we are unable to
+  #     get the PID, the value will be -1.
+  #     The placeholders are defined by a $HZ_INSTANCE_TRACKING{ prefix and followed by }.
+  #     For instance, a placeholder for the "start_timestamp" would be $HZ_INSTANCE_TRACKING{start_timestamp}.
+  #     The placeholders are resolved in a fail-safe manner. Any incorrect syntax
+  #     is ignored and only the known properties are resolved, placeholders for
+  #     any parameters which do not have defined values will be ignored. This also
+  #     means that if there is a missing closing bracket in one of the placeholders,
+  #     the property name will be resolved as anything from the opening bracket
+  #     to the next closing bracket, which might contain additional opening brackets.
+  #     If unset, a JSON formatted output will be used.
+  #
+  # * "file-name":
+  #     Sets the name of the file which will contain the tracking metadata. If left unset
+  #     a file named "Hazelcast.process" will be created in the directory as returned by
+  #     System.getProperty("java.io.tmpdir").
+  #     The filename can contain placeholders that will be resolved in the same way
+  #     as placeholders for the format pattern.
+  #
+  instance-tracking:
+    enabled: false
+    file-name: hazelcast.process
+    format-pattern: $HZ_INSTANCE_TRACKING{product}:$HZ_INSTANCE_TRACKING{version}

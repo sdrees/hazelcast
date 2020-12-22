@@ -16,25 +16,24 @@
 
 package com.hazelcast.instance.impl;
 
+import com.hazelcast.cluster.Address;
 import com.hazelcast.config.Config;
 import com.hazelcast.instance.EndpointQualifier;
 import com.hazelcast.instance.TestNodeContext;
-import com.hazelcast.internal.networking.NetworkStats;
-import com.hazelcast.internal.networking.Networking;
-import com.hazelcast.cluster.Address;
-import com.hazelcast.internal.nio.AggregateEndpointManager;
-import com.hazelcast.internal.nio.Connection;
 import com.hazelcast.internal.nio.ConnectionListener;
-import com.hazelcast.internal.nio.EndpointManager;
-import com.hazelcast.internal.nio.IOService;
-import com.hazelcast.internal.nio.NetworkingService;
 import com.hazelcast.internal.nio.Packet;
+import com.hazelcast.internal.server.NetworkStats;
+import com.hazelcast.internal.server.Server;
+import com.hazelcast.internal.server.ServerConnection;
+import com.hazelcast.internal.server.ServerConnectionManager;
+import com.hazelcast.internal.server.ServerContext;
 import com.hazelcast.test.HazelcastTestSupport;
 import org.junit.After;
 
+import javax.annotation.Nonnull;
 import java.util.Collection;
-import java.util.Set;
-import java.util.concurrent.TimeUnit;
+import java.util.Collections;
+import java.util.Map;
 import java.util.concurrent.atomic.AtomicInteger;
 
 public abstract class AbstractOutOfMemoryHandlerTest extends HazelcastTestSupport {
@@ -49,9 +48,9 @@ public abstract class AbstractOutOfMemoryHandlerTest extends HazelcastTestSuppor
             hazelcastInstance.shutdown();
         }
         if (hazelcastInstanceThrowsException != null) {
-            NetworkingService networkingService = hazelcastInstanceThrowsException.node.getNetworkingService();
+            Server server = hazelcastInstanceThrowsException.node.getServer();
             // Failing connection manager throws error, so we should disable this behaviour to shutdown instance properly
-            ((FailingNetworkingService) networkingService).switchToDummyMode();
+            ((FailingServer) server).switchToDummyMode();
             hazelcastInstanceThrowsException.shutdown();
         }
     }
@@ -60,7 +59,7 @@ public abstract class AbstractOutOfMemoryHandlerTest extends HazelcastTestSuppor
         Config config = new Config();
 
         NodeContext nodeContext = new TestNodeContext();
-        NodeContext nodeContextWithThrowable = new TestNodeContext(new FailingNetworkingService());
+        NodeContext nodeContextWithThrowable = new TestNodeContext(new FailingServer());
 
         int instanceId = INSTANCE_ID_COUNTER.incrementAndGet();
 
@@ -72,61 +71,52 @@ public abstract class AbstractOutOfMemoryHandlerTest extends HazelcastTestSuppor
                 nodeContextWithThrowable);
     }
 
-    private static class FailingNetworkingService
-            implements NetworkingService {
+    private static class FailingServer implements Server {
 
         private boolean dummyMode;
 
-        EndpointManager dummy = new EndpointManager() {
-
+        ServerConnectionManager dummy = new ServerConnectionManager() {
             @Override
-            public Set getActiveConnections() {
+            public Server getServer() {
                 return null;
             }
 
             @Override
-            public Collection getConnections() {
+            public @Nonnull Collection getConnections() {
+                return Collections.emptyList();
+            }
+
+            @Override
+            public ServerConnection get(Address address, int streamId) {
                 return null;
             }
 
             @Override
-            public Connection getConnection(Address address) {
+            public ServerConnection getOrConnect(Address address, int streamId) {
                 return null;
             }
 
             @Override
-            public Connection getOrConnect(Address address) {
+            public ServerConnection getOrConnect(Address address, boolean silent, int streamId) {
                 return null;
             }
 
             @Override
-            public Connection getOrConnect(Address address, boolean silent) {
-                return null;
-            }
-
-            @Override
-            public boolean registerConnection(Address address, Connection connection) {
+            public boolean register(Address remoteAddress, ServerConnection connection, int streamId) {
                 return false;
             }
 
             @Override
-            public boolean transmit(Packet packet, Connection connection) {
-                return false;
-            }
-
-            @Override
-            public boolean transmit(Packet packet, Address target) {
+            public boolean transmit(Packet packet, Address target, int streamId) {
                 return false;
             }
 
             @Override
             public void addConnectionListener(ConnectionListener listener) {
-
             }
 
             @Override
-            public void accept(Object o) {
-
+            public void accept(Packet o) {
             }
 
             @Override
@@ -140,28 +130,27 @@ public abstract class AbstractOutOfMemoryHandlerTest extends HazelcastTestSuppor
         }
 
         @Override
-        public IOService getIoService() {
+        public ServerContext getContext() {
             return null;
         }
 
         @Override
-        public AggregateEndpointManager getAggregateEndpointManager() {
+        public @Nonnull Collection<ServerConnection> getConnections() {
+            return Collections.emptyList();
+        }
+
+        @Override
+        public Map<EndpointQualifier, NetworkStats> getNetworkStats() {
             return null;
         }
 
         @Override
-        public EndpointManager getEndpointManager(EndpointQualifier qualifier) {
+        public void addConnectionListener(ConnectionListener<ServerConnection> listener) {
+        }
+
+        @Override
+        public ServerConnectionManager getConnectionManager(EndpointQualifier qualifier) {
             return dummy;
-        }
-
-        @Override
-        public void scheduleDeferred(Runnable task, long delay, TimeUnit unit) {
-
-        }
-
-        @Override
-        public Networking getNetworking() {
-            return null;
         }
 
         @Override
@@ -171,12 +160,10 @@ public abstract class AbstractOutOfMemoryHandlerTest extends HazelcastTestSuppor
 
         @Override
         public void start() {
-
         }
 
         @Override
         public void stop() {
-
         }
 
         @Override
@@ -186,5 +173,4 @@ public abstract class AbstractOutOfMemoryHandlerTest extends HazelcastTestSuppor
             }
         }
     }
-
 }

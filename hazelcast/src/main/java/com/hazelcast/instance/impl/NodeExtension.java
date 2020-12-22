@@ -16,12 +16,12 @@
 
 package com.hazelcast.instance.impl;
 
+import com.hazelcast.auditlog.AuditlogService;
 import com.hazelcast.cluster.ClusterState;
 import com.hazelcast.cp.internal.persistence.CPPersistenceService;
 import com.hazelcast.hotrestart.HotRestartService;
 import com.hazelcast.instance.EndpointQualifier;
 import com.hazelcast.internal.ascii.TextCommandService;
-import com.hazelcast.internal.auditlog.AuditlogService;
 import com.hazelcast.internal.cluster.impl.JoinMessage;
 import com.hazelcast.internal.cluster.impl.JoinRequest;
 import com.hazelcast.internal.diagnostics.Diagnostics;
@@ -30,13 +30,13 @@ import com.hazelcast.internal.hotrestart.InternalHotRestartService;
 import com.hazelcast.internal.jmx.ManagementService;
 import com.hazelcast.internal.management.TimedMemberStateFactory;
 import com.hazelcast.internal.memory.MemoryStats;
-import com.hazelcast.internal.networking.ChannelInitializerProvider;
+import com.hazelcast.internal.networking.ChannelInitializer;
 import com.hazelcast.internal.networking.InboundHandler;
 import com.hazelcast.internal.networking.OutboundHandler;
 import com.hazelcast.internal.nio.Connection;
-import com.hazelcast.internal.nio.IOService;
-import com.hazelcast.internal.nio.tcp.TcpIpConnection;
 import com.hazelcast.internal.serialization.InternalSerializationService;
+import com.hazelcast.internal.server.ServerConnection;
+import com.hazelcast.internal.server.ServerContext;
 import com.hazelcast.internal.util.ByteArrayProcessor;
 import com.hazelcast.nio.MemberSocketInterceptor;
 import com.hazelcast.security.SecurityContext;
@@ -45,6 +45,7 @@ import com.hazelcast.version.Version;
 
 import java.util.Map;
 import java.util.UUID;
+import java.util.function.Function;
 
 /**
  * NodeExtension is a <tt>Node</tt> extension mechanism to be able to plug different implementations of
@@ -62,6 +63,11 @@ public interface NodeExtension {
      * Called to print node information during startup
      */
     void printNodeInfo();
+
+    /**
+     * Logs metadata about the instance to the configured instance tracking output.
+     */
+    void logInstanceTrackingMetadata();
 
     /**
      * Called before node attempts to join to the cluster
@@ -139,28 +145,28 @@ public interface NodeExtension {
      * can be returned. This is the first item in the chain.
      *
      * @param connection tcp-ip connection
-     * @param ioService  IOService
+     * @param serverContext  ServerContext
      * @return the created InboundHandler.
      */
-    InboundHandler[] createInboundHandlers(EndpointQualifier qualifier, TcpIpConnection connection, IOService ioService);
+    InboundHandler[] createInboundHandlers(EndpointQualifier qualifier, ServerConnection connection, ServerContext context);
 
     /**
      * Creates a <tt>OutboundHandler</tt> for given <tt>Connection</tt> instance.
      *
      * @param connection tcp-ip connection
-     * @param ioService  IOService
+     * @param context  ServerContext
      * @return the created OutboundHandler
      */
-    OutboundHandler[] createOutboundHandlers(EndpointQualifier qualifier, TcpIpConnection connection, IOService ioService);
+    OutboundHandler[] createOutboundHandlers(EndpointQualifier qualifier, ServerConnection connection, ServerContext context);
 
 
     /**
-     * Creates the ChannelInitializerProvider.
+     * Creates the channel initializer function.
      *
-     * @param ioService
+     * @param serverContext
      * @return
      */
-    ChannelInitializerProvider createChannelInitializerProvider(IOService ioService);
+    Function<EndpointQualifier, ChannelInitializer> createChannelInitializerFn(ServerContext serverContext);
 
     /**
      * Called on thread start to inject/intercept extension specific logic,
@@ -293,10 +299,10 @@ public interface NodeExtension {
     TextCommandService createTextCommandService();
 
     /** Returns a byte array processor for incoming data on the Multicast joiner */
-    ByteArrayProcessor createMulticastInputProcessor(IOService ioService);
+    ByteArrayProcessor createMulticastInputProcessor(ServerContext serverContext);
 
     /** Returns a byte array processor for outgoing data on the Multicast joiner */
-    ByteArrayProcessor createMulticastOutputProcessor(IOService ioService);
+    ByteArrayProcessor createMulticastOutputProcessor(ServerContext serverContext);
 
     /**
      * Creates a listener for changes in dynamic data structure configurations

@@ -23,7 +23,7 @@ import com.hazelcast.client.impl.ClientEndpointImpl;
 import com.hazelcast.client.impl.ClientEndpointManager;
 import com.hazelcast.client.impl.ClientEngine;
 import com.hazelcast.client.impl.client.SecureRequest;
-import com.hazelcast.client.impl.protocol.ClientExceptions;
+import com.hazelcast.client.impl.protocol.ClientExceptionFactory;
 import com.hazelcast.client.impl.protocol.ClientMessage;
 import com.hazelcast.cluster.Address;
 import com.hazelcast.core.HazelcastInstanceNotActiveException;
@@ -33,6 +33,7 @@ import com.hazelcast.instance.impl.Node;
 import com.hazelcast.internal.nio.Connection;
 import com.hazelcast.internal.nio.ConnectionType;
 import com.hazelcast.internal.serialization.InternalSerializationService;
+import com.hazelcast.internal.server.ServerConnection;
 import com.hazelcast.logging.ILogger;
 import com.hazelcast.security.Credentials;
 import com.hazelcast.security.SecurityContext;
@@ -41,6 +42,7 @@ import com.hazelcast.spi.impl.NodeEngineImpl;
 import com.hazelcast.spi.impl.operationservice.impl.responses.NormalResponse;
 
 import java.lang.reflect.Field;
+import java.security.AccessControlException;
 import java.security.Permission;
 import java.util.Arrays;
 import java.util.Collection;
@@ -60,7 +62,7 @@ public abstract class AbstractMessageTask<P> implements MessageTask, SecureReque
             Arrays.asList(Error.class, MemberLeftException.class);
 
     protected final ClientMessage clientMessage;
-    protected final Connection connection;
+    protected final ServerConnection connection;
     protected final ClientEndpoint endpoint;
     protected final NodeEngineImpl nodeEngine;
     protected final InternalSerializationService serializationService;
@@ -76,7 +78,7 @@ public abstract class AbstractMessageTask<P> implements MessageTask, SecureReque
         this.node = node;
         this.nodeEngine = node.nodeEngine;
         this.serializationService = node.getSerializationService();
-        this.connection = connection;
+        this.connection = (ServerConnection) connection;
         this.clientEngine = node.clientEngine;
         this.endpointManager = clientEngine.getEndpointManager();
         this.endpoint = initEndpoint();
@@ -102,7 +104,13 @@ public abstract class AbstractMessageTask<P> implements MessageTask, SecureReque
     @Override
     public final void run() {
         try {
-            if (requiresAuthentication() && !endpoint.isAuthenticated()) {
+            Address address = connection.getRemoteAddress();
+            if (isManagementTask() && !clientEngine.getManagementTasksChecker().isTrusted(address)) {
+                String message = "The client address " + address + " is not allowed for management task "
+                        + getClass().getName();
+                logger.info(message);
+                throw new AccessControlException(message);
+            } else if (requiresAuthentication() && !endpoint.isAuthenticated()) {
                 handleAuthenticationFailure();
             } else {
                 initializeAndProcessMessage();
@@ -263,7 +271,7 @@ public abstract class AbstractMessageTask<P> implements MessageTask, SecureReque
     }
 
     private ClientMessage encodeException(Throwable throwable) {
-        ClientExceptions exceptionFactory = clientEngine.getClientExceptions();
+        ClientExceptionFactory exceptionFactory = clientEngine.getExceptionFactory();
         return exceptionFactory.createExceptionMessage(peelIfNeeded(throwable));
     }
 
@@ -293,6 +301,9 @@ public abstract class AbstractMessageTask<P> implements MessageTask, SecureReque
 
     final boolean addressesDecodedWithTranslation() {
         if (!isAdvancedNetworkEnabled()) {
+            return true;
+        }
+        if (parameters == null) {
             return true;
         }
         Class<Address> addressClass = Address.class;
@@ -333,7 +344,18 @@ public abstract class AbstractMessageTask<P> implements MessageTask, SecureReque
                 return t;
             }
         }
-
-        return peel(t);
+        //We are passing our own message factory, because we don't want checked exceptions to be wrapped to HazelcastException
+        return peel(t, null, null, (throwable, message) -> throwable);
     }
+
+
+    /**
+     * The default implementation returns false. Child classes which implement a logic related to a management operation should
+     * override it and return true so the proper access control mechanism is used.
+     */
+    @Override
+    public boolean isManagementTask() {
+        return false;
+    }
+
 }

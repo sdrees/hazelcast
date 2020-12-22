@@ -16,27 +16,29 @@
 
 package com.hazelcast.map.impl;
 
-import com.hazelcast.internal.locksupport.LockSupportService;
 import com.hazelcast.config.MapConfig;
 import com.hazelcast.internal.eviction.ExpirationManager;
-import com.hazelcast.map.impl.operation.MapClearExpiredOperation;
-import com.hazelcast.map.impl.recordstore.RecordStore;
-import com.hazelcast.query.impl.Indexes;
-import com.hazelcast.spi.impl.executionservice.ExecutionService;
-import com.hazelcast.spi.impl.NodeEngine;
-import com.hazelcast.internal.services.ObjectNamespace;
-import com.hazelcast.spi.impl.operationservice.OperationService;
-import com.hazelcast.internal.services.ServiceNamespace;
+import com.hazelcast.internal.locksupport.LockSupportService;
 import com.hazelcast.internal.partition.IPartitionService;
-import com.hazelcast.spi.properties.ClusterProperty;
-import com.hazelcast.spi.properties.HazelcastProperties;
+import com.hazelcast.internal.services.ObjectNamespace;
+import com.hazelcast.internal.services.ServiceNamespace;
 import com.hazelcast.internal.util.ConcurrencyUtil;
 import com.hazelcast.internal.util.ConstructorFunction;
 import com.hazelcast.internal.util.ContextMutexFactory;
+import com.hazelcast.internal.util.MapUtil;
+import com.hazelcast.map.impl.operation.MapClearExpiredOperation;
+import com.hazelcast.map.impl.recordstore.RecordStore;
+import com.hazelcast.query.impl.Indexes;
+import com.hazelcast.spi.impl.NodeEngine;
+import com.hazelcast.spi.impl.executionservice.ExecutionService;
+import com.hazelcast.spi.impl.operationservice.OperationService;
+import com.hazelcast.spi.properties.ClusterProperty;
+import com.hazelcast.spi.properties.HazelcastProperties;
 
 import javax.annotation.Nullable;
 import java.util.Collection;
-import java.util.HashSet;
+import java.util.Collections;
+import java.util.LinkedList;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 
@@ -47,14 +49,14 @@ public class PartitionContainer {
     private final int partitionId;
     private final MapService mapService;
     private final ContextMutexFactory contextMutexFactory = new ContextMutexFactory();
-    private final ConcurrentMap<String, RecordStore> maps = new ConcurrentHashMap<>(1000);
-    private final ConcurrentMap<String, Indexes> indexes = new ConcurrentHashMap<>(10);
+    private final ConcurrentMap<String, RecordStore> maps;
+    private final ConcurrentMap<String, Indexes> indexes = new ConcurrentHashMap<>();
     private final ConstructorFunction<String, RecordStore> recordStoreConstructor
             = name -> {
-                RecordStore recordStore = createRecordStore(name);
-                recordStore.startLoading();
-                return recordStore;
-            };
+        RecordStore recordStore = createRecordStore(name);
+        recordStore.startLoading();
+        return recordStore;
+    };
     private final ConstructorFunction<String, RecordStore> recordStoreConstructorSkipLoading
             = this::createRecordStore;
 
@@ -79,6 +81,8 @@ public class PartitionContainer {
     public PartitionContainer(final MapService mapService, final int partitionId) {
         this.mapService = mapService;
         this.partitionId = partitionId;
+        int approxMapCount = mapService.mapServiceContext.getNodeEngine().getConfig().getMapConfigs().size();
+        this.maps = MapUtil.createConcurrentHashMap(approxMapCount);
     }
 
     private RecordStore createRecordStore(String name) {
@@ -92,7 +96,7 @@ public class PartitionContainer {
         HazelcastProperties hazelcastProperties = nodeEngine.getProperties();
 
         MapKeyLoader keyLoader = new MapKeyLoader(name, opService, ps, nodeEngine.getClusterService(),
-                execService, mapContainer.toData());
+                execService, mapContainer.toData(), serviceContext.getNodeWideLoadedKeyLimiter());
         keyLoader.setMaxBatch(hazelcastProperties.getInteger(ClusterProperty.MAP_LOAD_CHUNK_SIZE));
         keyLoader.setMaxSize(getMaxSizePerNode(mapConfig.getEvictionConfig()));
         keyLoader.setHasBackup(mapConfig.getTotalBackupCount() > 0);
@@ -116,19 +120,26 @@ public class PartitionContainer {
     }
 
     public Collection<RecordStore> getAllRecordStores() {
-        return maps.values();
+        return maps.isEmpty() ? Collections.emptyList() : maps.values();
     }
 
     public Collection<ServiceNamespace> getAllNamespaces(int replicaIndex) {
-        Collection<ServiceNamespace> namespaces = new HashSet<>();
+        if (maps.isEmpty()) {
+            return Collections.emptyList();
+        }
 
+        Collection<ServiceNamespace> namespaces = Collections.EMPTY_LIST;
         for (RecordStore recordStore : maps.values()) {
             MapContainer mapContainer = recordStore.getMapContainer();
             MapConfig mapConfig = mapContainer.getMapConfig();
+
             if (mapConfig.getTotalBackupCount() < replicaIndex) {
                 continue;
             }
 
+            if (namespaces == Collections.EMPTY_LIST) {
+                namespaces = new LinkedList<>();
+            }
             namespaces.add(mapContainer.getObjectNamespace());
         }
 
@@ -162,6 +173,11 @@ public class PartitionContainer {
     }
 
     public void destroyMap(MapContainer mapContainer) {
+        // Mark map container destroyed before the underlying data structures are destroyed. We need this to ensure that every
+        // reader that observed non-destroyed state may use previously read data. E.g. if the reader returned only Key1 it
+        // is guaranteed that it hadn't missed Key2 because it was destroyed earlier.
+        mapContainer.onBeforeDestroy();
+
         String name = mapContainer.getName();
         RecordStore recordStore = maps.remove(name);
         if (recordStore != null) {

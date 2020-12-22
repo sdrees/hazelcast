@@ -45,10 +45,12 @@ import com.hazelcast.internal.services.RemoteService;
 import com.hazelcast.internal.services.SplitBrainHandlerService;
 import com.hazelcast.internal.services.SplitBrainProtectionAwareService;
 import com.hazelcast.internal.services.StatisticsAwareService;
+import com.hazelcast.internal.services.TenantContextAwareService;
 import com.hazelcast.internal.services.TransactionalService;
 import com.hazelcast.internal.util.ConcurrencyUtil;
 import com.hazelcast.internal.util.ConstructorFunction;
 import com.hazelcast.internal.util.ContextMutexFactory;
+import com.hazelcast.internal.util.MapUtil;
 import com.hazelcast.internal.util.scheduler.EntryTaskScheduler;
 import com.hazelcast.internal.util.scheduler.EntryTaskSchedulerFactory;
 import com.hazelcast.logging.ILogger;
@@ -95,29 +97,30 @@ import static com.hazelcast.spi.impl.merge.MergingValueFactory.createMergingValu
  */
 @SuppressWarnings({"checkstyle:classfanoutcomplexity", "checkstyle:methodcount"})
 public class QueueService implements ManagedService, MigrationAwareService, TransactionalService, RemoteService,
-                                     EventPublishingService<QueueEvent, ItemListener>, StatisticsAwareService<LocalQueueStats>,
-                                     SplitBrainProtectionAwareService, SplitBrainHandlerService, DynamicMetricsProvider {
+        EventPublishingService<QueueEvent, ItemListener>, StatisticsAwareService<LocalQueueStats>,
+        SplitBrainProtectionAwareService, SplitBrainHandlerService, DynamicMetricsProvider,
+        TenantContextAwareService {
 
     public static final String SERVICE_NAME = "hz:impl:queueService";
 
     private static final Object NULL_OBJECT = new Object();
 
     private final ConcurrentMap<String, QueueContainer> containerMap = new ConcurrentHashMap<>();
-    private final ConcurrentMap<String, LocalQueueStatsImpl> statsMap = new ConcurrentHashMap<>(1000);
+    private final ConcurrentMap<String, LocalQueueStatsImpl> statsMap;
     private final ConstructorFunction<String, LocalQueueStatsImpl> localQueueStatsConstructorFunction =
-        key -> new LocalQueueStatsImpl();
+            key -> new LocalQueueStatsImpl();
 
     private final ConcurrentMap<String, Object> splitBrainProtectionConfigCache = new ConcurrentHashMap<>();
     private final ContextMutexFactory splitBrainProtectionConfigCacheMutexFactory = new ContextMutexFactory();
     private final ConstructorFunction<String, Object> splitBrainProtectionConfigConstructor =
             new ConstructorFunction<String, Object>() {
-        @Override
-        public Object createNew(String name) {
-            QueueConfig queueConfig = nodeEngine.getConfig().findQueueConfig(name);
-            String splitBrainProtectionName = queueConfig.getSplitBrainProtectionName();
-            return splitBrainProtectionName == null ? NULL_OBJECT : splitBrainProtectionName;
-        }
-    };
+                @Override
+                public Object createNew(String name) {
+                    QueueConfig queueConfig = nodeEngine.getConfig().findQueueConfig(name);
+                    String splitBrainProtectionName = queueConfig.getSplitBrainProtectionName();
+                    return splitBrainProtectionName == null ? NULL_OBJECT : splitBrainProtectionName;
+                }
+            };
 
     private final NodeEngine nodeEngine;
     private final SerializationService serializationService;
@@ -133,6 +136,8 @@ public class QueueService implements ManagedService, MigrationAwareService, Tran
         TaskScheduler globalScheduler = nodeEngine.getExecutionService().getGlobalTaskScheduler();
         QueueEvictionProcessor entryProcessor = new QueueEvictionProcessor(nodeEngine);
         this.queueEvictionScheduler = EntryTaskSchedulerFactory.newScheduler(globalScheduler, entryProcessor, POSTPONE);
+        int approxQueueCount = nodeEngine.getConfig().getQueueConfigs().size();
+        this.statsMap = MapUtil.createConcurrentHashMap(approxQueueCount);
     }
 
     public void scheduleEviction(String name, long delay) {
@@ -176,6 +181,11 @@ public class QueueService implements ManagedService, MigrationAwareService, Tran
             container.getStore().instrument(nodeEngine);
         }
         return container;
+    }
+
+    public QueueContainer getExistingContainerOrNull(String name) {
+        QueueContainer container = containerMap.get(name);
+        return container != null ? container : null;
     }
 
     public void addContainer(String name, QueueContainer container) {
@@ -296,7 +306,7 @@ public class QueueService implements ManagedService, MigrationAwareService, Tran
         EventService eventService = nodeEngine.getEventService();
         QueueEventFilter filter = new QueueEventFilter(includeValue);
         return eventService.registerListenerAsync(QueueService.SERVICE_NAME, name, filter, listener)
-                           .thenApplyAsync(EventRegistration::getId, CALLER_RUNS);
+                .thenApplyAsync(EventRegistration::getId, CALLER_RUNS);
     }
 
     public boolean removeItemListener(String name, UUID registrationId) {

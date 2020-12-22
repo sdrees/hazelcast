@@ -88,7 +88,6 @@ import com.hazelcast.client.impl.protocol.codec.MapValuesCodec;
 import com.hazelcast.client.impl.protocol.codec.MapValuesWithPagingPredicateCodec;
 import com.hazelcast.client.impl.protocol.codec.MapValuesWithPredicateCodec;
 import com.hazelcast.client.impl.protocol.codec.holder.PagingPredicateHolder;
-import com.hazelcast.client.map.impl.querycache.ClientQueryCacheContext;
 import com.hazelcast.client.impl.spi.ClientContext;
 import com.hazelcast.client.impl.spi.ClientPartitionService;
 import com.hazelcast.client.impl.spi.ClientProxy;
@@ -98,6 +97,7 @@ import com.hazelcast.client.impl.spi.impl.ClientInvocationFuture;
 import com.hazelcast.client.impl.spi.impl.ListenerMessageCodec;
 import com.hazelcast.client.map.impl.iterator.ClientMapPartitionIterator;
 import com.hazelcast.client.map.impl.iterator.ClientMapQueryPartitionIterator;
+import com.hazelcast.client.map.impl.querycache.ClientQueryCacheContext;
 import com.hazelcast.cluster.Member;
 import com.hazelcast.config.IndexConfig;
 import com.hazelcast.core.EntryEvent;
@@ -107,6 +107,7 @@ import com.hazelcast.core.ReadOnly;
 import com.hazelcast.internal.journal.EventJournalInitialSubscriberState;
 import com.hazelcast.internal.journal.EventJournalReader;
 import com.hazelcast.internal.monitor.impl.LocalMapStatsImpl;
+import com.hazelcast.internal.serialization.Data;
 import com.hazelcast.internal.serialization.SerializationService;
 import com.hazelcast.internal.util.CollectionUtil;
 import com.hazelcast.internal.util.IterationType;
@@ -127,7 +128,6 @@ import com.hazelcast.map.impl.querycache.subscriber.QueryCacheRequest;
 import com.hazelcast.map.impl.querycache.subscriber.SubscriberContext;
 import com.hazelcast.map.listener.MapListener;
 import com.hazelcast.map.listener.MapPartitionLostListener;
-import com.hazelcast.internal.serialization.Data;
 import com.hazelcast.projection.Projection;
 import com.hazelcast.query.PagingPredicate;
 import com.hazelcast.query.PartitionPredicate;
@@ -156,6 +156,8 @@ import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.BiConsumer;
+import java.util.function.BiFunction;
+import java.util.function.Function;
 
 import static com.hazelcast.internal.util.CollectionUtil.objectToDataCollection;
 import static com.hazelcast.internal.util.ExceptionUtil.rethrow;
@@ -195,7 +197,8 @@ public class ClientMapProxy<K, V> extends ClientProxy
     protected static final String NULL_TTL_UNIT_IS_NOT_ALLOWED = "Null ttlUnit is not allowed!";
     protected static final String NULL_MAX_IDLE_UNIT_IS_NOT_ALLOWED = "Null maxIdleUnit is not allowed!";
     protected static final String NULL_TIMEUNIT_IS_NOT_ALLOWED = "Null timeunit is not allowed!";
-
+    protected static final String NULL_BIFUNCTION_IS_NOT_ALLOWED = "Null BiFunction is not allowed!";
+    protected static final String NULL_FUNCTION_IS_NOT_ALLOWED = "Null Function is not allowed!";
 
     private ClientLockReferenceIdGenerator lockReferenceIdGenerator;
     private ClientQueryCacheContext queryCacheContext;
@@ -223,8 +226,7 @@ public class ClientMapProxy<K, V> extends ClientProxy
         Data keyData = toData(key);
         ClientMessage message = MapContainsKeyCodec.encodeRequest(name, keyData, getThreadId());
         ClientMessage result = invoke(message, keyData);
-        MapContainsKeyCodec.ResponseParameters resultParameters = MapContainsKeyCodec.decodeResponse(result);
-        return resultParameters.response;
+        return MapContainsKeyCodec.decodeResponse(result);
     }
 
     @Override
@@ -234,8 +236,7 @@ public class ClientMapProxy<K, V> extends ClientProxy
         Data valueData = toData(value);
         ClientMessage request = MapContainsValueCodec.encodeRequest(name, valueData);
         ClientMessage response = invoke(request);
-        MapContainsValueCodec.ResponseParameters resultParameters = MapContainsValueCodec.decodeResponse(response);
-        return resultParameters.response;
+        return MapContainsValueCodec.decodeResponse(response);
     }
 
     @Override
@@ -249,8 +250,7 @@ public class ClientMapProxy<K, V> extends ClientProxy
         Data keyData = toData(key);
         ClientMessage request = MapGetCodec.encodeRequest(name, keyData, getThreadId());
         ClientMessage response = invoke(request, keyData);
-        MapGetCodec.ResponseParameters resultParameters = MapGetCodec.decodeResponse(response);
-        return resultParameters.response;
+        return MapGetCodec.decodeResponse(response);
     }
 
     @Override
@@ -277,11 +277,10 @@ public class ClientMapProxy<K, V> extends ClientProxy
     public V remove(@Nonnull Object key) {
         checkNotNull(key, NULL_KEY_IS_NOT_ALLOWED);
 
-        MapRemoveCodec.ResponseParameters resultParameters = removeInternal(key);
-        return toObject(resultParameters.response);
+        return toObject(removeInternal(key));
     }
 
-    protected MapRemoveCodec.ResponseParameters removeInternal(Object key) {
+    protected Data removeInternal(Object key) {
         Data keyData = toData(key);
         ClientMessage request = MapRemoveCodec.encodeRequest(name, keyData, getThreadId());
         ClientMessage response = invoke(request, keyData);
@@ -302,8 +301,7 @@ public class ClientMapProxy<K, V> extends ClientProxy
         ClientMessage request = MapRemoveIfSameCodec.encodeRequest(name, keyData, valueData, getThreadId());
 
         ClientMessage response = invoke(request, keyData);
-        MapRemoveIfSameCodec.ResponseParameters resultParameters = MapRemoveIfSameCodec.decodeResponse(response);
-        return resultParameters.response;
+        return MapRemoveIfSameCodec.decodeResponse(response);
     }
 
     @Override
@@ -342,7 +340,7 @@ public class ClientMapProxy<K, V> extends ClientProxy
         checkNotNull(key, NULL_KEY_IS_NOT_ALLOWED);
 
         return new ClientDelegatingFuture<>(getAsyncInternal(key),
-                getSerializationService(), clientMessage -> MapGetCodec.decodeResponse(clientMessage).response);
+                getSerializationService(), MapGetCodec::decodeResponse);
     }
 
     protected ClientInvocationFuture getAsyncInternal(Object key) {
@@ -405,7 +403,7 @@ public class ClientMapProxy<K, V> extends ClientProxy
             }
             ClientInvocationFuture future = invokeOnKeyOwner(request, keyData);
             SerializationService ss = getSerializationService();
-            return new ClientDelegatingFuture<>(future, ss, message -> MapPutCodec.decodeResponse(message).response);
+            return new ClientDelegatingFuture<>(future, ss, MapPutCodec::decodeResponse);
         } catch (Exception e) {
             throw rethrow(e);
         }
@@ -470,7 +468,7 @@ public class ClientMapProxy<K, V> extends ClientProxy
             ClientMessage request = MapRemoveCodec.encodeRequest(name, keyData, getThreadId());
             ClientInvocationFuture future = invokeOnKeyOwner(request, keyData);
             SerializationService ss = getSerializationService();
-            return new ClientDelegatingFuture<>(future, ss, message -> MapRemoveCodec.decodeResponse(message).response);
+            return new ClientDelegatingFuture<>(future, ss, MapRemoveCodec::decodeResponse);
         } catch (Exception e) {
             throw rethrow(e);
         }
@@ -487,8 +485,7 @@ public class ClientMapProxy<K, V> extends ClientProxy
         Data keyData = toData(key);
         ClientMessage request = MapTryRemoveCodec.encodeRequest(name, keyData, getThreadId(), timeunit.toMillis(timeout));
         ClientMessage response = invoke(request, keyData);
-        MapTryRemoveCodec.ResponseParameters resultParameters = MapTryRemoveCodec.decodeResponse(response);
-        return resultParameters.response;
+        return MapTryRemoveCodec.decodeResponse(response);
     }
 
     @Override
@@ -506,8 +503,7 @@ public class ClientMapProxy<K, V> extends ClientProxy
         long timeoutMillis = timeInMsOrOneIfResultIsZero(timeout, timeunit);
         ClientMessage request = MapTryPutCodec.encodeRequest(name, keyData, valueData, getThreadId(), timeoutMillis);
         ClientMessage response = invoke(request, keyData);
-        MapTryPutCodec.ResponseParameters resultParameters = MapTryPutCodec.decodeResponse(response);
-        return resultParameters.response;
+        return MapTryPutCodec.decodeResponse(response);
     }
 
     @Override
@@ -531,8 +527,7 @@ public class ClientMapProxy<K, V> extends ClientProxy
             request = MapPutCodec.encodeRequest(name, keyData, valueData, getThreadId(), ttlMillis);
         }
         ClientMessage response = invoke(request, keyData);
-        MapPutCodec.ResponseParameters putResponse = MapPutCodec.decodeResponse(response);
-        return toObject(putResponse.response);
+        return toObject(MapPutCodec.decodeResponse(response));
     }
 
     @Override
@@ -615,8 +610,7 @@ public class ClientMapProxy<K, V> extends ClientProxy
         }
 
         ClientMessage result = invoke(request, keyData);
-        MapPutIfAbsentCodec.ResponseParameters resultParameters = MapPutIfAbsentCodec.decodeResponse(result);
-        return toObject(resultParameters.response);
+        return toObject(MapPutIfAbsentCodec.decodeResponse(result));
     }
 
     @Override
@@ -634,8 +628,7 @@ public class ClientMapProxy<K, V> extends ClientProxy
         Data newValueData = toData(newValue);
         ClientMessage request = MapReplaceIfSameCodec.encodeRequest(name, keyData, oldValueData, newValueData, getThreadId());
         ClientMessage response = invoke(request, keyData);
-        MapReplaceIfSameCodec.ResponseParameters resultParameters = MapReplaceIfSameCodec.decodeResponse(response);
-        return resultParameters.response;
+        return MapReplaceIfSameCodec.decodeResponse(response);
     }
 
     @Override
@@ -651,8 +644,7 @@ public class ClientMapProxy<K, V> extends ClientProxy
         Data valueData = toData(value);
         ClientMessage request = MapReplaceCodec.encodeRequest(name, keyData, valueData, getThreadId());
         ClientMessage response = invoke(request, keyData);
-        MapReplaceCodec.ResponseParameters resultParameters = MapReplaceCodec.decodeResponse(response);
-        return toObject(resultParameters.response);
+        return toObject(MapReplaceCodec.decodeResponse(response));
     }
 
     @Override
@@ -699,7 +691,7 @@ public class ClientMapProxy<K, V> extends ClientProxy
     @Override
     public void lock(@Nonnull K key, long leaseTime, @Nullable TimeUnit timeUnit) {
         checkNotNull(key, NULL_KEY_IS_NOT_ALLOWED);
-        checkPositive(leaseTime, "leaseTime should be positive");
+        checkPositive("leaseTime", leaseTime);
         lockInternal(key, timeInMsOrTimeIfNullUnit(leaseTime, timeUnit));
     }
 
@@ -728,8 +720,7 @@ public class ClientMapProxy<K, V> extends ClientProxy
         Data keyData = toData(key);
         ClientMessage request = MapIsLockedCodec.encodeRequest(name, keyData);
         ClientMessage response = invoke(request, keyData);
-        MapIsLockedCodec.ResponseParameters resultParameters = MapIsLockedCodec.decodeResponse(response);
-        return resultParameters.response;
+        return MapIsLockedCodec.decodeResponse(response);
     }
 
     @Override
@@ -744,7 +735,7 @@ public class ClientMapProxy<K, V> extends ClientProxy
 
     @Override
     public boolean tryLock(@Nonnull K key, long time, @Nullable TimeUnit timeunit) throws InterruptedException {
-        return tryLock(key, time, timeunit, Long.MAX_VALUE, null);
+        return tryLock(key, time, timeunit, UNSET, null);
     }
 
     @Override
@@ -759,8 +750,7 @@ public class ClientMapProxy<K, V> extends ClientProxy
                 lockReferenceIdGenerator.getNextReferenceId());
 
         ClientMessage response = invoke(request, keyData, Long.MAX_VALUE);
-        MapTryLockCodec.ResponseParameters resultParameters = MapTryLockCodec.decodeResponse(response);
-        return resultParameters.response;
+        return MapTryLockCodec.decodeResponse(response);
     }
 
     @Override
@@ -806,8 +796,7 @@ public class ClientMapProxy<K, V> extends ClientProxy
         Data data = toData(interceptor);
         ClientMessage request = MapAddInterceptorCodec.encodeRequest(name, data);
         ClientMessage response = invoke(request);
-        MapAddInterceptorCodec.ResponseParameters resultParameters = MapAddInterceptorCodec.decodeResponse(response);
-        return resultParameters.response;
+        return MapAddInterceptorCodec.decodeResponse(response);
     }
 
     @Override
@@ -816,7 +805,7 @@ public class ClientMapProxy<K, V> extends ClientProxy
 
         ClientMessage request = MapRemoveInterceptorCodec.encodeRequest(name, id);
         ClientMessage response = invoke(request);
-        return MapRemoveInterceptorCodec.decodeResponse(response).response;
+        return MapRemoveInterceptorCodec.decodeResponse(response);
     }
 
     @Override
@@ -841,7 +830,7 @@ public class ClientMapProxy<K, V> extends ClientProxy
 
             @Override
             public UUID decodeAddResponse(ClientMessage clientMessage) {
-                return MapAddEntryListenerCodec.decodeResponse(clientMessage).response;
+                return MapAddEntryListenerCodec.decodeResponse(clientMessage);
             }
 
             @Override
@@ -851,7 +840,7 @@ public class ClientMapProxy<K, V> extends ClientProxy
 
             @Override
             public boolean decodeRemoveResponse(ClientMessage clientMessage) {
-                return MapRemoveEntryListenerCodec.decodeResponse(clientMessage).response;
+                return MapRemoveEntryListenerCodec.decodeResponse(clientMessage);
             }
         };
     }
@@ -878,7 +867,7 @@ public class ClientMapProxy<K, V> extends ClientProxy
 
             @Override
             public UUID decodeAddResponse(ClientMessage clientMessage) {
-                return MapAddPartitionLostListenerCodec.decodeResponse(clientMessage).response;
+                return MapAddPartitionLostListenerCodec.decodeResponse(clientMessage);
             }
 
             @Override
@@ -888,7 +877,7 @@ public class ClientMapProxy<K, V> extends ClientProxy
 
             @Override
             public boolean decodeRemoveResponse(ClientMessage clientMessage) {
-                return MapRemovePartitionLostListenerCodec.decodeResponse(clientMessage).response;
+                return MapRemovePartitionLostListenerCodec.decodeResponse(clientMessage);
             }
         };
     }
@@ -924,7 +913,7 @@ public class ClientMapProxy<K, V> extends ClientProxy
 
             @Override
             public UUID decodeAddResponse(ClientMessage clientMessage) {
-                return MapAddEntryListenerToKeyCodec.decodeResponse(clientMessage).response;
+                return MapAddEntryListenerToKeyCodec.decodeResponse(clientMessage);
             }
 
             @Override
@@ -934,7 +923,7 @@ public class ClientMapProxy<K, V> extends ClientProxy
 
             @Override
             public boolean decodeRemoveResponse(ClientMessage clientMessage) {
-                return MapRemoveEntryListenerCodec.decodeResponse(clientMessage).response;
+                return MapRemoveEntryListenerCodec.decodeResponse(clientMessage);
             }
         };
     }
@@ -976,7 +965,7 @@ public class ClientMapProxy<K, V> extends ClientProxy
 
             @Override
             public UUID decodeAddResponse(ClientMessage clientMessage) {
-                return MapAddEntryListenerToKeyWithPredicateCodec.decodeResponse(clientMessage).response;
+                return MapAddEntryListenerToKeyWithPredicateCodec.decodeResponse(clientMessage);
             }
 
             @Override
@@ -986,7 +975,7 @@ public class ClientMapProxy<K, V> extends ClientProxy
 
             @Override
             public boolean decodeRemoveResponse(ClientMessage clientMessage) {
-                return MapRemoveEntryListenerCodec.decodeResponse(clientMessage).response;
+                return MapRemoveEntryListenerCodec.decodeResponse(clientMessage);
             }
         };
     }
@@ -1021,7 +1010,7 @@ public class ClientMapProxy<K, V> extends ClientProxy
 
             @Override
             public UUID decodeAddResponse(ClientMessage clientMessage) {
-                return MapAddEntryListenerWithPredicateCodec.decodeResponse(clientMessage).response;
+                return MapAddEntryListenerWithPredicateCodec.decodeResponse(clientMessage);
             }
 
             @Override
@@ -1031,7 +1020,7 @@ public class ClientMapProxy<K, V> extends ClientProxy
 
             @Override
             public boolean decodeRemoveResponse(ClientMessage clientMessage) {
-                return MapRemoveEntryListenerCodec.decodeResponse(clientMessage).response;
+                return MapRemoveEntryListenerCodec.decodeResponse(clientMessage);
             }
         };
     }
@@ -1078,8 +1067,7 @@ public class ClientMapProxy<K, V> extends ClientProxy
         Data keyData = toData(key);
         ClientMessage request = MapEvictCodec.encodeRequest(name, keyData, getThreadId());
         ClientMessage response = invoke(request, keyData);
-        MapEvictCodec.ResponseParameters resultParameters = MapEvictCodec.decodeResponse(response);
-        return resultParameters.response;
+        return MapEvictCodec.decodeResponse(response);
     }
 
     @Override
@@ -1115,9 +1103,8 @@ public class ClientMapProxy<K, V> extends ClientProxy
     public Set<K> keySet() {
         ClientMessage request = MapKeySetCodec.encodeRequest(name);
         ClientMessage response = invoke(request);
-        MapKeySetCodec.ResponseParameters resultParameters = MapKeySetCodec.decodeResponse(response);
 
-        return (Set<K>) new UnmodifiableLazySet(resultParameters.response, getSerializationService());
+        return (Set<K>) new UnmodifiableLazySet(MapKeySetCodec.decodeResponse(response), getSerializationService());
     }
 
     @Override
@@ -1158,8 +1145,8 @@ public class ClientMapProxy<K, V> extends ClientProxy
         for (Future<ClientMessage> future : futures) {
             try {
                 ClientMessage response = future.get();
-                MapGetAllCodec.ResponseParameters resultParameters = MapGetAllCodec.decodeResponse(response);
-                for (Entry<Data, Data> entry : resultParameters.response) {
+                List<Entry<Data, Data>> entries = MapGetAllCodec.decodeResponse(response);
+                for (Entry<Data, Data> entry : entries) {
                     resultingKeyValuePairs.add(entry.getKey());
                     resultingKeyValuePairs.add(entry.getValue());
                 }
@@ -1197,8 +1184,7 @@ public class ClientMapProxy<K, V> extends ClientProxy
     public Collection<V> values() {
         ClientMessage request = MapValuesCodec.encodeRequest(name);
         ClientMessage response = invoke(request);
-        MapValuesCodec.ResponseParameters resultParameters = MapValuesCodec.decodeResponse(response);
-        return new UnmodifiableLazyList(resultParameters.response, getSerializationService());
+        return new UnmodifiableLazyList(MapValuesCodec.decodeResponse(response), getSerializationService());
     }
 
     @Nonnull
@@ -1206,9 +1192,7 @@ public class ClientMapProxy<K, V> extends ClientProxy
     public Set<Entry<K, V>> entrySet() {
         ClientMessage request = MapEntrySetCodec.encodeRequest(name);
         ClientMessage response = invoke(request);
-        MapEntrySetCodec.ResponseParameters resultParameters = MapEntrySetCodec.decodeResponse(response);
-
-        return getEntriesAsImmutableLazySet(resultParameters.response);
+        return getEntriesAsImmutableLazySet(MapEntrySetCodec.decodeResponse(response));
     }
 
     @SuppressWarnings("unchecked")
@@ -1221,9 +1205,8 @@ public class ClientMapProxy<K, V> extends ClientProxy
 
         ClientMessage request = MapKeySetWithPredicateCodec.encodeRequest(name, toData(predicate));
         ClientMessage response = invokeWithPredicate(request, predicate);
-        MapKeySetWithPredicateCodec.ResponseParameters resultParameters = MapKeySetWithPredicateCodec.decodeResponse(response);
 
-        return (Set<K>) new UnmodifiableLazySet(resultParameters.response, getSerializationService());
+        return (Set<K>) new UnmodifiableLazySet(MapKeySetWithPredicateCodec.decodeResponse(response), getSerializationService());
     }
 
     @SuppressWarnings("unchecked")
@@ -1254,9 +1237,8 @@ public class ClientMapProxy<K, V> extends ClientProxy
         ClientMessage request = MapEntriesWithPredicateCodec.encodeRequest(name, toData(predicate));
 
         ClientMessage response = invokeWithPredicate(request, predicate);
-        MapEntriesWithPredicateCodec.ResponseParameters resultParameters = MapEntriesWithPredicateCodec.decodeResponse(response);
 
-        return getEntriesAsImmutableLazySet(resultParameters.response);
+        return getEntriesAsImmutableLazySet(MapEntriesWithPredicateCodec.decodeResponse(response));
     }
 
     private Set getEntriesAsImmutableLazySet(List<Entry<Data, Data>> entryDataList) {
@@ -1288,9 +1270,8 @@ public class ClientMapProxy<K, V> extends ClientProxy
 
         ClientMessage request = MapValuesWithPredicateCodec.encodeRequest(name, toData(predicate));
         ClientMessage response = invokeWithPredicate(request, predicate);
-        MapValuesWithPredicateCodec.ResponseParameters resultParameters = MapValuesWithPredicateCodec.decodeResponse(response);
-
-        return (Collection<V>) new UnmodifiableLazyList(resultParameters.response, getSerializationService());
+        List<Data> dataList = MapValuesWithPredicateCodec.decodeResponse(response);
+        return (Collection<V>) new UnmodifiableLazyList(dataList, getSerializationService());
     }
 
     private ClientMessage invokeWithPredicate(ClientMessage request, Predicate predicate) {
@@ -1360,8 +1341,7 @@ public class ClientMapProxy<K, V> extends ClientProxy
         Data keyData = toData(key);
         ClientMessage request = MapSetTtlCodec.encodeRequest(getName(), keyData, ttlMillis);
         ClientMessage result = invoke(request, keyData);
-        MapSetTtlCodec.ResponseParameters resultParameters = MapSetTtlCodec.decodeResponse(result);
-        return resultParameters.response;
+        return MapSetTtlCodec.decodeResponse(result);
     }
 
     @Override
@@ -1378,8 +1358,7 @@ public class ClientMapProxy<K, V> extends ClientProxy
         Data keyData = toData(key);
         ClientMessage request = MapExecuteOnKeyCodec.encodeRequest(name, toData(entryProcessor), keyData, getThreadId());
         ClientMessage response = invoke(request, keyData);
-        MapExecuteOnKeyCodec.ResponseParameters resultParameters = MapExecuteOnKeyCodec.decodeResponse(response);
-        return toObject(resultParameters.response);
+        return toObject(MapExecuteOnKeyCodec.decodeResponse(response));
     }
 
     @Override
@@ -1396,7 +1375,7 @@ public class ClientMapProxy<K, V> extends ClientProxy
             ClientMessage request = MapSubmitToKeyCodec.encodeRequest(name, toData(entryProcessor), keyData, getThreadId());
             ClientInvocationFuture future = invokeOnKeyOwner(request, keyData);
             SerializationService ss = getSerializationService();
-            return new ClientDelegatingFuture(future, ss, message -> MapSubmitToKeyCodec.decodeResponse(message).response);
+            return new ClientDelegatingFuture(future, ss, MapSubmitToKeyCodec::decodeResponse);
         } catch (Exception e) {
             throw rethrow(e);
         }
@@ -1406,8 +1385,7 @@ public class ClientMapProxy<K, V> extends ClientProxy
     public <R> Map<K, R> executeOnEntries(@Nonnull EntryProcessor<K, V, R> entryProcessor) {
         ClientMessage request = MapExecuteOnAllKeysCodec.encodeRequest(name, toData(entryProcessor));
         ClientMessage response = invoke(request);
-        MapExecuteOnAllKeysCodec.ResponseParameters resultParameters = MapExecuteOnAllKeysCodec.decodeResponse(response);
-        return prepareResult(resultParameters.response);
+        return prepareResult(MapExecuteOnAllKeysCodec.decodeResponse(response));
     }
 
     protected <R> Map<K, R> prepareResult(Collection<Entry<Data, Data>> entries) {
@@ -1429,8 +1407,7 @@ public class ClientMapProxy<K, V> extends ClientProxy
         ClientMessage request = MapExecuteWithPredicateCodec.encodeRequest(name, toData(entryProcessor), toData(predicate));
         ClientMessage response = invokeWithPredicate(request, predicate);
 
-        MapExecuteWithPredicateCodec.ResponseParameters resultParameters = MapExecuteWithPredicateCodec.decodeResponse(response);
-        return prepareResult(resultParameters.response);
+        return prepareResult(MapExecuteWithPredicateCodec.decodeResponse(response));
     }
 
     @Override
@@ -1440,8 +1417,7 @@ public class ClientMapProxy<K, V> extends ClientProxy
         ClientMessage request = MapAggregateCodec.encodeRequest(name, toData(aggregator));
         ClientMessage response = invoke(request);
 
-        MapAggregateCodec.ResponseParameters resultParameters = MapAggregateCodec.decodeResponse(response);
-        return toObject(resultParameters.response);
+        return toObject(MapAggregateCodec.decodeResponse(response));
     }
 
     @Override
@@ -1454,9 +1430,7 @@ public class ClientMapProxy<K, V> extends ClientProxy
         ClientMessage request = MapAggregateWithPredicateCodec.encodeRequest(name, toData(aggregator), toData(predicate));
         ClientMessage response = invokeWithPredicate(request, predicate);
 
-        MapAggregateWithPredicateCodec.ResponseParameters resultParameters =
-                MapAggregateWithPredicateCodec.decodeResponse(response);
-        return toObject(resultParameters.response);
+        return toObject(MapAggregateWithPredicateCodec.decodeResponse(response));
     }
 
     @Override
@@ -1465,10 +1439,7 @@ public class ClientMapProxy<K, V> extends ClientProxy
         ClientMessage request = MapProjectCodec.encodeRequest(name, toData(projection));
         ClientMessage response = invoke(request);
 
-        MapProjectCodec.ResponseParameters resultParameters =
-                MapProjectCodec.decodeResponse(response);
-
-        return new UnmodifiableLazyList(resultParameters.response, getSerializationService());
+        return new UnmodifiableLazyList(MapProjectCodec.decodeResponse(response), getSerializationService());
     }
 
     @Override
@@ -1481,10 +1452,7 @@ public class ClientMapProxy<K, V> extends ClientProxy
         ClientMessage request = MapProjectWithPredicateCodec.encodeRequest(name, toData(projection), toData(predicate));
         ClientMessage response = invokeWithPredicate(request, predicate);
 
-        MapProjectWithPredicateCodec.ResponseParameters resultParameters =
-                MapProjectWithPredicateCodec.decodeResponse(response);
-
-        return new UnmodifiableLazyList(resultParameters.response, getSerializationService());
+        return new UnmodifiableLazyList(MapProjectWithPredicateCodec.decodeResponse(response), getSerializationService());
     }
 
     @Override
@@ -1549,9 +1517,7 @@ public class ClientMapProxy<K, V> extends ClientProxy
         }
     }
 
-    /**
-     * Async version of {@link #executeOnKeys}.
-     */
+    @Override
     public <R> InternalCompletableFuture<Map<K, R>> submitToKeys(@Nonnull Set<K> keys,
                                                                  @Nonnull EntryProcessor<K, V, R> entryProcessor) {
         checkNotNull(keys, NULL_KEY_IS_NOT_ALLOWED);
@@ -1573,8 +1539,8 @@ public class ClientMapProxy<K, V> extends ClientProxy
         ClientMessage request = MapExecuteOnKeysCodec.encodeRequest(name, toData(entryProcessor), dataKeys);
         ClientInvocationFuture future = new ClientInvocation(getClient(), request, getName()).invoke();
         return new ClientDelegatingFuture<>(
-            future, getSerializationService(),
-            message -> prepareResult(MapExecuteOnKeysCodec.decodeResponse(message).response));
+                future, getSerializationService(),
+                message -> prepareResult(MapExecuteOnKeysCodec.decodeResponse(message)));
     }
 
     @Override
@@ -1586,32 +1552,44 @@ public class ClientMapProxy<K, V> extends ClientProxy
     public int size() {
         ClientMessage request = MapSizeCodec.encodeRequest(name);
         ClientMessage response = invoke(request);
-        MapSizeCodec.ResponseParameters resultParameters = MapSizeCodec.decodeResponse(response);
-        return resultParameters.response;
+        return MapSizeCodec.decodeResponse(response);
     }
 
     @Override
     public boolean isEmpty() {
         ClientMessage request = MapIsEmptyCodec.encodeRequest(name);
         ClientMessage response = invoke(request);
-        MapIsEmptyCodec.ResponseParameters resultParameters = MapIsEmptyCodec.decodeResponse(response);
-        return resultParameters.response;
+        return MapIsEmptyCodec.decodeResponse(response);
     }
 
     @Override
     public void putAll(@Nonnull Map<? extends K, ? extends V> m) {
-        putAllInternal(m, null);
+        putAllInternal(m, null, true);
     }
 
-    // used by Jet
+    @Override
     public InternalCompletableFuture<Void> putAllAsync(@Nonnull Map<? extends K, ? extends V> m) {
         InternalCompletableFuture<Void> future = new InternalCompletableFuture<>();
-        putAllInternal(m, future);
+        putAllInternal(m, future, true);
+        return future;
+    }
+
+    @Override
+    public void setAll(@Nonnull Map<? extends K, ? extends V> m) {
+        putAllInternal(m, null, false);
+    }
+
+    @Override
+    public InternalCompletableFuture<Void> setAllAsync(@Nonnull Map<? extends K, ? extends V> m) {
+        InternalCompletableFuture<Void> future = new InternalCompletableFuture<>();
+        putAllInternal(m, future, false);
         return future;
     }
 
     @SuppressWarnings("checkstyle:npathcomplexity")
-    private void putAllInternal(@Nonnull Map<? extends K, ? extends V> map, @Nullable InternalCompletableFuture<Void> future) {
+    private void putAllInternal(@Nonnull Map<? extends K, ? extends V> map,
+                                @Nullable InternalCompletableFuture<Void> future,
+                                boolean triggerMapLoader) {
         if (map.isEmpty()) {
             if (future != null) {
                 future.complete(null);
@@ -1655,7 +1633,7 @@ public class ClientMapProxy<K, V> extends ClientProxy
             Integer partitionId = entry.getKey();
             // if there is only one entry, consider how we can use MapPutRequest
             // without having to get back the return value
-            ClientMessage request = MapPutAllCodec.encodeRequest(name, entry.getValue());
+            ClientMessage request = MapPutAllCodec.encodeRequest(name, entry.getValue(), triggerMapLoader);
             new ClientInvocation(getClient(), request, getName(), partitionId)
                     .invoke()
                     .whenCompleteAsync(callback);
@@ -1726,7 +1704,7 @@ public class ClientMapProxy<K, V> extends ClientProxy
      * The underlying implementation may send more values in one batch than {@code fetchSize} if it needs to get to
      * a "safepoint" to later resume iteration.
      * Predicates of type {@link PagingPredicate} are not supported.
-     <b>NOTE</b>
+     * <b>NOTE</b>
      * The iteration may be done when the map is being mutated or when there are
      * membership changes. The iterator does not reflect the state when it has
      * been constructed - it may return some entries that were added after the
@@ -1984,4 +1962,131 @@ public class ClientMapProxy<K, V> extends ClientProxy
             super.onDestroy();
         }
     }
+
+    @Override
+    public V computeIfPresent(@Nonnull K key, @Nonnull BiFunction<? super K, ? super V, ? extends V> remappingFunction) {
+        checkNotNull(key, NULL_KEY_IS_NOT_ALLOWED);
+        checkNotNull(key, NULL_BIFUNCTION_IS_NOT_ALLOWED);
+
+        return computeIfPresentLocally(key, remappingFunction);
+    }
+
+
+    private V computeIfPresentLocally(K key,
+                                      BiFunction<? super K, ? super V, ? extends V> remappingFunction) {
+
+        while (true) {
+            Data oldValueAsData = toData(getInternal(key));
+            if (oldValueAsData == null) {
+                return null;
+            }
+
+            V oldValueClone = toObject(oldValueAsData);
+            V newValue = remappingFunction.apply(key, oldValueClone);
+            if (newValue != null) {
+                if (replaceIfSameInternal(key, oldValueAsData, toData(newValue))) {
+                    return newValue;
+                }
+            } else if (removeInternal(key, oldValueAsData)) {
+                return null;
+            }
+        }
+    }
+
+    @Override
+    public V computeIfAbsent(@Nonnull K key, @Nonnull Function<? super K, ? extends V> mappingFunction) {
+        checkNotNull(key, NULL_KEY_IS_NOT_ALLOWED);
+        checkNotNull(mappingFunction, NULL_FUNCTION_IS_NOT_ALLOWED);
+
+        return computeIfAbsentLocally(key, mappingFunction);
+    }
+
+    private V computeIfAbsentLocally(K key, Function<? super K, ? extends V> mappingFunction) {
+        V oldValue = toObject(getInternal(key));
+        if (oldValue != null) {
+            return oldValue;
+        }
+
+        V newValue = mappingFunction.apply(key);
+        if (newValue == null) {
+            return null;
+        }
+
+        V result = putIfAbsentInternal(UNSET, MILLISECONDS, null, null, key, toData(newValue));
+        if (result == null) {
+            return newValue;
+        } else {
+            return result;
+        }
+    }
+
+    public V compute(@Nonnull K key, @Nonnull BiFunction<? super K, ? super V, ? extends V> remappingFunction) {
+        checkNotNull(key, NULL_KEY_IS_NOT_ALLOWED);
+        checkNotNull(key, NULL_BIFUNCTION_IS_NOT_ALLOWED);
+
+        return computeLocally(key, remappingFunction);
+    }
+
+    private V computeLocally(K key,
+                             BiFunction<? super K, ? super V, ? extends V> remappingFunction) {
+
+        while (true) {
+            Data oldValueAsData = toData(getInternal(key));
+            V oldValueClone = toObject(oldValueAsData);
+            V newValue = remappingFunction.apply(key, oldValueClone);
+
+            if (oldValueAsData != null) {
+                if (newValue != null) {
+                    if (replaceIfSameInternal(key, oldValueAsData, toData(newValue))) {
+                        return newValue;
+                    }
+                } else if (removeInternal(key, oldValueAsData)) {
+                    return null;
+                }
+            } else {
+                if (newValue != null) {
+                    V result = putIfAbsentInternal(UNSET, MILLISECONDS, null, null, key, toData(newValue));
+                    if (result == null) {
+                        return newValue;
+                    }
+                } else {
+                    return null;
+                }
+            }
+        }
+    }
+
+    public V merge(@Nonnull K key, @Nonnull V value,
+                   @Nonnull BiFunction<? super V, ? super V, ? extends V> remappingFunction) {
+        checkNotNull(key, NULL_KEY_IS_NOT_ALLOWED);
+        checkNotNull(value, NULL_VALUE_IS_NOT_ALLOWED);
+        checkNotNull(remappingFunction, NULL_BIFUNCTION_IS_NOT_ALLOWED);
+
+        return mergeLocally(key, value, remappingFunction);
+    }
+
+    private V mergeLocally(K key, V value, BiFunction<? super V, ? super V, ? extends V> remappingFunction) {
+        Data keyAsData = toData(key);
+
+        while (true) {
+            Data oldValueAsData = toData(getInternal(keyAsData));
+            if (oldValueAsData != null) {
+                V oldValueClone = toObject(oldValueAsData);
+                V newValue = remappingFunction.apply(oldValueClone, value);
+                if (newValue != null) {
+                    if (replaceIfSameInternal(keyAsData, oldValueAsData, toData(newValue))) {
+                        return newValue;
+                    }
+                } else if (removeInternal(keyAsData, oldValueAsData)) {
+                    return null;
+                }
+            } else {
+                V result =  putIfAbsentInternal(UNSET, MILLISECONDS, null, null, keyAsData, toData(value));
+                if (result == null) {
+                    return value;
+                }
+            }
+        }
+    }
+
 }

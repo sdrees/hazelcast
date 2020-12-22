@@ -300,7 +300,7 @@ hazelcast:
   #                  connection-timeout-seconds: 10
   #                  hz-port: 5702
   # * "custom-publisher":
-  #     Custom implementation of a WAN publisher implementing WanReplicationPublisher.
+  #     Custom implementation of a WAN publisher implementing WanPublisher.
   #     * "class-name":
   #     Mandatory config value defining the fully qualified class name of the
   #     WAN publisher implementation.
@@ -318,7 +318,7 @@ hazelcast:
   #     It has the following sub-elements:
   #     - "class-name":
   #         Sets the fully qualified class name of the class implementing
-  #         a custom WAN consumer (WanReplicationConsumer).
+  #         a custom WAN consumer (WanConsumer).
   #         If you don't define a class name, the default processing logic for
   #         incoming WAN events will be used.
   #     - "properties":
@@ -527,8 +527,8 @@ hazelcast:
   #     protocol: TLS
   #     mutualAuthentication: REQUIRED
   # * "socket-interceptor":
-  # Lets you add custom hooks to join and perform connection procedures (like identity checking using
-  # Kerberos, etc.). This feature is available only in Hazelcast Enterprise. To be able to use it, you
+  # Lets you add custom hooks to join and perform connection procedures (like a custom authentication protocol, etc.).
+  # This feature is available only in Hazelcast Enterprise. To be able to use it, you
   # should first implement the MemberSocketInterceptor (for members joining to a cluster) or
   # SocketInterceptor (for clients connecting to a member) class. Its configuration contains the class you
   # implemented and socket interceptor properties. By default, it is disabled. The following is an example:
@@ -536,8 +536,8 @@ hazelcast:
   #   enabled: true
   #   class-name: com.hazelcast.examples.MySocketInterceptor
   #   properties:
-  #     kerberos-host: kerb-host-name
-  #     kerberos-config-file: kerb.conf
+  #     property1: value1
+  #     property2: value2
   # * "symmetric-encryption":
   # Lets you encrypt the entire socket level communication among all Hazelcast members.
   # This feature is available only in Hazelcast Enterprise.  Its configuration contains the encryption
@@ -613,6 +613,8 @@ hazelcast:
       - 34500
     reuse-address: false
     join:
+      auto-detection:
+        enabled: false
       multicast:
         enabled: false
         multicast-group: 224.2.2.3
@@ -628,23 +630,41 @@ hazelcast:
         enabled: false
         access-key: my-access-key
         secret-key: my-secret-key
-        iam-role: dummy
         region: us-west-1
         host-header: ec2.amazonaws.com
+        connection-timeout-seconds: 7
+        read-timeout-seconds: 7
+        connection-retries: 4
+        hz-port: 5701-5710
         security-group-name: hazelcast-sg
         tag-key: type
         tag-value: hz-nodes
+        iam-role: dummy
+        use-public-ip: true
+        # cluster: my-clusters
+        # family: test-family
+        # service-name: test-service
       gcp:
         enabled: false
-        zones: us-east1-b,us-east1-c
+        private-key-path: key-path
+        projects: project-1,project-2
+        region: us-central1
+        zones: us-central1-b,us-central1-c
+        label: key=value
+        hz-port: 5701-5710
+        use-public-ip: true
       azure:
         enabled: false
+        instance-metadata-available: false
         client-id: CLIENT_ID
         client-secret: CLIENT_SECRET
         tenant-id: TENANT_ID
         subscription-id: SUB_ID
-        cluster-id: HZLCAST001
-        group-name: RESOURCE-GROUP-NAME
+        resource-group: RESOURCE-GROUP-NAME
+        scale-set: SCALE-SET-NAME
+        tag: TAG-NAME=HZLCAST001
+        hz-port: 5701-5707
+        use-public-ip: true
       kubernetes:
         enabled: false
         namespace: MY-KUBERNETES-NAMESPACE
@@ -899,8 +919,10 @@ hazelcast:
   #
   # ===== HAZELCAST QUEUE CONFIGURATION =====
   #
-  # Configuration element's name is "queue". It has the optional attribute "name" with which you
-  # can specify the name of your queue. Its default value is "default".
+  # Configuration element's name is "queue".
+  # It has following optional attributes:
+  # * "name"
+  # with which you can specify the name of your queue. Its default value is "default".
   # It has the following elements:
   # * "statistics-enabled":
   # When you enable it, you can retrieve queue statistics. Its default value is true.
@@ -942,6 +964,12 @@ hazelcast:
   # * "split-brain-protection-ref":
   #     Adds the Split Brain Protection for this data-structure which you configure using the "split-brain-protection" element. You should set
   #     the "split-brain-protection-ref"'s value as the "split-brain-protection"'s name.
+  # * "priority-comparator-class-name":
+  #     Fully-qualified comparator's class name to be used for the priority queue.
+  #     If nothing is provided, then queue behaves as a FIFO queue.
+  #
+  #     If this value is non-null, then Hazelcast will ignore the queue store
+  #     "memory-limit" configuration value.
   #
   queue:
     default:
@@ -963,6 +991,7 @@ hazelcast:
       merge-policy:
         batch-size: 100
         class-name: PutIfAbsentMergePolicy
+      priority-comparator-class-name: com.hazelcast.collection.impl.queue.model.PriorityElementComparator
 
   #
   # ===== HAZELCAST MAP CONFIGURATION =====
@@ -2076,10 +2105,19 @@ hazelcast:
   #     Percentage of the allocated native memory that is used for the metadata such as indexes, offsets, etc. It is
   #     used only by the POOLED memory allocator. Its default value is 12.5.
   # - "persistent-memory-directory":
-  #     Specifies the directory where the non-volatile memory (e.g. Intel Optane) is mounted. If this element is not defined,
-  #     the RAM is used as a native memory. This directory will be created automatically if it does not exist.
-  #     To avoid collisions, every member of the cluster will create its own subfolder to work with the non-volatile
-  #     memory.
+  #     Simple configuration option for a single directory where the non-volatile memory (e.g. Intel Optane) is mounted.
+  #     This should be used only on single-socket systems as only one directory can be defined. On multi-socket systems
+  #     use <persistent-memory> instead.
+  #     If neither this or <persistent-memory> elements are defined, the RAM is used as native memory. This directory
+  #     will be created automatically if it does not exist. To avoid collisions, every member of the cluster will create
+  #     its own subfolder to work with the non-volatile memory.
+  # - "persistent-memory":
+  #     Specifies the configuration for the non-volatile memory (e.g. Intel Optane) in the system. Under this configuration
+  #     section multiple directories can be listed with optionally specifying the NUMA node the non-volatile memory mounted
+  #     in the given directory is attached to for NUMA-aware allocations. If neither this or the
+  #     <persistent-memory-directory> elements are defined, the RAM is used as native memory. The directories defined under
+  #     this section will be created automatically if they do not exist. To avoid collisions, every member of the cluster
+  #     will create its own subfolder to work with the non-volatile memory.
   #
   native-memory:
     enabled: true
@@ -2090,7 +2128,17 @@ hazelcast:
     min-block-size: 32
     page-size: 4194304
     metadata-space-percentage: 12.5
-    persistent-memory-directory: /mnt/optane
+    # Simple configuration for single-socket machines with non-volatile memory
+    # persistent-memory-directory: /mnt/optane
+    # Advanced configuration for non-volatile memory
+    persistent-memory:
+      enabled: true
+      mode: MOUNTED
+      directories:
+        - directory: /mnt/pmem0
+          numa-node: 0
+        - directory: /mnt/pmem1
+          numa-node: 1
   #
   # ===== HAZELCAST SECURITY CONFIGURATION =====
   #
@@ -2189,6 +2237,8 @@ hazelcast:
              user-name-attribute: userNameAttribute
              system-user-dn: systemUserDn
              system-user-password: systemUserPassword
+             system-authentication: simple
+             security-realm: realmName
              password-attribute: passwordAttribute
              user-context: userContext
              user-filter: userFilter
@@ -2207,6 +2257,63 @@ hazelcast:
           token:
              encoding: base64
              value: SGF6ZWxjYXN0
+      - name: kerberosRealm
+        authentication:
+          kerberos:
+            skip-role: true
+            relax-flags-check: true
+            use-name-without-realm: true
+            security-realm: krb5Acceptor
+            ldap:
+              url: ldap://127.0.0.1/
+              system-authentication: GSSAPI
+              security-realm: krb5Initiator
+              skip-authentication: true
+              user-filter: "(krb5PrincipalName={login})"
+              role-mapping-attribute: cn
+        identity:
+          kerberos:
+            realm: HAZELCAST.COM
+            security-realm: krb5Initiator
+            service-name-prefix: hz/
+            use-canonical-hostname: true
+            spn: hz/127.0.0.1@HAZELCAST.COM
+      - name: simpleKerberosRealm
+        authentication:
+          kerberos:
+            principal: hz/127.0.0.1@HAZELCAST.COM
+            keytab-file: /opt/localhost.keytab
+        identity:
+          kerberos:
+            realm: HAZELCAST.COM
+            principal: hz/127.0.0.1@HAZELCAST.COM
+            keytab-file: /opt/localhost.keytab
+      - name: krb5Acceptor
+        authentication:
+          jaas:
+            - class-name: com.sun.security.auth.module.Krb5LoginModule
+              usage: REQUIRED
+              properties:
+                isInitiator: false
+                useTicketCache: false
+                doNotPrompt: true
+                useKeyTab: true
+                storeKey: true
+                principal: hz/127.0.0.1@HAZELCAST.COM
+                keyTab: /opt/hz-localhost.keytab
+      - name: krb5Initiator
+        authentication:
+          jaas:
+            - class-name: com.sun.security.auth.module.Krb5LoginModule
+              usage: REQUIRED
+              properties:
+                isInitiator: true
+                useTicketCache: false
+                doNotPrompt: true
+                useKeyTab: true
+                storeKey: true
+                principal: hz/127.0.0.1@HAZELCAST.COM
+                keyTab: /opt/hz-localhost.keytab
     member-authentication:
       realm: mr
     client-authentication:
@@ -2302,6 +2409,10 @@ hazelcast:
           actions:
             - all
       pn-counter:
+        - name: "*"
+          actions:
+            - all
+      replicatedmap:
         - name: "*"
           actions:
             - all
@@ -2767,8 +2878,8 @@ hazelcast:
   #              protocol: TLS
   #              mutualAuthentication: REQUIRED
   #      * "socket-interceptor":
-  #          Lets you add custom hooks to join and perform connection procedures (like identity checking using
-  #          Kerberos, etc.). This feature is available only in Hazelcast Enterprise. To be able to use it, you
+  #          Lets you add custom hooks to join and perform connection procedures (like a custom authentication
+  #          protocol, etc.). This feature is available only in Hazelcast Enterprise. To be able to use it, you
   #          should first implement the MemberSocketInterceptor (for members joining to a cluster) or
   #          SocketInterceptor (for clients connecting to a member) class. Its configuration contains the class you
   #          implemented and socket interceptor properties. By default, it is disabled. The following is an example:
@@ -2776,8 +2887,8 @@ hazelcast:
   #            enabled: true
   #            class-name: com.hazelcast.examples.MySocketInterceptor
   #            properties:
-  #              kerberos-host: kerb-host-name
-  #              kerberos-config-file: kerb.conf
+  #              property1: value1
+  #              property2: value2
   #      * "symmetric-encryption":
   #          Lets you encrypt the entire socket level communication among all Hazelcast members.
   #          This feature is available only in Hazelcast Enterprise.  Its configuration contains the encryption
@@ -2850,7 +2961,7 @@ hazelcast:
     join:
       multicast:
         enabled: true
-        loopbackModeEnabled: true
+        loopback-mode-enabled: true
         multicast-group: 1.2.3.4
         multicast-port: 12345
         multicast-timeout-seconds: 5
@@ -2872,27 +2983,41 @@ hazelcast:
         enabled: false
         access-key: my-access-key
         secret-key: my-secret-key
-        iam-role: dummy
-        # optional, default is us-east-1
         region: us-west-1
-        # optional, default is ec2.amazonaws.com. If set, region shouldn't be set as it will override this property
         host-header: ec2.amazonaws.com
-        # optional, only instances belonging to this group will be discovered, default will try all running instances
+        connection-timeout-seconds: 7
+        read-timeout-seconds: 7
+        connection-retries: 4
+        hz-port: 5701-5710
         security-group-name: hazelcast-sg
         tag-key: type
         tag-value: hz-nodes
+        iam-role: dummy
         use-public-ip: true
+        # cluster: my-clusters
+        # family: test-family
+        # service-name: test-service
       gcp:
         enabled: false
-        zones: us-east1-b,us-east1-c
+        private-key-path: key-path
+        projects: project-1,project-2
+        region: us-central1
+        zones: us-central1-b,us-central1-c
+        label: key=value
+        hz-port: 5701-5710
+        use-public-ip: true
       azure:
         enabled: false
+        instance-metadata-available: false
         client-id: CLIENT_ID
         client-secret: CLIENT_SECRET
         tenant-id: TENANT_ID
         subscription-id: SUB_ID
-        cluster-id: HZLCAST001
-        group-name: RESOURCE-GROUP-NAME
+        resource-group: RESOURCE-GROUP-NAME
+        scale-set: SCALE-SET-NAME
+        tag: TAG-NAME=HZLCAST001
+        hz-port: 5701-5707
+        use-public-ip: true
       kubernetes:
         enabled: false
         namespace: MY-KUBERNETES-NAMESPACE
@@ -3278,3 +3403,75 @@ hazelcast:
     jmx:
       enabled: false
     collection-frequency-seconds: 10
+
+  auditlog:
+    enabled: false
+    factory-class-name: com.acme.AuditlogToSyslogFactory
+    properties:
+      host: syslogserver.acme.com
+      port: 514
+      type: tcp
+
+  #
+  # ===== HAZELCAST INSTANCE TRACKING CONFIGURATION =====
+  #
+  # Configuration element's name is "instance-tracking".
+  #
+  # It has the following sub-elements:
+  #     * "enabled":
+  #         Enables or disables instance tracking.
+  #
+  # * "format-pattern":
+  #     Sets the pattern used to render the contents of the instance tracking file.
+  #     It may contain placeholders for these properties:
+  #     - "product": The instance product name, e.g. "Hazelcast" or "Hazelcast Enterprise".
+  #     - "version": The instance version.
+  #     - "mode": The instance mode which can be "server", "embedded" or "client".
+  #     - "start_timestamp": The timestamp of when the instance was started expressed the difference,
+  #     measured in milliseconds, between the current time and midnight, January 1, 1970 UTC
+  #     - "licensed": If this instance is using a license or not. The value 0 signifies
+  #     that there is no license set and the value 1 signifies that a license is in use.
+  #     - "pid": Attempts to get the process ID value. The algorithm does not guarantee to get the
+  #     process ID on all JVMs and operating systems so please test before use. In case we are unable to
+  #     get the PID, the value will be -1.
+  #     The placeholders are defined by a $HZ_INSTANCE_TRACKING{ prefix and followed by }.
+  #     For instance, a placeholder for the "start_timestamp" would be $HZ_INSTANCE_TRACKING{start_timestamp}.
+  #     The placeholders are resolved in a fail-safe manner. Any incorrect syntax
+  #     is ignored and only the known properties are resolved, placeholders for
+  #     any parameters which do not have defined values will be ignored. This also
+  #     means that if there is a missing closing bracket in one of the placeholders,
+  #     the property name will be resolved as anything from the opening bracket
+  #     to the next closing bracket, which might contain additional opening brackets.
+  #     If unset, a JSON formatted output will be used.
+  #
+  # * "file-name":
+  #     Sets the name of the file which will contain the tracking metadata. If left unset
+  #     a file named "Hazelcast.process" will be created in the directory as returned by
+  #     System.getProperty("java.io.tmpdir").
+  #     The filename can contain placeholders that will be resolved in the same way
+  #     as placeholders for the format pattern.
+  #
+  instance-tracking:
+    enabled: false
+    file-name: hazelcast.process
+    format-pattern: $HZ_INSTANCE_TRACKING{product}:$HZ_INSTANCE_TRACKING{version}
+
+  #
+  # ===== HAZELCAST SQL CONFIGURATION =====
+  #
+  # Configuration element's name is "sql".
+  #
+  # It has the following sub-elements:
+  #     * "executor-pool-size":
+  #         Defines the number of threads responsible for query execution.
+  #
+  #     * "operation-pool-size":
+  #         Defines the number of threads responsible for network operations processing.
+  #
+  #     * "statement-timeout-millis":
+  #         Defines the timeout in milliseconds that is applied to queries without an explicit timeout.
+  #
+  sql:
+    executor-pool-size: 8
+    operation-pool-size: 8
+    statement-timeout-millis: 0

@@ -17,9 +17,9 @@
 package com.hazelcast.query.impl;
 
 import com.hazelcast.config.IndexType;
+import com.hazelcast.internal.serialization.Data;
 import com.hazelcast.internal.serialization.InternalSerializationService;
 import com.hazelcast.internal.serialization.impl.DefaultSerializationServiceBuilder;
-import com.hazelcast.internal.serialization.Data;
 import com.hazelcast.query.impl.getters.Extractors;
 import com.hazelcast.test.HazelcastParallelClassRunner;
 import com.hazelcast.test.annotation.ParallelJVMTest;
@@ -31,6 +31,7 @@ import org.junit.runner.RunWith;
 
 import java.io.Serializable;
 
+import static com.hazelcast.config.MapConfig.DEFAULT_IN_MEMORY_FORMAT;
 import static com.hazelcast.query.impl.TypeConverters.INTEGER_CONVERTER;
 import static com.hazelcast.query.impl.TypeConverters.LONG_CONVERTER;
 import static org.junit.Assert.assertNull;
@@ -48,7 +49,8 @@ public class ConverterResolutionTest {
     public void before() {
         serializationService = new DefaultSerializationServiceBuilder().build();
         extractors = Extractors.newBuilder(serializationService).build();
-        indexes = Indexes.newBuilder(serializationService, IndexCopyBehavior.COPY_ON_READ).extractors(extractors).build();
+        indexes = Indexes.newBuilder(serializationService,
+                IndexCopyBehavior.COPY_ON_READ, DEFAULT_IN_MEMORY_FORMAT).extractors(extractors).build();
     }
 
     @Test
@@ -56,7 +58,7 @@ public class ConverterResolutionTest {
         assertNull(indexes.getConverter("value"));
         assertNull(indexes.getConverter("unknown"));
 
-        indexes.addOrGetIndex(IndexUtils.createTestIndexConfig(IndexType.HASH, "value"), null);
+        indexes.addOrGetIndex(IndexUtils.createTestIndexConfig(IndexType.HASH, "value"));
         assertNull(indexes.getConverter("value"));
         assertNull(indexes.getConverter("unknown"));
 
@@ -77,7 +79,7 @@ public class ConverterResolutionTest {
         assertNull(indexes.getConverter("value"));
         assertNull(indexes.getConverter("unknown"));
 
-        indexes.addOrGetIndex(IndexUtils.createTestIndexConfig(IndexType.HASH, "value"), null);
+        indexes.addOrGetIndex(IndexUtils.createTestIndexConfig(IndexType.HASH, "value"));
         assertNull(indexes.getConverter("unknown"));
 
         indexes.putEntry(new Entry(0, 1L), null, Index.OperationSource.USER);
@@ -93,12 +95,12 @@ public class ConverterResolutionTest {
         assertNull(indexes.getConverter("value"));
         assertNull(indexes.getConverter("unknown"));
 
-        indexes.addOrGetIndex(IndexUtils.createTestIndexConfig(IndexType.HASH, "__key", "value"), null);
+        indexes.addOrGetIndex(IndexUtils.createTestIndexConfig(IndexType.HASH, "__key", "value"));
         assertNull(indexes.getConverter("__key"));
         assertNull(indexes.getConverter("value"));
         assertNull(indexes.getConverter("unknown"));
 
-        indexes.addOrGetIndex(IndexUtils.createTestIndexConfig(IndexType.SORTED, "value", "__key"), null);
+        indexes.addOrGetIndex(IndexUtils.createTestIndexConfig(IndexType.SORTED, "value", "__key"));
         assertNull(indexes.getConverter("__key"));
         assertNull(indexes.getConverter("value"));
         // just to make sure double-invocation doesn't change anything
@@ -124,7 +126,7 @@ public class ConverterResolutionTest {
         assertNull(indexes.getConverter("value"));
         assertNull(indexes.getConverter("unknown"));
 
-        indexes.addOrGetIndex(IndexUtils.createTestIndexConfig(IndexType.HASH, "__key", "value"), null);
+        indexes.addOrGetIndex(IndexUtils.createTestIndexConfig(IndexType.HASH, "__key", "value"));
         assertNull(indexes.getConverter("unknown"));
 
         indexes.putEntry(new Entry(0, null), null, Index.OperationSource.USER);
@@ -146,12 +148,12 @@ public class ConverterResolutionTest {
         assertNull(indexes.getConverter("value"));
         assertNull(indexes.getConverter("unknown"));
 
-        indexes.addOrGetIndex(IndexUtils.createTestIndexConfig(IndexType.SORTED, "value"), null);
+        indexes.addOrGetIndex(IndexUtils.createTestIndexConfig(IndexType.SORTED, "value"));
         assertNull(indexes.getConverter("__key"));
         assertNull(indexes.getConverter("value"));
         assertNull(indexes.getConverter("unknown"));
 
-        indexes.addOrGetIndex(IndexUtils.createTestIndexConfig(IndexType.HASH, "__key", "value"), null);
+        indexes.addOrGetIndex(IndexUtils.createTestIndexConfig(IndexType.HASH, "__key", "value"));
         assertNull(indexes.getConverter("__key"));
         assertNull(indexes.getConverter("value"));
         assertNull(indexes.getConverter("unknown"));

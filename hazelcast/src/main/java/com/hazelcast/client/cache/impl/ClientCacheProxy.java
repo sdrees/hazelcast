@@ -366,8 +366,7 @@ public class ClientCacheProxy<K, V> extends ClientCacheProxySupport<K, V>
     @Override
     public UUID addPartitionLostListener(CachePartitionLostListener listener) {
         EventHandler<ClientMessage> handler = new ClientCacheProxySupportUtil.ClientCachePartitionLostEventHandler(name,
-                getContext(), listener);
-        injectDependencies(listener);
+                getContext(), injectDependencies(listener));
         return getContext().getListenerService().registerListener(createPartitionLostListenerCodec(name), handler);
     }
 
@@ -591,7 +590,7 @@ public class ClientCacheProxy<K, V> extends ClientCacheProxySupport<K, V>
         try {
             ClientMessage request = CacheSizeCodec.encodeRequest(nameWithPrefix);
             ClientMessage resultMessage = invoke(request);
-            return CacheSizeCodec.decodeResponse(resultMessage).response;
+            return CacheSizeCodec.decodeResponse(resultMessage);
         } catch (Throwable t) {
             throw rethrowAllowedTypeFirst(t, CacheException.class);
         }

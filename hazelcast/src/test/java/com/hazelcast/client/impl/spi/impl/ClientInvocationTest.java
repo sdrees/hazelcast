@@ -21,11 +21,12 @@ import com.hazelcast.client.config.ClientConfig;
 import com.hazelcast.client.impl.clientside.HazelcastClientInstanceImpl;
 import com.hazelcast.client.impl.protocol.ClientMessage;
 import com.hazelcast.client.impl.protocol.codec.MapSizeCodec;
+import com.hazelcast.client.properties.ClientProperty;
 import com.hazelcast.client.test.ClientTestSupport;
 import com.hazelcast.client.test.TestHazelcastFactory;
-import com.hazelcast.config.Config;
 import com.hazelcast.core.HazelcastInstance;
 import com.hazelcast.core.LifecycleEvent;
+import com.hazelcast.core.OperationTimeoutException;
 import com.hazelcast.internal.util.FutureUtil;
 import com.hazelcast.map.EntryProcessor;
 import com.hazelcast.map.IMap;
@@ -73,11 +74,7 @@ public class ClientInvocationTest extends ClientTestSupport {
      */
     @Test
     public void executionCallback_TooLongThrowableStackTrace() {
-        Config config = new Config();
-        config.getNetworkConfig().getJoin().getMulticastConfig().setEnabled(false);
-        config.getNetworkConfig().getJoin().getTcpIpConfig().setEnabled(true);
-        HazelcastInstance server = hazelcastFactory.newHazelcastInstance(config);
-
+        HazelcastInstance server = hazelcastFactory.newHazelcastInstance();
         HazelcastInstance client = hazelcastFactory.newHazelcastClient();
         IMap<Object, Object> map = client.getMap(randomMapName());
 
@@ -92,7 +89,7 @@ public class ClientInvocationTest extends ClientTestSupport {
         }
 
         // crash the server
-        getNode(server).getNetworkingService().shutdown();
+        getNode(server).getServer().shutdown();
         server.getLifecycleService().terminate();
 
         int callBackCount = 0;
@@ -202,8 +199,7 @@ public class ClientInvocationTest extends ClientTestSupport {
         ClientMessage request = MapSizeCodec.encodeRequest("test");
         int ownerlessPartition = 4000;
         ClientInvocation invocation = new ClientInvocation(client, request, "map", ownerlessPartition);
-        invocation.invoke().get();
-        assertEquals(0, MapSizeCodec.decodeResponse(invocation.invoke().get()).response);
+        assertEquals(0, MapSizeCodec.decodeResponse(invocation.invoke().get()));
     }
 
     @Test
@@ -214,6 +210,34 @@ public class ClientInvocationTest extends ClientTestSupport {
 
         ClientMessage request = MapSizeCodec.encodeRequest("test");
         ClientInvocation invocation = new ClientInvocation(client, request, "map", unavailableTarget);
-        assertEquals(0, MapSizeCodec.decodeResponse(invocation.invoke().get()).response);
+        assertEquals(0, MapSizeCodec.decodeResponse(invocation.invoke().get()));
+    }
+
+    @Test(expected = OperationTimeoutException.class)
+    public void invokeOnPartitionOwner_redirectDisallowedToRandom_WhenPartitionOwnerIsnull() {
+        hazelcastFactory.newHazelcastInstance();
+        ClientConfig config = new ClientConfig();
+        config.setProperty(ClientProperty.INVOCATION_TIMEOUT_SECONDS.getName(), "1");
+        HazelcastClientInstanceImpl client = getHazelcastClientInstanceImpl(hazelcastFactory.newHazelcastClient(config));
+
+        ClientMessage request = MapSizeCodec.encodeRequest("test");
+        int ownerlessPartition = 4000;
+        ClientInvocation invocation = new ClientInvocation(client, request, "map", ownerlessPartition);
+        invocation.disallowRetryOnRandom();
+        invocation.invoke().joinInternal();
+    }
+
+    @Test(expected = OperationTimeoutException.class)
+    public void invokeOnMember_redirectDisallowedToRandom_whenMemberIsNotInMemberList() {
+        hazelcastFactory.newHazelcastInstance();
+        UUID unavailableTarget = UUID.randomUUID();
+        ClientConfig config = new ClientConfig();
+        config.setProperty(ClientProperty.INVOCATION_TIMEOUT_SECONDS.getName(), "1");
+        HazelcastClientInstanceImpl client = getHazelcastClientInstanceImpl(hazelcastFactory.newHazelcastClient(config));
+
+        ClientMessage request = MapSizeCodec.encodeRequest("test");
+        ClientInvocation invocation = new ClientInvocation(client, request, "map", unavailableTarget);
+        invocation.disallowRetryOnRandom();
+        invocation.invoke().joinInternal();
     }
 }

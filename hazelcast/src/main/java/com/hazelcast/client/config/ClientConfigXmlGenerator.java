@@ -20,6 +20,7 @@ import com.hazelcast.client.LoadBalancer;
 import com.hazelcast.client.util.RandomLB;
 import com.hazelcast.client.util.RoundRobinLB;
 import com.hazelcast.config.AliasedDiscoveryConfig;
+import com.hazelcast.config.AutoDetectionConfig;
 import com.hazelcast.config.ConfigXmlGenerator.XmlGenerator;
 import com.hazelcast.config.CredentialsFactoryConfig;
 import com.hazelcast.config.DiscoveryConfig;
@@ -27,40 +28,39 @@ import com.hazelcast.config.DiscoveryStrategyConfig;
 import com.hazelcast.config.EntryListenerConfig;
 import com.hazelcast.config.EvictionConfig;
 import com.hazelcast.config.GlobalSerializerConfig;
+import com.hazelcast.config.InstanceTrackingConfig;
 import com.hazelcast.config.ListenerConfig;
+import com.hazelcast.config.LoginModuleConfig;
 import com.hazelcast.config.NativeMemoryConfig;
 import com.hazelcast.config.NearCacheConfig;
 import com.hazelcast.config.NearCachePreloaderConfig;
+import com.hazelcast.config.PersistentMemoryConfig;
+import com.hazelcast.config.PersistentMemoryDirectoryConfig;
 import com.hazelcast.config.PredicateConfig;
 import com.hazelcast.config.QueryCacheConfig;
 import com.hazelcast.config.SSLConfig;
 import com.hazelcast.config.SerializationConfig;
 import com.hazelcast.config.SerializerConfig;
 import com.hazelcast.config.SocketInterceptorConfig;
+import com.hazelcast.config.security.JaasAuthenticationConfig;
+import com.hazelcast.config.security.KerberosIdentityConfig;
+import com.hazelcast.config.security.RealmConfig;
 import com.hazelcast.config.security.TokenIdentityConfig;
 import com.hazelcast.config.security.UsernamePasswordIdentityConfig;
+import com.hazelcast.internal.cluster.Versions;
 import com.hazelcast.internal.config.AliasedDiscoveryConfigUtils;
 import com.hazelcast.internal.util.Preconditions;
-import com.hazelcast.logging.ILogger;
-import com.hazelcast.logging.Logger;
 import com.hazelcast.nio.serialization.DataSerializableFactory;
 import com.hazelcast.nio.serialization.PortableFactory;
 import com.hazelcast.query.impl.IndexUtils;
 
-import javax.xml.transform.OutputKeys;
-import javax.xml.transform.Source;
-import javax.xml.transform.Transformer;
-import javax.xml.transform.TransformerFactory;
-import javax.xml.transform.stream.StreamResult;
-import javax.xml.transform.stream.StreamSource;
-import java.io.StringReader;
-import java.io.StringWriter;
+import java.util.ArrayList;
 import java.util.Collection;
 import java.util.List;
 import java.util.Map;
 
 import static com.hazelcast.client.config.impl.ClientAliasedDiscoveryConfigUtils.aliasedDiscoveryConfigsFrom;
-import static com.hazelcast.internal.nio.IOUtil.closeResource;
+import static com.hazelcast.internal.util.StringUtil.formatXml;
 import static com.hazelcast.internal.util.StringUtil.isNullOrEmpty;
 
 /**
@@ -68,8 +68,6 @@ import static com.hazelcast.internal.util.StringUtil.isNullOrEmpty;
  * {@link ClientConfig} to a Hazelcast Client XML string.
  */
 public final class ClientConfigXmlGenerator {
-
-    private static final ILogger LOGGER = Logger.getLogger(ClientConfigXmlGenerator.class);
 
     private ClientConfigXmlGenerator() {
     }
@@ -97,7 +95,10 @@ public final class ClientConfigXmlGenerator {
         gen.open("hazelcast-client", "xmlns", "http://www.hazelcast.com/schema/client-config",
                 "xmlns:xsi", "http://www.w3.org/2001/XMLSchema-instance",
                 "xsi:schemaLocation", "http://www.hazelcast.com/schema/client-config "
-                        + "http://www.hazelcast.com/schema/client-config/hazelcast-client-config-4.1.xsd");
+                        + "http://www.hazelcast.com/schema/client-config/hazelcast-client-config-"
+                        + Versions.CURRENT_CLUSTER_VERSION.getMajor() + '.'
+                        + Versions.CURRENT_CLUSTER_VERSION.getMinor()
+                        + ".xsd");
 
         //InstanceName
         gen.node("instance-name", clientConfig.getInstanceName());
@@ -134,63 +135,12 @@ public final class ClientConfigXmlGenerator {
         flakeIdGenerator(gen, clientConfig.getFlakeIdGeneratorConfigMap());
         //Metrics
         metrics(gen, clientConfig.getMetricsConfig());
+        instanceTrackingConfig(gen, clientConfig.getInstanceTrackingConfig());
 
         //close HazelcastClient
         gen.close();
 
-        return format(xml.toString(), indent);
-    }
-
-    private static String format(String input, int indent) {
-        if (indent < 0) {
-            return input;
-        }
-        if (indent == 0) {
-            throw new IllegalArgumentException("Indent should be greater than 0");
-        }
-        StreamResult xmlOutput = null;
-        try {
-            Source xmlInput = new StreamSource(new StringReader(input));
-            xmlOutput = new StreamResult(new StringWriter());
-            TransformerFactory transformerFactory = TransformerFactory.newInstance();
-            /*
-             * Older versions of Xalan still use this method of setting indent values.
-             * Attempt to make this work but don't completely fail if it's a problem.
-             */
-            try {
-                transformerFactory.setAttribute("indent-number", indent);
-            } catch (IllegalArgumentException e) {
-                logFinest("Failed to set indent-number attribute; cause: " + e.getMessage());
-            }
-            Transformer transformer = transformerFactory.newTransformer();
-            transformer.setOutputProperty(OutputKeys.OMIT_XML_DECLARATION, "yes");
-            transformer.setOutputProperty(OutputKeys.ENCODING, "UTF-8");
-            transformer.setOutputProperty(OutputKeys.INDENT, "yes");
-            /*
-             * Newer versions of Xalan will look for a fully-qualified output property in order to specify amount of
-             * indentation to use. Attempt to make this work as well but again don't completely fail if it's a problem.
-             */
-            try {
-                transformer.setOutputProperty("{http://xml.apache.org/xslt}indent-amount", Integer.toString(indent));
-            } catch (IllegalArgumentException e) {
-                logFinest("Failed to set indent-amount property; cause: " + e.getMessage());
-            }
-            transformer.transform(xmlInput, xmlOutput);
-            return xmlOutput.getWriter().toString();
-        } catch (Exception e) {
-            LOGGER.warning(e);
-            return input;
-        } finally {
-            if (xmlOutput != null) {
-                closeResource(xmlOutput.getWriter());
-            }
-        }
-    }
-
-    private static void logFinest(String message) {
-        if (LOGGER.isFinestEnabled()) {
-            LOGGER.finest(message);
-        }
+        return formatXml(xml.toString(), indent);
     }
 
     private static void network(XmlGenerator gen, ClientNetworkConfig network) {
@@ -204,6 +154,7 @@ public final class ClientConfigXmlGenerator {
         socketInterceptor(gen, network.getSocketInterceptorConfig());
         ssl(gen, network.getSSLConfig());
         aliasedDiscoveryConfigsGenerator(gen, aliasedDiscoveryConfigsFrom(network));
+        autoDetection(gen, network.getAutoDetectionConfig());
         discovery(gen, network.getDiscoveryConfig());
         outboundPort(gen, network.getOutboundPortDefinitions());
         icmp(gen, network.getClientIcmpPingConfig());
@@ -212,7 +163,7 @@ public final class ClientConfigXmlGenerator {
     }
 
     private static void security(XmlGenerator gen, ClientSecurityConfig security) {
-        if (security == null || !security.hasIdentityConfig()) {
+        if (security == null) {
             return;
         }
         gen.open("security");
@@ -231,6 +182,65 @@ public final class ClientConfigXmlGenerator {
             gen.open("credentials-factory", "class-name", cfConfig.getClassName())
             .appendProperties(cfConfig.getProperties())
             .close();
+        }
+        kerberosIdentityGenerator(gen, security.getKerberosIdentityConfig());
+        Map<String, RealmConfig> realms = security.getRealmConfigs();
+        if (realms != null && !realms.isEmpty()) {
+            gen.open("realms");
+            for (Map.Entry<String, RealmConfig> realmEntry : realms.entrySet()) {
+                securityRealmGenerator(gen, realmEntry.getKey(), realmEntry.getValue());
+            }
+            gen.close();
+        }
+        gen.close();
+    }
+
+    private static void kerberosIdentityGenerator(XmlGenerator gen, KerberosIdentityConfig c) {
+        if (c == null) {
+            return;
+        }
+        gen.open("kerberos")
+            .nodeIfContents("realm", c.getRealm())
+            .nodeIfContents("principal", c.getPrincipal())
+            .nodeIfContents("keytab-file", c.getKeytabFile())
+            .nodeIfContents("security-realm", c.getSecurityRealm())
+            .nodeIfContents("service-name-prefix", c.getServiceNamePrefix())
+            .nodeIfContents("use-canonical-hostname", c.getUseCanonicalHostname())
+            .nodeIfContents("spn", c.getSpn())
+            .close();
+    }
+
+    private static void securityRealmGenerator(XmlGenerator gen, String name, RealmConfig c) {
+        gen.open("realm", "name", name);
+        if (c.isAuthenticationConfigured()) {
+            gen.open("authentication");
+            jaasAuthenticationGenerator(gen, c.getJaasAuthenticationConfig());
+            gen.close();
+        }
+        gen.close();
+    }
+
+    private static void jaasAuthenticationGenerator(XmlGenerator gen, JaasAuthenticationConfig c) {
+        if (c == null) {
+            return;
+        }
+        appendLoginModules(gen, "jaas", c.getLoginModuleConfigs());
+    }
+
+    private static void appendLoginModules(XmlGenerator gen, String tag, List<LoginModuleConfig> loginModuleConfigs) {
+        gen.open(tag);
+        for (LoginModuleConfig lm : loginModuleConfigs) {
+            List<String> attrs = new ArrayList<>();
+            attrs.add("class-name");
+            attrs.add(lm.getClassName());
+
+            if (lm.getUsage() != null) {
+                attrs.add("usage");
+                attrs.add(lm.getUsage().name());
+            }
+            gen.open("login-module", attrs.toArray())
+                    .appendProperties(lm.getProperties())
+                    .close();
         }
         gen.close();
     }
@@ -317,9 +327,26 @@ public final class ClientConfigXmlGenerator {
                         "unit", nativeMemory.getSize().getUnit())
                 .node("min-block-size", nativeMemory.getMinBlockSize())
                 .node("page-size", nativeMemory.getPageSize())
-                .node("metadata-space-percentage", nativeMemory.getMetadataSpacePercentage())
-                .node("persistent-memory-directory", nativeMemory.getPersistentMemoryDirectory())
-                .close();
+                .node("metadata-space-percentage", nativeMemory.getMetadataSpacePercentage());
+
+        PersistentMemoryConfig pmemConfig = nativeMemory.getPersistentMemoryConfig();
+        List<PersistentMemoryDirectoryConfig> directoryConfigs = pmemConfig.getDirectoryConfigs();
+        gen.open("persistent-memory",
+                "enabled", pmemConfig.isEnabled(),
+                "mode", pmemConfig.getMode().name());
+        if (!directoryConfigs.isEmpty()) {
+            gen.open("directories");
+            for (PersistentMemoryDirectoryConfig dirConfig : directoryConfigs) {
+                if (dirConfig.isNumaNodeSet()) {
+                    gen.node("directory", dirConfig.getDirectory(),
+                            "numa-node", dirConfig.getNumaNode());
+                } else {
+                    gen.node("directory", dirConfig.getDirectory());
+                }
+            }
+            gen.close();
+        }
+        gen.close().close();
     }
 
     private static void proxyFactory(XmlGenerator gen, List<ProxyFactoryConfig> proxyFactories) {
@@ -345,9 +372,14 @@ public final class ClientConfigXmlGenerator {
         } else if (loadBalancer instanceof RoundRobinLB) {
             type = "round-robin";
         } else {
-            throw new IllegalArgumentException("Unknown load-balancer type: " + loadBalancer);
+            type = "custom";
         }
-        gen.node("load-balancer", null, "type", type);
+
+        if ("custom".equals(type)) {
+            gen.node("load-balancer", loadBalancer.getClass().getName(), "type", type);
+        } else {
+            gen.node("load-balancer", null, "type", type);
+        }
     }
 
     private static void nearCaches(XmlGenerator gen, Map<String, NearCacheConfig> nearCacheMap) {
@@ -507,6 +539,13 @@ public final class ClientConfigXmlGenerator {
         }
     }
 
+    private static void autoDetection(XmlGenerator gen, AutoDetectionConfig config) {
+        if (config == null) {
+            return;
+        }
+        gen.open("auto-detection", "enabled", config.isEnabled()).close();
+    }
+
     private static void discovery(XmlGenerator gen, DiscoveryConfig discovery) {
         if (discovery.getNodeFilter() == null && discovery.getNodeFilterClass() == null
                 && discovery.getDiscoveryStrategyConfigs().isEmpty()) {
@@ -599,6 +638,13 @@ public final class ClientConfigXmlGenerator {
            .open("jmx", "enabled", metricsConfig.getJmxConfig().isEnabled())
            .close()
            .node("collection-frequency-seconds", metricsConfig.getCollectionFrequencySeconds())
+           .close();
+    }
+
+    private static void instanceTrackingConfig(XmlGenerator gen, InstanceTrackingConfig trackingConfig) {
+        gen.open("instance-tracking", "enabled", trackingConfig.isEnabled())
+           .node("file-name", trackingConfig.getFileName())
+           .node("format-pattern", trackingConfig.getFormatPattern())
            .close();
     }
 }

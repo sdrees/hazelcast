@@ -36,7 +36,7 @@ import static com.hazelcast.client.impl.protocol.codec.builtin.FixedSizeTypesCod
 /**
  * Gets the latest TimedMemberState of the member it's called on.
  */
-@Generated("335c3f21f399ea04e62a45ecfec8416a")
+@Generated("287fb47ed74d4b8ac374cc69916589a6")
 public final class MCGetTimedMemberStateCodec {
     //hex: 0x200B00
     public static final int REQUEST_MESSAGE_TYPE = 2099968;
@@ -46,10 +46,6 @@ public final class MCGetTimedMemberStateCodec {
     private static final int RESPONSE_INITIAL_FRAME_SIZE = RESPONSE_BACKUP_ACKS_FIELD_OFFSET + BYTE_SIZE_IN_BYTES;
 
     private MCGetTimedMemberStateCodec() {
-    }
-
-    @edu.umd.cs.findbugs.annotations.SuppressFBWarnings({"URF_UNREAD_PUBLIC_OR_PROTECTED_FIELD"})
-    public static class RequestParameters {
     }
 
     public static ClientMessage encodeRequest() {
@@ -63,22 +59,6 @@ public final class MCGetTimedMemberStateCodec {
         return clientMessage;
     }
 
-    public static MCGetTimedMemberStateCodec.RequestParameters decodeRequest(ClientMessage clientMessage) {
-        ClientMessage.ForwardFrameIterator iterator = clientMessage.frameIterator();
-        RequestParameters request = new RequestParameters();
-        //empty initial frame
-        iterator.next();
-        return request;
-    }
-
-    @edu.umd.cs.findbugs.annotations.SuppressFBWarnings({"URF_UNREAD_PUBLIC_OR_PROTECTED_FIELD"})
-    public static class ResponseParameters {
-
-        /**
-         * Latest TimedMemberState of the member, serialized as JSON.
-         */
-        public @Nullable java.lang.String timedMemberStateJson;
-    }
 
     public static ClientMessage encodeResponse(@Nullable java.lang.String timedMemberStateJson) {
         ClientMessage clientMessage = ClientMessage.createForEncode();
@@ -90,13 +70,14 @@ public final class MCGetTimedMemberStateCodec {
         return clientMessage;
     }
 
-    public static MCGetTimedMemberStateCodec.ResponseParameters decodeResponse(ClientMessage clientMessage) {
+    /**
+     * Latest TimedMemberState of the member, serialized as JSON.
+     */
+    public static java.lang.String decodeResponse(ClientMessage clientMessage) {
         ClientMessage.ForwardFrameIterator iterator = clientMessage.frameIterator();
-        ResponseParameters response = new ResponseParameters();
         //empty initial frame
         iterator.next();
-        response.timedMemberStateJson = CodecUtil.decodeNullable(iterator, StringCodec::decode);
-        return response;
+        return CodecUtil.decodeNullable(iterator, StringCodec::decode);
     }
 
 }

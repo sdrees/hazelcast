@@ -20,15 +20,15 @@ import com.hazelcast.config.EvictionConfig;
 import com.hazelcast.config.IndexConfig;
 import com.hazelcast.config.MaxSizePolicy;
 import com.hazelcast.config.QueryCacheConfig;
-import com.hazelcast.map.IMap;
 import com.hazelcast.internal.eviction.EvictionListener;
+import com.hazelcast.internal.serialization.Data;
 import com.hazelcast.internal.serialization.InternalSerializationService;
+import com.hazelcast.map.IMap;
 import com.hazelcast.map.impl.LazyMapEntry;
 import com.hazelcast.map.impl.proxy.MapProxyImpl;
 import com.hazelcast.map.impl.querycache.QueryCacheContext;
 import com.hazelcast.map.impl.querycache.QueryCacheEventService;
 import com.hazelcast.map.impl.querycache.subscriber.record.QueryCacheRecord;
-import com.hazelcast.internal.serialization.Data;
 import com.hazelcast.partition.PartitioningStrategy;
 import com.hazelcast.query.Predicate;
 import com.hazelcast.query.impl.CachedQueryEntry;
@@ -82,7 +82,10 @@ abstract class AbstractInternalQueryCache<K, V> implements InternalQueryCache<K,
         // We are not using injected index provider since we're not supporting off-heap indexes in CQC due
         // to threading incompatibility. If we injected the IndexProvider from the MapServiceContext
         // the EE side would create HD indexes which is undesired.
-        this.indexes = Indexes.newBuilder(serializationService, COPY_ON_READ).build();
+        this.indexes = Indexes.newBuilder(serializationService, COPY_ON_READ, queryCacheConfig.getInMemoryFormat())
+                .partitionCount(context.getPartitionCount())
+                .build();
+
         this.includeValue = isIncludeValue();
         this.partitioningStrategy = getPartitioningStrategy();
         this.extractors = Extractors.newBuilder(serializationService).build();
@@ -94,7 +97,7 @@ abstract class AbstractInternalQueryCache<K, V> implements InternalQueryCache<K,
         for (IndexConfig indexConfig : queryCacheConfig.getIndexConfigs()) {
             IndexConfig indexConfig0 = getNormalizedIndexConfig(indexConfig);
 
-            indexes.addOrGetIndex(indexConfig0, null);
+            indexes.addOrGetIndex(indexConfig0);
         }
     }
 
@@ -224,8 +227,8 @@ abstract class AbstractInternalQueryCache<K, V> implements InternalQueryCache<K,
 
     @Override
     public void clear() {
-        recordStore.clear();
         indexes.destroyIndexes();
+        recordStore.clear();
     }
 
     protected IndexConfig getNormalizedIndexConfig(IndexConfig originalConfig) {

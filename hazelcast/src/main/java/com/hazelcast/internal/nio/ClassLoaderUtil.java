@@ -225,32 +225,34 @@ public final class ClassLoaderUtil {
         if (primitiveClass != null) {
             return primitiveClass;
         }
-        ClassLoader theClassLoader = classLoaderHint;
-        if (theClassLoader == null) {
-            theClassLoader = Thread.currentThread().getContextClassLoader();
-        }
 
-        // first try to load it through the given classloader
-        if (theClassLoader != null) {
+        // Try to load it using the hinted classloader if not null
+        if (classLoaderHint != null) {
             try {
-                return tryLoadClass(className, theClassLoader);
+                return tryLoadClass(className, classLoaderHint);
             } catch (ClassNotFoundException ignore) {
-                // reset selected classloader and try with others
-                theClassLoader = null;
             }
         }
 
-        // if failed and this is a Hazelcast class, try again with our classloader
-        if (className.startsWith(HAZELCAST_BASE_PACKAGE) || className.startsWith(HAZELCAST_ARRAY)) {
-            theClassLoader = ClassLoaderUtil.class.getClassLoader();
+        // If this is a Hazelcast class, try to load it using our classloader
+        ClassLoader theClassLoader = ClassLoaderUtil.class.getClassLoader();
+        if (theClassLoader != null && belongsToHazelcastPackage(className)) {
+            try {
+                return tryLoadClass(className, ClassLoaderUtil.class.getClassLoader());
+            } catch (ClassNotFoundException ignore) {
+            }
         }
-        if (theClassLoader == null) {
-            theClassLoader = Thread.currentThread().getContextClassLoader();
-        }
-        if (theClassLoader != null) {
-            return tryLoadClass(className, theClassLoader);
+
+        // Try to load it using context class loader if not null
+        ClassLoader contextClassLoader = Thread.currentThread().getContextClassLoader();
+        if (contextClassLoader != null) {
+            return tryLoadClass(className, contextClassLoader);
         }
         return Class.forName(className);
+    }
+
+    private static boolean belongsToHazelcastPackage(String className) {
+        return className.startsWith(HAZELCAST_BASE_PACKAGE) || className.startsWith(HAZELCAST_ARRAY);
     }
 
     private static Class<?> tryPrimitiveClass(String className) {
@@ -350,7 +352,7 @@ public final class ClassLoaderUtil {
      *
      * @param clazz class to check whether implements the interface
      * @param iface interface to be implemented
-     * @return <code>true</code> when the class implements the inteface with the same name
+     * @return <code>true</code> when the class implements the interface with the same name
      */
     public static boolean implementsInterfaceWithSameName(Class<?> clazz, Class<?> iface) {
         Class<?>[] interfaces = getAllInterfaces(clazz);
@@ -435,7 +437,7 @@ public final class ClassLoaderUtil {
          */
         @SuppressWarnings("checkstyle:RedundantModifier")
         public IrresolvableConstructor() {
-            throw new UnsupportedOperationException("Irresolvable constructor should never be instantiated.");
+            throw new UnsupportedOperationException("Irresolvable constructor must never be instantiated.");
         }
     }
 

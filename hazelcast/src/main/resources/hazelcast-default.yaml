@@ -34,8 +34,10 @@ hazelcast:
       # 0 or * means use system provided port.
       - 0
     join:
-      multicast:
+      auto-detection:
         enabled: true
+      multicast:
+        enabled: false
         multicast-group: 224.2.2.3
         multicast-port: 54327
       tcp-ip:
@@ -45,33 +47,12 @@ hazelcast:
           - 127.0.0.1
       aws:
         enabled: false
-        access-key: my-access-key
-        secret-key: my-secret-key
-        # optional, default is us-east-1
-        region: us-west-1
-        # optional, default is ec2.amazonaws.com. If set, region shouldn't be set as it will override this property
-        host-header: ec2.amazonaws.com
-        # optional, only instances belonging to this group will be discovered, default will try all running instances
-        security-group-name: hazelcast-sg
-        tag-key: type
-        tag-value: hz-nodes
       gcp:
         enabled: false
-        zones: us-east1-b,us-east1-c
       azure:
         enabled: false
-        client-id: CLIENT_ID
-        client-secret: CLIENT_SECRET
-        tenant-id: TENANT_ID
-        subscription-id: SUB_ID
-        cluster-id: HZLCAST001
-        group-name: RESOURCE-GROUP-NAME
       kubernetes:
         enabled: false
-        namespace: MY-KUBERNETES-NAMESPACE
-        service-name: MY-SERVICE-NAME
-        service-label-name: MY-SERVICE-LABEL-NAME
-        service-label-value: MY-SERVICE-LABEL-VALUE
       eureka:
         enabled: false
         self-registration: true
@@ -111,6 +92,21 @@ hazelcast:
       pool-size: 16
       # Queue capacity. 0 means Integer.MAX_VALUE.
       queue-capacity: 0
+      statistics-enabled: true
+
+  durable-executor-service:
+    default:
+      capacity: 100
+      durability: 1
+      pool-size: 16
+      statistics-enabled: true
+
+  scheduled-executor-service:
+    default:
+      capacity: 100
+      durability: 1
+      pool-size: 16
+      statistics-enabled: true
 
   security:
     client-block-unmapped-actions: true
@@ -284,12 +280,6 @@ hazelcast:
         batch-size: 100
         class-name: HyperLogLogMergePolicy
 
-  scheduled-executor-service:
-    default:
-      capacity: 100
-      durability: 1
-      pool-size: 16
-
   crdt-replication:
     replication-period-millis: 1000
     max-concurrent-replication-targets: 1
@@ -329,3 +319,11 @@ hazelcast:
     jmx:
       enabled: true
     collection-frequency-seconds: 5
+
+  instance-tracking:
+    enabled: false
+
+  sql:
+    executor-pool-size: -1
+    operation-pool-size: -1
+    statement-timeout-millis: 0

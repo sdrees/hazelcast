@@ -19,6 +19,7 @@ package com.hazelcast.map.impl;
 import com.hazelcast.config.InMemoryFormat;
 import com.hazelcast.internal.serialization.Data;
 import com.hazelcast.internal.serialization.InternalSerializationService;
+import com.hazelcast.map.ExtendedMapEntry;
 import com.hazelcast.nio.ObjectDataInput;
 import com.hazelcast.nio.ObjectDataOutput;
 import com.hazelcast.nio.serialization.IdentifiedDataSerializable;
@@ -30,6 +31,9 @@ import java.io.IOException;
 import java.io.Serializable;
 import java.util.Map;
 import java.util.Objects;
+import java.util.concurrent.TimeUnit;
+
+import static com.hazelcast.map.impl.record.Record.UNSET;
 
 /**
  * A {@link java.util.Map.Entry Map.Entry} implementation
@@ -56,12 +60,14 @@ import java.util.Objects;
  * @param <V> value
  */
 public class LazyMapEntry<K, V> extends CachedQueryEntry<K, V>
-        implements Serializable, IdentifiedDataSerializable {
+        implements Serializable, IdentifiedDataSerializable, ExtendedMapEntry<K, V> {
 
     private static final long serialVersionUID = 0L;
 
     private transient boolean modified;
     private transient Metadata metadata;
+
+    private transient long newTtl = UNSET;
 
     public LazyMapEntry() {
     }
@@ -74,11 +80,12 @@ public class LazyMapEntry<K, V> extends CachedQueryEntry<K, V>
         init(serializationService, key, value, extractors);
     }
 
-    @Override
-    public LazyMapEntry init(InternalSerializationService serializationService, Data key, Object value, Extractors extractors) {
+    public LazyMapEntry init(InternalSerializationService serializationService,
+                             Data key, Object value, Extractors extractors, long ttl) {
         super.init(serializationService, key, value, extractors);
         modified = false;
         metadata = null;
+        newTtl = ttl;
         return this;
     }
 
@@ -101,6 +108,12 @@ public class LazyMapEntry<K, V> extends CachedQueryEntry<K, V>
         return oldValue;
     }
 
+    @Override
+    public V setValue(V value, long ttl, TimeUnit ttlUnit) {
+        newTtl = ttlUnit.toMillis(ttl);
+        return setValue(value);
+    }
+
     /**
      * Similar to calling {@link #setValue} with null but doesn't return old-value hence no extra deserialization.
      */
@@ -121,6 +134,10 @@ public class LazyMapEntry<K, V> extends CachedQueryEntry<K, V>
 
     public boolean isModified() {
         return modified;
+    }
+
+    public long getNewTtl() {
+        return newTtl;
     }
 
     @Override

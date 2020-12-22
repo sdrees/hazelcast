@@ -18,6 +18,7 @@ package com.hazelcast.spring;
 
 import com.hazelcast.config.AbstractXmlConfigHelper;
 import com.hazelcast.config.AliasedDiscoveryConfig;
+import com.hazelcast.config.AutoDetectionConfig;
 import com.hazelcast.config.ClassFilter;
 import com.hazelcast.config.DiscoveryConfig;
 import com.hazelcast.config.DiscoveryStrategyConfig;
@@ -30,11 +31,18 @@ import com.hazelcast.config.InvalidConfigurationException;
 import com.hazelcast.config.JavaSerializationFilterConfig;
 import com.hazelcast.config.MapConfig;
 import com.hazelcast.config.MaxSizePolicy;
+import com.hazelcast.config.NativeMemoryConfig;
 import com.hazelcast.config.NearCachePreloaderConfig;
+import com.hazelcast.config.PersistentMemoryConfig;
+import com.hazelcast.config.PersistentMemoryDirectoryConfig;
+import com.hazelcast.config.PersistentMemoryMode;
 import com.hazelcast.config.SerializationConfig;
 import com.hazelcast.config.SerializerConfig;
 import com.hazelcast.config.SocketInterceptorConfig;
 import com.hazelcast.internal.config.DomConfigHelper;
+import com.hazelcast.internal.util.StringUtil;
+import com.hazelcast.memory.MemorySize;
+import com.hazelcast.memory.MemoryUnit;
 import com.hazelcast.query.impl.IndexUtils;
 import com.hazelcast.spring.context.SpringManagedContext;
 import org.springframework.beans.factory.config.BeanDefinition;
@@ -62,6 +70,7 @@ import static com.hazelcast.internal.config.ConfigValidator.checkNearCacheEvicti
 import static com.hazelcast.internal.config.DomConfigHelper.childElements;
 import static com.hazelcast.internal.config.DomConfigHelper.cleanNodeName;
 import static com.hazelcast.internal.config.DomConfigHelper.getBooleanValue;
+import static com.hazelcast.internal.config.DomConfigHelper.getIntegerValue;
 import static com.hazelcast.internal.util.StringUtil.upperCaseInternal;
 import static java.lang.Integer.parseInt;
 import static java.util.Arrays.asList;
@@ -98,7 +107,10 @@ public abstract class AbstractHazelcastBeanDefinitionParser extends AbstractBean
                 }
 
                 if (parserContext.isNested()) {
-                    builder.setScope(parserContext.getContainingBeanDefinition().getScope());
+                    BeanDefinition containingBeanDefinition = parserContext.getContainingBeanDefinition();
+                    if (containingBeanDefinition != null) {
+                        builder.setScope(containingBeanDefinition.getScope());
+                    }
                 } else {
                     Node scopeNode = attributes.getNamedItem("scope");
                     if (scopeNode != null) {
@@ -126,6 +138,13 @@ public abstract class AbstractHazelcastBeanDefinitionParser extends AbstractBean
 
         protected BeanDefinitionBuilder createBeanBuilder(Class clazz) {
             BeanDefinitionBuilder builder = BeanDefinitionBuilder.rootBeanDefinition(clazz);
+            builder.setScope(configBuilder.getBeanDefinition().getScope());
+            builder.setLazyInit(configBuilder.getBeanDefinition().isLazyInit());
+            return builder;
+        }
+
+        protected BeanDefinitionBuilder createBeanBuilder(String className) {
+            BeanDefinitionBuilder builder = BeanDefinitionBuilder.rootBeanDefinition(className);
             builder.setScope(configBuilder.getBeanDefinition().getScope());
             builder.setLazyInit(configBuilder.getBeanDefinition().isLazyInit());
             return builder;
@@ -510,6 +529,85 @@ public abstract class AbstractHazelcastBeanDefinitionParser extends AbstractBean
             return nearCachePreloaderConfigBuilder.getBeanDefinition();
         }
 
+        protected void handleNativeMemory(Node node) {
+            BeanDefinitionBuilder nativeMemoryConfigBuilder = createBeanBuilder(NativeMemoryConfig.class);
+            AbstractBeanDefinition beanDefinition = nativeMemoryConfigBuilder.getBeanDefinition();
+            fillAttributeValues(node, nativeMemoryConfigBuilder, "persistentMemoryDirectory");
+            ManagedList<BeanDefinition> directories = new ManagedList<>();
+            BeanDefinitionBuilder pmemConfigBuilder = createBeanBuilder(PersistentMemoryConfig.class);
+            for (Node child : childElements(node)) {
+                String nodeName = cleanNodeName(child);
+                if ("size".equals(nodeName)) {
+                    handleMemorySizeConfig(child, nativeMemoryConfigBuilder);
+                } else if ("persistent-memory".equals(nodeName)) {
+                    handlePersistentMemoryConfig(child, pmemConfigBuilder, directories);
+                }
+            }
+
+            Node attrPmemDirectory = node.getAttributes().getNamedItem("persistent-memory-directory");
+            if (attrPmemDirectory != null) {
+                BeanDefinitionBuilder pmemDirConfigBuilder = createBeanBuilder(PersistentMemoryDirectoryConfig.class);
+                pmemDirConfigBuilder.addConstructorArgValue(getTextContent(attrPmemDirectory));
+                directories.add(pmemDirConfigBuilder.getBeanDefinition());
+            }
+
+            if (!directories.isEmpty()) {
+                pmemConfigBuilder.addPropertyValue("directoryConfigs", directories);
+            }
+
+            nativeMemoryConfigBuilder.addPropertyValue("persistentMemoryConfig", pmemConfigBuilder.getBeanDefinition());
+            configBuilder.addPropertyValue("nativeMemoryConfig", beanDefinition);
+        }
+
+        private void handlePersistentMemoryConfig(Node pmemNode, BeanDefinitionBuilder pmemConfigBuilder,
+                                                  ManagedList<BeanDefinition> directoriesList) {
+            Node enabledNode = pmemNode.getAttributes().getNamedItem("enabled");
+            if (enabledNode != null) {
+                boolean enabled = getBooleanValue(getTextContent(enabledNode));
+                pmemConfigBuilder.addPropertyValue("enabled", enabled);
+            }
+
+            Node mode = pmemNode.getAttributes().getNamedItem("mode");
+            if (mode != null) {
+                String modeValue = getTextContent(mode);
+                try {
+                    pmemConfigBuilder.addPropertyValue("mode", PersistentMemoryMode.valueOf(modeValue));
+                } catch (Exception ex) {
+                    throw new InvalidConfigurationException("Invalid 'mode' for 'persistent-memory': " + modeValue);
+                }
+            }
+
+            for (Node dirsNode : childElements(pmemNode)) {
+                String dirsNodeName = cleanNodeName(dirsNode);
+                if ("directories".equals(dirsNodeName)) {
+                    for (Node dirNode : childElements(dirsNode)) {
+                        String dirNodeName = cleanNodeName(dirNode);
+                        if ("directory".equals(dirNodeName)) {
+                            BeanDefinitionBuilder pmemDirConfigBuilder = createBeanBuilder(PersistentMemoryDirectoryConfig.class);
+                            NamedNodeMap attributes = dirNode.getAttributes();
+                            Node numaNode = attributes.getNamedItem("numa-node");
+                            pmemDirConfigBuilder.addConstructorArgValue(getTextContent(dirNode));
+                            String numaNodeStr = getTextContent(numaNode);
+                            if (!StringUtil.isNullOrEmptyAfterTrim(numaNodeStr)) {
+                                pmemDirConfigBuilder.addConstructorArgValue(getIntegerValue("numa-node", numaNodeStr));
+                            }
+                            directoriesList.add(pmemDirConfigBuilder.getBeanDefinition());
+                        }
+                    }
+                }
+            }
+        }
+
+        private void handleMemorySizeConfig(Node node, BeanDefinitionBuilder nativeMemoryConfigBuilder) {
+            BeanDefinitionBuilder memorySizeConfigBuilder = createBeanBuilder(MemorySize.class);
+            NamedNodeMap attributes = node.getAttributes();
+            Node value = attributes.getNamedItem("value");
+            Node unit = attributes.getNamedItem("unit");
+            memorySizeConfigBuilder.addConstructorArgValue(getTextContent(value));
+            memorySizeConfigBuilder.addConstructorArgValue(MemoryUnit.valueOf(getTextContent(unit)));
+            nativeMemoryConfigBuilder.addPropertyValue("size", memorySizeConfigBuilder.getBeanDefinition());
+        }
+
         protected void handleDiscoveryStrategies(Node node, BeanDefinitionBuilder joinConfigBuilder) {
             BeanDefinitionBuilder discoveryConfigBuilder = createBeanBuilder(DiscoveryConfig.class);
             ManagedList<BeanDefinition> discoveryStrategyConfigs = new ManagedList<>();
@@ -525,6 +623,12 @@ public abstract class AbstractHazelcastBeanDefinitionParser extends AbstractBean
             }
             discoveryConfigBuilder.addPropertyValue("discoveryStrategyConfigs", discoveryStrategyConfigs);
             joinConfigBuilder.addPropertyValue("discoveryConfig", discoveryConfigBuilder.getBeanDefinition());
+        }
+
+        protected void handleAutoDetection(Node node, BeanDefinitionBuilder joinConfigBuilder) {
+            BeanDefinitionBuilder autoDetectionConfigBuilder = createBeanBuilder(AutoDetectionConfig.class);
+            autoDetectionConfigBuilder.addPropertyValue("enabled", getBooleanValue(getAttribute(node, "enabled")));
+            joinConfigBuilder.addPropertyValue("autoDetectionConfig", autoDetectionConfigBuilder.getBeanDefinition());
         }
 
         protected void handleIndex(ManagedList<BeanDefinition> indexes, Node indexNode) {

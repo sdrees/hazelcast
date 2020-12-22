@@ -131,6 +131,7 @@ public final class MetricDescriptorConstants {
     public static final String EXECUTOR_PREFIX_DURABLE_INTERNAL = "executor.durable.internal";
     public static final String EXECUTOR_PREFIX_SCHEDULED_INTERNAL = "executor.scheduled.internal";
     public static final String EXECUTOR_DISCRIMINATOR_NAME = "name";
+    public static final String EXECUTOR_METRIC_CREATION_TIME = "creationTime";
     public static final String EXECUTOR_METRIC_PENDING = "pending";
     public static final String EXECUTOR_METRIC_STARTED = "started";
     public static final String EXECUTOR_METRIC_COMPLETED = "completed";
@@ -143,6 +144,14 @@ public final class MetricDescriptorConstants {
     public static final String EXECUTOR_METRIC_MANAGED_EXECUTOR_SERVICE_QUEUE_SIZE = "queueSize";
     public static final String EXECUTOR_METRIC_MANAGED_EXECUTOR_SERVICE_REMAINING_QUEUE_CAPACITY = "remainingQueueCapacity";
     // ===[/EXECUTOR]===================================================
+
+    // ===[SCHEDULED-EXECUTOR]====================================================
+    public static final String SCHEDULED_EXECUTOR_PREFIX = "scheduledExecutor";
+    // ===[/SCHEDULED-EXECUTOR]===================================================
+
+    // ===[DURABLE-EXECUTOR]====================================================
+    public static final String DURABLE_EXECUTOR_PREFIX = "durableExecutor";
+    // ===[/DURABLE-EXECUTOR]===================================================
 
     // ===[FILE]========================================================
     public static final String FILE_PREFIX = "file.partition";
@@ -187,10 +196,18 @@ public final class MetricDescriptorConstants {
     public static final String HOTRESTART_METRIC_GC_LIVE_TOMBSTONES = "liveTombstones";
     // ===[/HOT-RESTART]================================================
 
+    // ===[LIST]=======================================================
+    public static final String LIST_PREFIX = "list";
+    public static final String LIST_METRIC_LAST_ACCESS_TIME = "lastAccessTime";
+    public static final String LIST_METRIC_LAST_UPDATE_TIME = "lastUpdateTime";
+    public static final String LIST_METRIC_CREATION_TIME = "creationTime";
+    // ===[/LIST]======================================================
+
     // ===[MAP]=========================================================
     public static final String MAP_PREFIX = "map";
     public static final String MAP_PREFIX_INDEX = "map.index";
     public static final String MAP_PREFIX_NEARCACHE = "map.nearcache";
+    public static final String MAP_PREFIX_ENTRY_PROCESSOR_OFFLOADABLE_EXECUTOR = "map.entry.processor.offloadable.executor";
     public static final String MAP_DISCRIMINATOR_NAME = "name";
     public static final String MAP_TAG_INDEX = "index";
     public static final String MAP_METRIC_LAST_ACCESS_TIME = "lastAccessTime";
@@ -414,8 +431,11 @@ public final class MetricDescriptorConstants {
     public static final String PARTITIONS_METRIC_PARTITION_SERVICE_MIGRATION_QUEUE_SIZE = "migrationQueueSize";
     public static final String PARTITIONS_METRIC_PARTITION_REPLICA_MANAGER_REPLICA_SYNC_SEMAPHORE = "replicaSyncSemaphore";
     public static final String PARTITIONS_METRIC_PARTITION_REPLICA_MANAGER_SYNC_REQUEST_COUNTER = "replicaSyncRequestsCounter";
+    public static final String PARTITIONS_METRIC_PARTITION_REPLICA_STATE_MANAGER_PARTITION_COUNT = "partitionCount";
     public static final String PARTITIONS_METRIC_PARTITION_REPLICA_STATE_MANAGER_LOCAL_PARTITION_COUNT = "localPartitionCount";
+    public static final String PARTITIONS_METRIC_PARTITION_REPLICA_STATE_MANAGER_ACTIVE_PARTITION_COUNT = "activePartitionCount";
     public static final String PARTITIONS_METRIC_PARTITION_REPLICA_STATE_MANAGER_VERSION = "stateVersion";
+    public static final String PARTITIONS_METRIC_PARTITION_REPLICA_STATE_MANAGER_STAMP = "stateStamp";
     public static final String PARTITIONS_METRIC_PARTITION_REPLICA_STATE_MANAGER_MEMBER_GROUP_SIZE = "memberGroupsSize";
     // ===[/PARTITIONS]=================================================
 
@@ -487,6 +507,13 @@ public final class MetricDescriptorConstants {
     public static final String RUNTIME_FULL_METRIC_UPTIME = "runtime.uptime";
     // ===[/RUNTIME]====================================================
 
+    // ===[SET]=======================================================
+    public static final String SET_PREFIX = "set";
+    public static final String SET_METRIC_LAST_ACCESS_TIME = "lastAccessTime";
+    public static final String SET_METRIC_LAST_UPDATE_TIME = "lastUpdateTime";
+    public static final String SET_METRIC_CREATION_TIME = "creationTime";
+    // ===[/SET]======================================================
+
     // ===[TCP]=========================================================
     public static final String TCP_PREFIX = "tcp";
     public static final String TCP_PREFIX_ACCEPTOR = "tcp.acceptor";
@@ -514,8 +541,8 @@ public final class MetricDescriptorConstants {
     public static final String TCP_METRIC_ENDPOINT_MANAGER_OPENED_COUNT = "openedCount";
     public static final String TCP_METRIC_ENDPOINT_MANAGER_CLOSED_COUNT = "closedCount";
     public static final String TCP_METRIC_ENDPOINT_MANAGER_ACCEPTED_SOCKET_COUNT = "acceptedSocketCount";
-    public static final String TCP_METRIC_UNIFIED_ENDPOINT_MANAGER_CLIENT_COUNT = "clientCount";
-    public static final String TCP_METRIC_UNIFIED_ENDPOINT_MANAGER_TEXT_COUNT = "textCount";
+    public static final String TCP_METRIC_CLIENT_COUNT = "clientCount";
+    public static final String TCP_METRIC_TEXT_COUNT = "textCount";
     // ===[/TCP]========================================================
 
     // ===[TOPIC]=======================================================
@@ -574,6 +601,11 @@ public final class MetricDescriptorConstants {
     public static final String WAN_METRIC_MERKLE_SYNC_MAX_LEAF_ENTRY_COUNT = "maxLeafEntryCount";
     public static final String WAN_METRIC_MERKLE_SYNC_AVG_ENTRIES_PER_LEAF = "avgEntriesPerLeaf";
     public static final String WAN_METRIC_MERKLE_SYNC_STD_DEV_ENTRIES_PER_LEAF = "stdDevEntriesPerLeaf";
+    public static final String WAN_METRIC_ACK_DELAY_TOTAL_COUNT = "ackDelayTotalCount";
+    public static final String WAN_METRIC_ACK_DELAY_TOTAL_MILLIS = "ackDelayTotalMillis";
+    public static final String WAN_METRIC_ACK_DELAY_CURRENT_MILLIS = "ackDelayCurrentMillis";
+    public static final String WAN_METRIC_ACK_DELAY_LAST_START = "ackDelayLastStart";
+    public static final String WAN_METRIC_ACK_DELAY_LAST_END = "ackDelayLastEnd";
     // ===[/WAN]========================================================
 
     public static final String GENERAL_DISCRIMINATOR_NAME = "name";

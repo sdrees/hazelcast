@@ -16,6 +16,8 @@
 
 package com.hazelcast.test.compatibility;
 
+import com.hazelcast.auditlog.AuditlogService;
+import com.hazelcast.auditlog.impl.NoOpAuditlogService;
 import com.hazelcast.cluster.ClusterState;
 import com.hazelcast.cp.internal.persistence.CPPersistenceService;
 import com.hazelcast.cp.internal.persistence.NopCPPersistenceService;
@@ -24,8 +26,6 @@ import com.hazelcast.instance.EndpointQualifier;
 import com.hazelcast.instance.impl.HazelcastInstanceImpl;
 import com.hazelcast.instance.impl.NodeExtension;
 import com.hazelcast.internal.ascii.TextCommandService;
-import com.hazelcast.internal.auditlog.AuditlogService;
-import com.hazelcast.internal.auditlog.impl.NoOpAuditlogService;
 import com.hazelcast.internal.cluster.impl.JoinMessage;
 import com.hazelcast.internal.diagnostics.Diagnostics;
 import com.hazelcast.internal.dynamicconfig.DynamicConfigListener;
@@ -33,11 +33,11 @@ import com.hazelcast.internal.hotrestart.InternalHotRestartService;
 import com.hazelcast.internal.jmx.ManagementService;
 import com.hazelcast.internal.management.TimedMemberStateFactory;
 import com.hazelcast.internal.memory.MemoryStats;
-import com.hazelcast.internal.networking.ChannelInitializerProvider;
+import com.hazelcast.internal.networking.ChannelInitializer;
 import com.hazelcast.internal.networking.InboundHandler;
 import com.hazelcast.internal.networking.OutboundHandler;
-import com.hazelcast.internal.nio.IOService;
-import com.hazelcast.internal.nio.tcp.TcpIpConnection;
+import com.hazelcast.internal.server.ServerContext;
+import com.hazelcast.internal.server.ServerConnection;
 import com.hazelcast.internal.serialization.InternalSerializationService;
 import com.hazelcast.internal.serialization.SerializationService;
 import com.hazelcast.internal.util.ByteArrayProcessor;
@@ -48,6 +48,7 @@ import com.hazelcast.version.Version;
 
 import java.util.Map;
 import java.util.UUID;
+import java.util.function.Function;
 
 /**
  * Node extension that instantiates a {@link SamplingSerializationService} when asked to create
@@ -80,6 +81,11 @@ public class SamplingNodeExtension implements NodeExtension {
     @Override
     public void printNodeInfo() {
         nodeExtension.printNodeInfo();
+    }
+
+    @Override
+    public void logInstanceTrackingMetadata() {
+        nodeExtension.logInstanceTrackingMetadata();
     }
 
     @Override
@@ -128,18 +134,18 @@ public class SamplingNodeExtension implements NodeExtension {
     }
 
     @Override
-    public InboundHandler[] createInboundHandlers(EndpointQualifier qualifier, TcpIpConnection connection, IOService ioService) {
-        return nodeExtension.createInboundHandlers(qualifier, connection, ioService);
+    public InboundHandler[] createInboundHandlers(EndpointQualifier qualifier, ServerConnection connection, ServerContext serverContext) {
+        return nodeExtension.createInboundHandlers(qualifier, connection, serverContext);
     }
 
     @Override
-    public OutboundHandler[] createOutboundHandlers(EndpointQualifier qualifier, TcpIpConnection connection, IOService ioService) {
-        return nodeExtension.createOutboundHandlers(qualifier, connection, ioService);
+    public OutboundHandler[] createOutboundHandlers(EndpointQualifier qualifier, ServerConnection connection, ServerContext serverContext) {
+        return nodeExtension.createOutboundHandlers(qualifier, connection, serverContext);
     }
 
     @Override
-    public ChannelInitializerProvider createChannelInitializerProvider(IOService ioService) {
-        return nodeExtension.createChannelInitializerProvider(ioService);
+    public Function<EndpointQualifier, ChannelInitializer> createChannelInitializerFn(ServerContext serverContext) {
+       return nodeExtension.createChannelInitializerFn(serverContext);
     }
 
     @Override
@@ -227,13 +233,13 @@ public class SamplingNodeExtension implements NodeExtension {
     }
 
     @Override
-    public ByteArrayProcessor createMulticastInputProcessor(IOService ioService) {
-        return nodeExtension.createMulticastInputProcessor(ioService);
+    public ByteArrayProcessor createMulticastInputProcessor(ServerContext serverContext) {
+        return nodeExtension.createMulticastInputProcessor(serverContext);
     }
 
     @Override
-    public ByteArrayProcessor createMulticastOutputProcessor(IOService ioService) {
-        return nodeExtension.createMulticastOutputProcessor(ioService);
+    public ByteArrayProcessor createMulticastOutputProcessor(ServerContext serverContext) {
+        return nodeExtension.createMulticastOutputProcessor(serverContext);
     }
 
     @Override

@@ -36,7 +36,7 @@ import static com.hazelcast.client.impl.protocol.codec.builtin.FixedSizeTypesCod
 /**
  * Obtains a list of prepared transaction from the cluster.
  */
-@Generated("e57be9bbcfa0371baf75fd56689ef530")
+@Generated("0c2d80a3df53ca7504b2e0a0ce93e4da")
 public final class XATransactionCollectTransactionsCodec {
     //hex: 0x140200
     public static final int REQUEST_MESSAGE_TYPE = 1311232;
@@ -46,10 +46,6 @@ public final class XATransactionCollectTransactionsCodec {
     private static final int RESPONSE_INITIAL_FRAME_SIZE = RESPONSE_BACKUP_ACKS_FIELD_OFFSET + BYTE_SIZE_IN_BYTES;
 
     private XATransactionCollectTransactionsCodec() {
-    }
-
-    @edu.umd.cs.findbugs.annotations.SuppressFBWarnings({"URF_UNREAD_PUBLIC_OR_PROTECTED_FIELD"})
-    public static class RequestParameters {
     }
 
     public static ClientMessage encodeRequest() {
@@ -63,22 +59,6 @@ public final class XATransactionCollectTransactionsCodec {
         return clientMessage;
     }
 
-    public static XATransactionCollectTransactionsCodec.RequestParameters decodeRequest(ClientMessage clientMessage) {
-        ClientMessage.ForwardFrameIterator iterator = clientMessage.frameIterator();
-        RequestParameters request = new RequestParameters();
-        //empty initial frame
-        iterator.next();
-        return request;
-    }
-
-    @edu.umd.cs.findbugs.annotations.SuppressFBWarnings({"URF_UNREAD_PUBLIC_OR_PROTECTED_FIELD"})
-    public static class ResponseParameters {
-
-        /**
-         * Array of Xids.
-         */
-        public java.util.List<javax.transaction.xa.Xid> response;
-    }
 
     public static ClientMessage encodeResponse(java.util.Collection<javax.transaction.xa.Xid> response) {
         ClientMessage clientMessage = ClientMessage.createForEncode();
@@ -90,13 +70,14 @@ public final class XATransactionCollectTransactionsCodec {
         return clientMessage;
     }
 
-    public static XATransactionCollectTransactionsCodec.ResponseParameters decodeResponse(ClientMessage clientMessage) {
+    /**
+     * Array of Xids.
+     */
+    public static java.util.List<javax.transaction.xa.Xid> decodeResponse(ClientMessage clientMessage) {
         ClientMessage.ForwardFrameIterator iterator = clientMessage.frameIterator();
-        ResponseParameters response = new ResponseParameters();
         //empty initial frame
         iterator.next();
-        response.response = ListMultiFrameCodec.decode(iterator, XidCodec::decode);
-        return response;
+        return ListMultiFrameCodec.decode(iterator, XidCodec::decode);
     }
 
 }

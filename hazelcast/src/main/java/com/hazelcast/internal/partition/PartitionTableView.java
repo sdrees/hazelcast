@@ -20,53 +20,50 @@ import edu.umd.cs.findbugs.annotations.SuppressFBWarnings;
 
 import java.util.Arrays;
 
-import static com.hazelcast.internal.partition.InternalPartition.MAX_REPLICA_COUNT;
+import static com.hazelcast.internal.partition.PartitionStamp.calculateStamp;
 
 /**
  * An immutable/readonly view of partition table.
- * View consists of partition replica assignments and global partition state version.
+ * View consists of partition replica assignments and global partition state stamp.
  * <p>
- * {@link #getReplicas(int)} returns clone of internal addresses array.
+ * {@link #getReplicas(int)} returns a clone of internal replica array.
  */
 public class PartitionTableView {
 
-    private final PartitionReplica[][] replicas;
-    private final int version;
+    private final InternalPartition[] partitions;
+
+    private long stamp;
 
     @SuppressFBWarnings("EI_EXPOSE_REP")
-    public PartitionTableView(PartitionReplica[][] replicas, int version) {
-        this.replicas = replicas;
-        this.version = version;
+    public PartitionTableView(InternalPartition[] partitions) {
+        this.partitions = partitions;
     }
 
-    public PartitionTableView(InternalPartition[] partitions, int version) {
-        PartitionReplica[][] a = new PartitionReplica[partitions.length][MAX_REPLICA_COUNT];
-        for (InternalPartition partition : partitions) {
-            int partitionId = partition.getPartitionId();
-            for (int replica = 0; replica < MAX_REPLICA_COUNT; replica++) {
-                a[partitionId][replica] = partition.getReplica(replica);
-            }
+    public long stamp() {
+        long s = stamp;
+        if (s == 0) {
+            s = calculateStamp(partitions);
+            stamp = s;
         }
-
-        this.replicas = a;
-        this.version = version;
+        return s;
     }
 
-    public int getVersion() {
-        return version;
+    public int length() {
+        return partitions.length;
+    }
+
+    public InternalPartition getPartition(int partitionId) {
+        return partitions[partitionId];
     }
 
     public PartitionReplica getReplica(int partitionId, int replicaIndex) {
-        return replicas[partitionId][replicaIndex];
-    }
-
-    public int getLength() {
-        return replicas.length;
+        InternalPartition partition = partitions[partitionId];
+        return partition != null ? partition.getReplica(replicaIndex) : null;
     }
 
     public PartitionReplica[] getReplicas(int partitionId) {
-        PartitionReplica[] a = replicas[partitionId];
-        return Arrays.copyOf(a, a.length);
+        InternalPartition partition = partitions[partitionId];
+        return partition != null ? partition.getReplicasCopy() : new PartitionReplica[InternalPartition.MAX_REPLICA_COUNT];
     }
 
     @Override
@@ -79,18 +76,18 @@ public class PartitionTableView {
         }
 
         PartitionTableView that = (PartitionTableView) o;
-        return version == that.version && Arrays.deepEquals(replicas, that.replicas);
+
+        return Arrays.equals(partitions, that.partitions);
     }
 
     @Override
     public int hashCode() {
-        int result = Arrays.deepHashCode(replicas);
-        result = 31 * result + version;
-        return result;
+        return Arrays.hashCode(partitions);
     }
 
     @Override
     public String toString() {
-        return "PartitionTable{" + "addresses=" + Arrays.deepToString(replicas) + ", version=" + version + '}';
+        return "PartitionTableView{" + "partitions=" + Arrays.toString(partitions)
+                + ", stamp=" + stamp() + '}';
     }
 }

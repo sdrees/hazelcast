@@ -37,7 +37,7 @@ import static com.hazelcast.client.impl.protocol.codec.builtin.FixedSizeTypesCod
  * Polls events available on member. Once read, events are removed from
  * member's internal queue.
  */
-@Generated("fd9008fc4d686b8cd0a5b23bb2a3d616")
+@Generated("bb0c91773d2bde1be8abe015c26e5fc5")
 public final class MCPollMCEventsCodec {
     //hex: 0x201800
     public static final int REQUEST_MESSAGE_TYPE = 2103296;
@@ -47,10 +47,6 @@ public final class MCPollMCEventsCodec {
     private static final int RESPONSE_INITIAL_FRAME_SIZE = RESPONSE_BACKUP_ACKS_FIELD_OFFSET + BYTE_SIZE_IN_BYTES;
 
     private MCPollMCEventsCodec() {
-    }
-
-    @edu.umd.cs.findbugs.annotations.SuppressFBWarnings({"URF_UNREAD_PUBLIC_OR_PROTECTED_FIELD"})
-    public static class RequestParameters {
     }
 
     public static ClientMessage encodeRequest() {
@@ -64,22 +60,6 @@ public final class MCPollMCEventsCodec {
         return clientMessage;
     }
 
-    public static MCPollMCEventsCodec.RequestParameters decodeRequest(ClientMessage clientMessage) {
-        ClientMessage.ForwardFrameIterator iterator = clientMessage.frameIterator();
-        RequestParameters request = new RequestParameters();
-        //empty initial frame
-        iterator.next();
-        return request;
-    }
-
-    @edu.umd.cs.findbugs.annotations.SuppressFBWarnings({"URF_UNREAD_PUBLIC_OR_PROTECTED_FIELD"})
-    public static class ResponseParameters {
-
-        /**
-         * List of events.
-         */
-        public java.util.List<com.hazelcast.internal.management.dto.MCEventDTO> events;
-    }
 
     public static ClientMessage encodeResponse(java.util.Collection<com.hazelcast.internal.management.dto.MCEventDTO> events) {
         ClientMessage clientMessage = ClientMessage.createForEncode();
@@ -91,13 +71,14 @@ public final class MCPollMCEventsCodec {
         return clientMessage;
     }
 
-    public static MCPollMCEventsCodec.ResponseParameters decodeResponse(ClientMessage clientMessage) {
+    /**
+     * List of events.
+     */
+    public static java.util.List<com.hazelcast.internal.management.dto.MCEventDTO> decodeResponse(ClientMessage clientMessage) {
         ClientMessage.ForwardFrameIterator iterator = clientMessage.frameIterator();
-        ResponseParameters response = new ResponseParameters();
         //empty initial frame
         iterator.next();
-        response.events = ListMultiFrameCodec.decode(iterator, MCEventCodec::decode);
-        return response;
+        return ListMultiFrameCodec.decode(iterator, MCEventCodec::decode);
     }
 
 }

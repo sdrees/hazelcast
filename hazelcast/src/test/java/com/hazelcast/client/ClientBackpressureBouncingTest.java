@@ -20,7 +20,7 @@ import com.hazelcast.client.config.ClientConfig;
 import com.hazelcast.client.impl.clientside.HazelcastClientInstanceImpl;
 import com.hazelcast.client.impl.spi.ClientInvocationService;
 import com.hazelcast.client.impl.spi.impl.ClientInvocation;
-import com.hazelcast.client.impl.spi.impl.SmartClientInvocationService;
+import com.hazelcast.client.impl.spi.impl.ClientInvocationServiceImpl;
 import com.hazelcast.client.test.bounce.MultiSocketClientDriverFactory;
 import com.hazelcast.config.Config;
 import com.hazelcast.core.HazelcastInstance;
@@ -31,6 +31,7 @@ import com.hazelcast.test.HazelcastSerialParametersRunnerFactory;
 import com.hazelcast.test.HazelcastTestSupport;
 import com.hazelcast.test.annotation.SlowTest;
 import com.hazelcast.test.bounce.BounceMemberRule;
+import com.hazelcast.test.bounce.BounceTestConfiguration;
 import org.junit.After;
 import org.junit.Rule;
 import org.junit.Test;
@@ -87,6 +88,7 @@ public class ClientBackpressureBouncingTest extends HazelcastTestSupport {
         this.backoff = backoffTimeoutMillis;
         this.bounceMemberRule = BounceMemberRule
                 .with(new Config())
+                .driverType(BounceTestConfiguration.DriverType.CLIENT)
                 .driverFactory(new MultiSocketClientDriverFactory(
                         new ClientConfig()
                                 .setProperty(MAX_CONCURRENT_INVOCATIONS.getName(), valueOf(MAX_CONCURRENT_INVOCATION_CONFIG))
@@ -179,10 +181,9 @@ public class ClientBackpressureBouncingTest extends HazelcastTestSupport {
             try {
                 HazelcastClientInstanceImpl clientImpl = getHazelcastClientInstanceImpl(client);
                 ClientInvocationService invocationService = clientImpl.getInvocationService();
-                SmartClientInvocationService smartInvocationService = (SmartClientInvocationService) invocationService;
-                Field invocationsField = SmartClientInvocationService.class.getSuperclass().getDeclaredField("invocations");
+                Field invocationsField = ClientInvocationServiceImpl.class.getDeclaredField("invocations");
                 invocationsField.setAccessible(true);
-                return (ConcurrentMap<Long, ClientInvocation>) invocationsField.get(smartInvocationService);
+                return (ConcurrentMap<Long, ClientInvocation>) invocationsField.get(invocationService);
             } catch (Exception e) {
                 throw rethrow(e);
             }

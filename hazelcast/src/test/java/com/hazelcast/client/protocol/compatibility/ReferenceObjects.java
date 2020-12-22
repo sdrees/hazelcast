@@ -16,6 +16,7 @@
 
 package com.hazelcast.client.protocol.compatibility;
 
+import com.google.common.collect.ImmutableMap;
 import com.hazelcast.cache.impl.CacheEventData;
 import com.hazelcast.client.impl.client.DistributedObjectInfo;
 import com.hazelcast.client.impl.protocol.codec.builtin.CustomTypeFactory;
@@ -44,7 +45,11 @@ import com.hazelcast.config.MergePolicyConfig;
 import com.hazelcast.config.MerkleTreeConfig;
 import com.hazelcast.config.NearCachePreloaderConfig;
 import com.hazelcast.config.WanReplicationRef;
+import com.hazelcast.cp.CPMember;
+import com.hazelcast.cp.internal.CPMemberInfo;
 import com.hazelcast.cp.internal.RaftGroupId;
+import com.hazelcast.instance.EndpointQualifier;
+import com.hazelcast.instance.ProtocolType;
 import com.hazelcast.internal.cluster.MemberInfo;
 import com.hazelcast.internal.management.dto.ClientBwListEntryDTO;
 import com.hazelcast.internal.management.dto.MCEventDTO;
@@ -53,8 +58,14 @@ import com.hazelcast.internal.serialization.impl.HeapData;
 import com.hazelcast.map.impl.SimpleEntryView;
 import com.hazelcast.map.impl.querycache.event.DefaultQueryCacheEventData;
 import com.hazelcast.map.impl.querycache.event.QueryCacheEventData;
+import com.hazelcast.partition.MigrationState;
+import com.hazelcast.internal.partition.MigrationStateImpl;
 import com.hazelcast.scheduledexecutor.ScheduledTaskHandler;
 import com.hazelcast.scheduledexecutor.impl.ScheduledTaskHandlerImpl;
+import com.hazelcast.sql.SqlColumnMetadata;
+import com.hazelcast.sql.SqlColumnType;
+import com.hazelcast.sql.impl.QueryId;
+import com.hazelcast.sql.impl.client.SqlError;
 import com.hazelcast.transaction.impl.xa.SerializableXID;
 import com.hazelcast.version.MemberVersion;
 
@@ -636,6 +647,9 @@ public class ReferenceObjects {
     public static List<Long> aListOfLongs = Collections.singletonList(aLong);
     public static List<UUID> aListOfUUIDs = Collections.singletonList(aUUID);
     public static Address anAddress;
+    public static CPMember aCpMember;
+    public static List<CPMember> aListOfCpMembers;
+    public static MigrationState aMigrationState = new MigrationStateImpl(aLong, anInt, anInt, aLong);
 
     static {
         try {
@@ -643,6 +657,8 @@ public class ReferenceObjects {
         } catch (UnknownHostException e) {
             e.printStackTrace();
         }
+        aCpMember = new CPMemberInfo(aUUID, anAddress);
+        aListOfCpMembers = Collections.singletonList(aCpMember);
     }
 
     public static List<Map.Entry<UUID, List<Integer>>> aListOfUUIDToListOfIntegers
@@ -767,6 +783,9 @@ public class ReferenceObjects {
     public static List<CacheSimpleEntryListenerConfig> aListOfCacheSimpleEntryListenerConfigs
             = Collections.singletonList(aCacheSimpleEntryListenerConfig);
     public static List<Data> aListOfData = Collections.singletonList(aData);
+    public static List<Collection<Data>> aListOfListOfData = Collections.singletonList(aListOfData);
+    public static Collection<Map.Entry<Data, Collection<Data>>> aListOfDataToListOfData
+            = Collections.singletonList(new AbstractMap.SimpleEntry<>(aData, aListOfData));
     public static List<DistributedObjectInfo> aListOfDistributedObjectInfo = Collections.singletonList(aDistributedObjectInfo);
     public static List<AttributeConfig> aListOfAttributeConfigs = Collections.singletonList(anAttributeConfig);
     public static List<QueryCacheConfigHolder> aListOfQueryCacheConfigHolders = Collections.singletonList(aQueryCacheConfigHolder);
@@ -780,8 +799,15 @@ public class ReferenceObjects {
             aBoolean, aBoolean, aBoolean, aBoolean, aHotRestartConfig, anEventJournalConfig, aString, aListOfData,
             aMergePolicyConfig, aBoolean, aListOfListenerConfigHolders);
     private static MemberVersion aMemberVersion = new MemberVersion(aByte, aByte, aByte);
-    public static Collection<MemberInfo> aListOfMemberInfos = Collections.singletonList(new MemberInfo(anAddress, aUUID, aMapOfStringToString, aBoolean, aMemberVersion));
+    public static Collection<MemberInfo> aListOfMemberInfos = Collections.singletonList(new MemberInfo(anAddress, aUUID, aMapOfStringToString, aBoolean, aMemberVersion,
+            ImmutableMap.of(EndpointQualifier.resolve(ProtocolType.WAN, "localhost"), anAddress)));
+
     public static AnchorDataListHolder anAnchorDataListHolder = new AnchorDataListHolder(aListOfIntegers, aListOfDataToData);
     public static PagingPredicateHolder aPagingPredicateHolder = new PagingPredicateHolder(anAnchorDataListHolder, aData, aData,
             anInt, anInt, aByte, aData);
+
+    public static QueryId anSqlQueryId = new QueryId(aLong, aLong, aLong, aLong);
+    public static SqlColumnMetadata anSqlColumnMetadata = CustomTypeFactory.createSqlColumnMetadata(aString, SqlColumnType.BOOLEAN.getId());
+    public static List<SqlColumnMetadata> aListOfSqlColumnMetadata = Collections.singletonList(anSqlColumnMetadata);
+    public static SqlError anSqlError = new SqlError(anInt, aString, aUUID);
 }

@@ -66,10 +66,12 @@ import com.hazelcast.spi.impl.proxyservice.impl.ProxyServiceImpl;
 import com.hazelcast.spi.impl.servicemanager.ServiceInfo;
 import com.hazelcast.spi.impl.servicemanager.ServiceManager;
 import com.hazelcast.spi.impl.servicemanager.impl.ServiceManagerImpl;
+import com.hazelcast.spi.impl.tenantcontrol.impl.TenantControlServiceImpl;
 import com.hazelcast.spi.merge.SplitBrainMergePolicyProvider;
 import com.hazelcast.spi.properties.ClusterProperty;
 import com.hazelcast.spi.properties.HazelcastProperties;
 import com.hazelcast.splitbrainprotection.impl.SplitBrainProtectionServiceImpl;
+import com.hazelcast.sql.impl.SqlServiceImpl;
 import com.hazelcast.transaction.TransactionManagerService;
 import com.hazelcast.transaction.impl.TransactionManagerServiceImpl;
 import com.hazelcast.version.MemberVersion;
@@ -117,9 +119,11 @@ public class NodeEngineImpl implements NodeEngine {
     private final WanReplicationService wanReplicationService;
     private final Consumer<Packet> packetDispatcher;
     private final SplitBrainProtectionServiceImpl splitBrainProtectionService;
+    private final SqlServiceImpl sqlService;
     private final Diagnostics diagnostics;
     private final SplitBrainMergePolicyProvider splitBrainMergePolicyProvider;
     private final ConcurrencyDetection concurrencyDetection;
+    private final TenantControlServiceImpl tenantControlService;
 
     @SuppressWarnings("checkstyle:executablestatementcount")
     public NodeEngineImpl(Node node) {
@@ -145,20 +149,25 @@ public class NodeEngineImpl implements NodeEngine {
             }
             this.transactionManagerService = new TransactionManagerServiceImpl(this);
             this.wanReplicationService = node.getNodeExtension().createService(WanReplicationService.class);
+            this.sqlService = new SqlServiceImpl(this);
             this.packetDispatcher = new PacketDispatcher(
-                    logger,
-                    operationService.getOperationExecutor(),
-                    operationService.getInboundResponseHandlerSupplier().get(),
-                    operationService.getInvocationMonitor(),
-                    eventService,
-                    getJetPacketConsumer(node.getNodeExtension()));
+                logger,
+                operationService.getOperationExecutor(),
+                operationService.getInboundResponseHandlerSupplier().get(),
+                operationService.getInvocationMonitor(),
+                eventService,
+                getJetPacketConsumer(node.getNodeExtension()),
+                sqlService
+            );
             this.splitBrainProtectionService = new SplitBrainProtectionServiceImpl(this);
             this.diagnostics = newDiagnostics();
             this.splitBrainMergePolicyProvider = new SplitBrainMergePolicyProvider(this);
+            this.tenantControlService = new TenantControlServiceImpl(this);
             serviceManager.registerService(OperationServiceImpl.SERVICE_NAME, operationService);
             serviceManager.registerService(OperationParker.SERVICE_NAME, operationParker);
             serviceManager.registerService(UserCodeDeploymentService.SERVICE_NAME, userCodeDeploymentService);
             serviceManager.registerService(ClusterWideConfigurationService.SERVICE_NAME, configurationService);
+            serviceManager.registerService(TenantControlServiceImpl.SERVICE_NAME, tenantControlService);
         } catch (Throwable e) {
             try {
                 shutdown(true);
@@ -191,11 +200,7 @@ public class NodeEngineImpl implements NodeEngine {
         String addressString = address.getHost().replace(":", "_") + "_" + address.getPort();
         String name = "diagnostics-" + addressString + "-" + currentTimeMillis();
 
-        return new Diagnostics(
-                name,
-                loggingService.getLogger(Diagnostics.class),
-                getHazelcastInstance().getName(),
-                node.getProperties());
+        return new Diagnostics(name, loggingService, getHazelcastInstance().getName(), node.getProperties());
     }
 
     public LoggingService getLoggingService() {
@@ -221,6 +226,7 @@ public class NodeEngineImpl implements NodeEngine {
         proxyService.init();
         operationService.start();
         splitBrainProtectionService.start();
+        sqlService.start();
 
         diagnostics.start();
         node.getNodeExtension().registerPlugins(diagnostics);
@@ -310,6 +316,11 @@ public class NodeEngineImpl implements NodeEngine {
         return proxyService;
     }
 
+    @Override
+    public TenantControlServiceImpl getTenantControlService() {
+        return tenantControlService;
+    }
+
     public OperationParker getOperationParker() {
         return operationParker;
     }
@@ -322,6 +333,11 @@ public class NodeEngineImpl implements NodeEngine {
     @Override
     public SplitBrainProtectionServiceImpl getSplitBrainProtectionService() {
         return splitBrainProtectionService;
+    }
+
+    @Override
+    public SqlServiceImpl getSqlService() {
+        return sqlService;
     }
 
     @Override
@@ -474,6 +490,7 @@ public class NodeEngineImpl implements NodeEngine {
     }
 
     public void reset() {
+        sqlService.reset();
         operationParker.reset();
         operationService.reset();
     }
@@ -481,6 +498,10 @@ public class NodeEngineImpl implements NodeEngine {
     @SuppressWarnings("checkstyle:npathcomplexity")
     public void shutdown(boolean terminate) {
         logger.finest("Shutting down services...");
+        if (sqlService != null) {
+            sqlService.shutdown();
+        }
+
         if (operationParker != null) {
             operationParker.shutdown();
         }

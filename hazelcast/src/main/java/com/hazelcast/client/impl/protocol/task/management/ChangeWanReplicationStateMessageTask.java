@@ -43,10 +43,14 @@ public class ChangeWanReplicationStateMessageTask extends AbstractInvocationMess
 
     @Override
     protected Operation prepareOperation() {
+        WanPublisherState state = WanPublisherState.getByType(parameters.newState);
+        if (state == null) {
+            throw new IllegalArgumentException("Unexpected WAN publisher state = [" + parameters.newState + "]");
+        }
         return new ChangeWanStateOperation(
                 parameters.wanReplicationName,
                 parameters.wanPublisherId,
-                WanPublisherState.getByType(parameters.newState));
+                state);
     }
 
     @Override
@@ -82,5 +86,10 @@ public class ChangeWanReplicationStateMessageTask extends AbstractInvocationMess
     @Override
     public Object[] getParameters() {
         return new Object[] {parameters.wanReplicationName, parameters.wanPublisherId, parameters.newState};
+    }
+
+    @Override
+    public boolean isManagementTask() {
+        return true;
     }
 }

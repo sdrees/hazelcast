@@ -19,13 +19,14 @@ package com.hazelcast.map.impl.operation;
 import com.hazelcast.core.EntryEventType;
 import com.hazelcast.internal.locksupport.LockWaitNotifyKey;
 import com.hazelcast.internal.nio.IOUtil;
+import com.hazelcast.internal.serialization.Data;
 import com.hazelcast.internal.util.UUIDSerializationUtil;
 import com.hazelcast.map.EntryProcessor;
 import com.hazelcast.map.impl.MapDataSerializerHook;
 import com.hazelcast.map.impl.MapService;
 import com.hazelcast.nio.ObjectDataInput;
 import com.hazelcast.nio.ObjectDataOutput;
-import com.hazelcast.internal.serialization.Data;
+import com.hazelcast.nio.serialization.impl.Versioned;
 import com.hazelcast.spi.impl.operationservice.BackupAwareOperation;
 import com.hazelcast.spi.impl.operationservice.Notifier;
 import com.hazelcast.spi.impl.operationservice.Operation;
@@ -42,21 +43,22 @@ import static com.hazelcast.map.impl.operation.EntryOperator.operator;
  * See the javadoc on {@link EntryOperation}
  */
 public class EntryOffloadableSetUnlockOperation extends KeyBasedMapOperation
-        implements BackupAwareOperation, Notifier {
+        implements BackupAwareOperation, Notifier, Versioned {
 
+    protected long begin;
+    protected long newTtl;
+    protected UUID caller;
     protected Data newValue;
     protected Data oldValue;
-    protected UUID caller;
-    protected long begin;
     protected EntryEventType modificationType;
     protected EntryProcessor entryBackupProcessor;
 
     public EntryOffloadableSetUnlockOperation() {
     }
 
-    public EntryOffloadableSetUnlockOperation(String name, EntryEventType modificationType, Data key, Data oldValue,
-                                              Data newValue, UUID caller, long threadId, long begin,
-                                              EntryProcessor entryBackupProcessor) {
+    public EntryOffloadableSetUnlockOperation(String name, EntryEventType modificationType, long newTtl,
+                                              Data key, Data oldValue, Data newValue, UUID caller,
+                                              long threadId, long begin, EntryProcessor entryBackupProcessor) {
         super(name, key, newValue);
         this.newValue = newValue;
         this.oldValue = oldValue;
@@ -65,13 +67,14 @@ public class EntryOffloadableSetUnlockOperation extends KeyBasedMapOperation
         this.modificationType = modificationType;
         this.entryBackupProcessor = entryBackupProcessor;
         this.setThreadId(threadId);
+        this.newTtl = newTtl;
     }
 
     @Override
     protected void runInternal() {
         verifyLock();
         try {
-            operator(this).init(dataKey, oldValue, newValue, null, modificationType, null)
+            operator(this).init(dataKey, oldValue, newValue, null, modificationType, null, newTtl)
                     .doPostOperateOps();
         } finally {
             unlockKey();
@@ -104,7 +107,8 @@ public class EntryOffloadableSetUnlockOperation extends KeyBasedMapOperation
 
     @Override
     public Operation getBackupOperation() {
-        return entryBackupProcessor != null ? new EntryBackupOperation(name, dataKey, entryBackupProcessor) : null;
+        return entryBackupProcessor != null
+                ? new EntryBackupOperation(name, dataKey, entryBackupProcessor) : null;
     }
 
     @Override
@@ -151,18 +155,21 @@ public class EntryOffloadableSetUnlockOperation extends KeyBasedMapOperation
         UUIDSerializationUtil.writeUUID(out, caller);
         out.writeLong(begin);
         out.writeObject(entryBackupProcessor);
+        out.writeLong(newTtl);
     }
 
     @Override
     protected void readInternal(ObjectDataInput in) throws IOException {
         super.readInternal(in);
         String modificationTypeName = in.readUTF();
-        modificationType = modificationTypeName.equals("") ? null : EntryEventType.valueOf(modificationTypeName);
+        modificationType = modificationTypeName.equals("")
+                ? null : EntryEventType.valueOf(modificationTypeName);
         oldValue = IOUtil.readData(in);
         newValue = IOUtil.readData(in);
         caller = UUIDSerializationUtil.readUUID(in);
         begin = in.readLong();
         entryBackupProcessor = in.readObject();
+        newTtl = in.readLong();
     }
 
 }

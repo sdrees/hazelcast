@@ -22,6 +22,7 @@ import com.hazelcast.core.HazelcastInstance;
 import com.hazelcast.core.HazelcastInstanceAware;
 import com.hazelcast.map.IMap;
 import com.hazelcast.partition.PartitionAware;
+import com.hazelcast.scheduledexecutor.AutoDisposableTask;
 import com.hazelcast.scheduledexecutor.IScheduledExecutorService;
 import com.hazelcast.scheduledexecutor.IScheduledFuture;
 import com.hazelcast.scheduledexecutor.NamedTask;
@@ -34,6 +35,8 @@ import java.io.Serializable;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.Callable;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.Semaphore;
 import java.util.concurrent.TimeUnit;
 
 import static java.lang.System.currentTimeMillis;
@@ -116,25 +119,23 @@ public class ScheduledExecutorServiceTestSupport extends HazelcastTestSupport {
 
     static class ICountdownLatchCallableTask implements Callable<Double>, Serializable, HazelcastInstanceAware {
 
-        final String runLatchName;
-        final int sleepPeriod;
+        final String initLatchName;
+        final String waitLatchName;
+        final String doneLatchName;
 
         transient HazelcastInstance instance;
 
-        ICountdownLatchCallableTask(String runLatchName, int sleepPeriod) {
-            this.runLatchName = runLatchName;
-            this.sleepPeriod = sleepPeriod;
+        ICountdownLatchCallableTask(String initLatchName, String waitLatchName, String doneLatchName) {
+            this.initLatchName = initLatchName;
+            this.waitLatchName = waitLatchName;
+            this.doneLatchName = doneLatchName;
         }
 
         @Override
         public Double call() {
-            try {
-                sleep(sleepPeriod);
-            } catch (InterruptedException e) {
-                Thread.interrupted();
-            }
-
-            instance.getCPSubsystem().getCountDownLatch(runLatchName).countDown();
+            instance.getCPSubsystem().getCountDownLatch(initLatchName).countDown();
+            assertOpenEventually(instance.getCPSubsystem().getCountDownLatch(waitLatchName));
+            instance.getCPSubsystem().getCountDownLatch(doneLatchName).countDown();
             return 77 * 2.2;
         }
 
@@ -275,6 +276,42 @@ public class ScheduledExecutorServiceTestSupport extends HazelcastTestSupport {
 
     }
 
+    static class OneSecondSleepingTask implements Runnable, Serializable {
+
+        OneSecondSleepingTask() {
+        }
+
+        @Override
+        public void run() {
+            sleepSeconds(1);
+        }
+
+    }
+
+    static class CountableRunTask implements Runnable, Serializable {
+        private final CountDownLatch progress;
+        private final Semaphore suspend;
+
+        CountableRunTask(CountDownLatch progress, Semaphore suspend) {
+            this.progress = progress;
+            this.suspend = suspend;
+        }
+
+        @Override
+        public void run() {
+            progress.countDown();
+
+            if (progress.getCount() == 0) {
+                try {
+                    suspend.acquire();
+                } catch (InterruptedException e) {
+                    Thread.interrupted();
+                }
+            }
+        }
+
+    }
+
     static class ErroneousCallableTask implements Callable<Double>, Serializable, HazelcastInstanceAware {
 
         private String completionLatchName;
@@ -398,6 +435,29 @@ public class ScheduledExecutorServiceTestSupport extends HazelcastTestSupport {
         @Override
         public Boolean call() {
             return (instance != null);
+        }
+    }
+
+    public static class AutoDisposableCallable implements Callable<Boolean>, AutoDisposableTask {
+
+        @Override
+        public Boolean call() {
+            return true;
+        }
+    }
+
+    public static class NamedCallable implements Callable<Boolean>, NamedTask, Serializable {
+
+        public static final String NAME = "NAMED-CALLABLE";
+
+        @Override
+        public Boolean call() {
+            return true;
+        }
+
+        @Override
+        public String getName() {
+            return NAME;
         }
     }
 

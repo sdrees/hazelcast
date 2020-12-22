@@ -16,37 +16,39 @@
 
 package com.hazelcast.internal.cluster.impl;
 
+import com.hazelcast.auditlog.AuditlogTypeIds;
+import com.hazelcast.cluster.Address;
 import com.hazelcast.cluster.ClusterState;
 import com.hazelcast.cluster.Member;
-import com.hazelcast.internal.hotrestart.InternalHotRestartService;
-import com.hazelcast.instance.BuildInfo;
 import com.hazelcast.cluster.impl.MemberImpl;
+import com.hazelcast.instance.BuildInfo;
 import com.hazelcast.instance.impl.Node;
 import com.hazelcast.instance.impl.NodeExtension;
 import com.hazelcast.internal.cluster.MemberInfo;
 import com.hazelcast.internal.cluster.impl.operations.AuthenticationFailureOp;
 import com.hazelcast.internal.cluster.impl.operations.BeforeJoinCheckFailureOp;
+import com.hazelcast.internal.cluster.impl.operations.ClusterMismatchOp;
 import com.hazelcast.internal.cluster.impl.operations.ConfigMismatchOp;
 import com.hazelcast.internal.cluster.impl.operations.FinalizeJoinOp;
-import com.hazelcast.internal.cluster.impl.operations.ClusterMismatchOp;
 import com.hazelcast.internal.cluster.impl.operations.JoinRequestOp;
 import com.hazelcast.internal.cluster.impl.operations.MasterResponseOp;
 import com.hazelcast.internal.cluster.impl.operations.MembersUpdateOp;
 import com.hazelcast.internal.cluster.impl.operations.OnJoinOp;
 import com.hazelcast.internal.cluster.impl.operations.WhoisMasterOp;
-import com.hazelcast.internal.partition.InternalPartitionService;
-import com.hazelcast.internal.partition.PartitionRuntimeState;
-import com.hazelcast.logging.ILogger;
-import com.hazelcast.cluster.Address;
+import com.hazelcast.internal.hotrestart.InternalHotRestartService;
 import com.hazelcast.internal.nio.Connection;
 import com.hazelcast.internal.nio.Packet;
-import com.hazelcast.security.Credentials;
-import com.hazelcast.spi.impl.operationservice.Operation;
-import com.hazelcast.spi.impl.operationservice.OperationService;
-import com.hazelcast.spi.impl.NodeEngineImpl;
-import com.hazelcast.spi.properties.ClusterProperty;
+import com.hazelcast.internal.server.ServerConnection;
+import com.hazelcast.internal.partition.InternalPartitionService;
+import com.hazelcast.internal.partition.PartitionRuntimeState;
 import com.hazelcast.internal.util.Clock;
 import com.hazelcast.internal.util.UuidUtil;
+import com.hazelcast.logging.ILogger;
+import com.hazelcast.security.Credentials;
+import com.hazelcast.spi.impl.NodeEngineImpl;
+import com.hazelcast.spi.impl.operationservice.Operation;
+import com.hazelcast.spi.impl.operationservice.OperationService;
+import com.hazelcast.spi.properties.ClusterProperty;
 import com.hazelcast.version.MemberVersion;
 import com.hazelcast.version.Version;
 
@@ -149,7 +151,7 @@ public class ClusterJoinManager {
      * @param connection the connection to the joining node
      * @see JoinRequestOp
      */
-    public void handleJoinRequest(JoinRequest joinRequest, Connection connection) {
+    public void handleJoinRequest(JoinRequest joinRequest, ServerConnection connection) {
         if (!ensureNodeIsReady()) {
             return;
         }
@@ -247,7 +249,7 @@ public class ClusterJoinManager {
      * @param joinRequest the join request from a node attempting to join
      * @param connection  the connection of this node to the joining node
      */
-    private void executeJoinRequest(JoinRequest joinRequest, Connection connection) {
+    private void executeJoinRequest(JoinRequest joinRequest, ServerConnection connection) {
         clusterServiceLock.lock();
         try {
             if (checkJoinRequest(joinRequest, connection)) {
@@ -269,7 +271,7 @@ public class ClusterJoinManager {
     }
 
     @SuppressWarnings("checkstyle:npathcomplexity")
-    private boolean checkJoinRequest(JoinRequest joinRequest, Connection connection) {
+    private boolean checkJoinRequest(JoinRequest joinRequest, ServerConnection connection) {
         if (checkIfJoinRequestFromAnExistingMember(joinRequest, connection)) {
             return true;
         }
@@ -372,14 +374,27 @@ public class ClusterJoinManager {
                 throw new SecurityException("Expecting security credentials, but credentials could not be found in join request");
             }
             String endpoint = joinRequest.getAddress().getHost();
+            Boolean passed = Boolean.FALSE;
             try {
                 String remoteClusterName = joinRequest.getConfigCheck().getClusterName();
                 LoginContext loginContext = node.securityContext.createMemberLoginContext(remoteClusterName, credentials,
                         connection);
                 loginContext.login();
+                connection.attributeMap().put(LoginContext.class, loginContext);
+                passed = Boolean.TRUE;
             } catch (LoginException e) {
                 throw new SecurityException(format("Authentication has failed for %s @%s, cause: %s",
                         String.valueOf(credentials), endpoint, e.getMessage()));
+            } finally {
+                Address remoteAddr = connection == null ? null : connection.getRemoteAddress();
+                nodeEngine.getNode().getNodeExtension().getAuditlogService()
+                    .eventBuilder(AuditlogTypeIds.AUTHENTICATION_MEMBER)
+                    .message("Member connection authentication.")
+                    .addParameter("credentials", credentials)
+                    .addParameter("remoteAddress", remoteAddr)
+                    .addParameter("endpoint", endpoint)
+                    .addParameter("passed", passed)
+                    .log();
             }
         }
     }
@@ -445,14 +460,13 @@ public class ClusterJoinManager {
      * Send join request to {@code toAddress}.
      *
      * @param toAddress       the currently known master address.
-     * @param withCredentials use cluster credentials
      * @return {@code true} if join request was sent successfully, otherwise {@code false}.
      */
-    public boolean sendJoinRequest(Address toAddress, boolean withCredentials) {
+    public boolean sendJoinRequest(Address toAddress) {
         if (toAddress == null) {
             toAddress = clusterService.getMasterAddress();
         }
-        JoinRequestOp joinRequest = new JoinRequestOp(node.createJoinRequest(withCredentials));
+        JoinRequestOp joinRequest = new JoinRequestOp(node.createJoinRequest(toAddress));
         return nodeEngine.getOperationService().send(joinRequest, toAddress);
     }
 
@@ -525,11 +539,11 @@ public class ClusterJoinManager {
                 return;
             }
 
-            Connection conn = node.getEndpointManager(MEMBER).getConnection(currentMaster);
+            Connection conn = node.getServer().getConnectionManager(MEMBER).get(currentMaster);
             if (conn != null && conn.isAlive()) {
                 logger.info(format("Ignoring master response %s from %s since this node has an active master %s",
                         masterAddress, callerAddress, currentMaster));
-                sendJoinRequest(currentMaster, true);
+                sendJoinRequest(currentMaster);
             } else {
                 logger.warning(format("Ambiguous master response! Received master response %s from %s. "
                                 + "This node has a master %s, but does not have an active connection to it. "
@@ -544,8 +558,8 @@ public class ClusterJoinManager {
 
     private void setMasterAndJoin(Address masterAddress) {
         clusterService.setMasterAddress(masterAddress);
-        node.getEndpointManager(MEMBER).getOrConnect(masterAddress);
-        if (!sendJoinRequest(masterAddress, true)) {
+        node.getServer().getConnectionManager(MEMBER).getOrConnect(masterAddress);
+        if (!sendJoinRequest(masterAddress)) {
             logger.warning("Could not create connection to possible master " + masterAddress);
         }
     }
@@ -573,7 +587,7 @@ public class ClusterJoinManager {
      * @param connection  the connection to operation caller, to which response will be sent.
      * @see WhoisMasterOp
      */
-    public void answerWhoisMasterQuestion(JoinMessage joinMessage, Connection connection) {
+    public void answerWhoisMasterQuestion(JoinMessage joinMessage, ServerConnection connection) {
         if (!ensureValidConfiguration(joinMessage)) {
             return;
         }
@@ -620,7 +634,7 @@ public class ClusterJoinManager {
         nodeEngine.getOperationService().send(op, target);
     }
 
-    private boolean checkIfJoinRequestFromAnExistingMember(JoinMessage joinMessage, Connection connection) {
+    private boolean checkIfJoinRequestFromAnExistingMember(JoinMessage joinMessage, ServerConnection connection) {
         Address target = joinMessage.getAddress();
         MemberImpl member = clusterService.getMember(target);
         if (member == null) {
@@ -660,12 +674,12 @@ public class ClusterJoinManager {
             logger.warning(msg);
 
             clusterService.suspectMember(member, msg, false);
-            Connection existing = node.getEndpointManager(MEMBER).getConnection(target);
+            ServerConnection existing = node.getServer().getConnectionManager(MEMBER).get(target);
             if (existing != connection) {
                 if (existing != null) {
                     existing.close(msg, null);
                 }
-                node.getEndpointManager(MEMBER).registerConnection(target, connection);
+                node.getServer().getConnectionManager(MEMBER).register(target, connection);
             }
         }
         return true;
@@ -822,7 +836,7 @@ public class ClusterJoinManager {
             return LOCAL_NODE_SHOULD_MERGE;
         }
 
-        logger.info(joinMessage.getAddress() + " should merge to us "
+        logger.info(joinMessage.getAddress() + " should merge to us"
                 + ", both have the same data member count: " + currentDataMemberCount);
         return REMOTE_NODE_SHOULD_MERGE;
     }
@@ -917,7 +931,7 @@ public class ClusterJoinManager {
         String targetAddressStr = "[" + targetAddress.getHost() + "]:" + targetAddress.getPort();
 
         if (thisAddressStr.equals(targetAddressStr)) {
-            throw new IllegalArgumentException("Addresses should be different! This: "
+            throw new IllegalArgumentException("Addresses must be different! This: "
                     + thisAddress + ", Target: " + targetAddress);
         }
 

@@ -25,12 +25,11 @@ import com.hazelcast.internal.partition.impl.MigrationManager;
 import com.hazelcast.internal.partition.service.TestMigrationAwareService;
 import com.hazelcast.spi.impl.SpiDataSerializerHook;
 import com.hazelcast.spi.properties.ClusterProperty;
-import com.hazelcast.test.ChangeLoggingRule;
 import com.hazelcast.test.HazelcastSerialClassRunner;
 import com.hazelcast.test.annotation.ParallelJVMTest;
 import com.hazelcast.test.annotation.QuickTest;
 import org.junit.Before;
-import org.junit.ClassRule;
+import org.junit.Ignore;
 import org.junit.Test;
 import org.junit.experimental.categories.Category;
 import org.junit.runner.RunWith;
@@ -59,18 +58,14 @@ import static com.hazelcast.test.PacketFiltersUtil.rejectOperationsFrom;
 import static com.hazelcast.test.PacketFiltersUtil.resetPacketFiltersFrom;
 import static java.util.Arrays.asList;
 import static java.util.Collections.singletonList;
-import static org.hamcrest.Matchers.greaterThan;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
-import static org.junit.Assert.assertThat;
+import static org.junit.Assert.assertNotEquals;
 import static org.junit.Assert.assertTrue;
 
 @RunWith(HazelcastSerialClassRunner.class)
 @Category({QuickTest.class, ParallelJVMTest.class})
 public class MigrationInvocationsSafetyTest extends PartitionCorrectnessTestSupport {
-
-    @ClassRule
-    public static ChangeLoggingRule changeLoggingRule = new ChangeLoggingRule("log4j2-debug.xml");
 
     @Before
     public void setupParams() {
@@ -95,11 +90,11 @@ public class MigrationInvocationsSafetyTest extends PartitionCorrectnessTestSupp
 
         ensurePartitionsInitialized(initialMaster, slave2, slave3);
 
-        final int initialPartitionStateVersion = getPartitionService(initialMaster).getPartitionStateVersion();
-        assertEquals(initialPartitionStateVersion, getPartitionService(slave2).getPartitionStateVersion());
-        assertEquals(initialPartitionStateVersion, getPartitionService(slave3).getPartitionStateVersion());
-        assertEquals(0, getPartitionService(nextMaster).getPartitionStateVersion());
-        assertEquals(0, getPartitionService(slave1).getPartitionStateVersion());
+        long initialPartitionStateStamp = getPartitionService(initialMaster).getPartitionStateStamp();
+        assertEquals(initialPartitionStateStamp, getPartitionService(slave2).getPartitionStateStamp());
+        assertEquals(initialPartitionStateStamp, getPartitionService(slave3).getPartitionStateStamp());
+        assertEquals(0, getPartitionService(nextMaster).getPartitionStateStamp());
+        assertEquals(0, getPartitionService(slave1).getPartitionStateStamp());
 
         dropOperationsBetween(nextMaster, slave3, F_ID, singletonList(FETCH_PARTITION_STATE));
 
@@ -112,12 +107,12 @@ public class MigrationInvocationsSafetyTest extends PartitionCorrectnessTestSupp
         });
 
         assertTrueEventually(() -> {
-            int nextPartitionStateVersion = getPartitionService(nextMaster).getPartitionStateVersion();
-            assertThat(nextPartitionStateVersion, greaterThan(initialPartitionStateVersion));
+            long nextPartitionStateStamp = getPartitionService(nextMaster).getPartitionStateStamp();
+            assertNotEquals(nextPartitionStateStamp, initialPartitionStateStamp);
 
-            assertEquals(nextPartitionStateVersion, getPartitionService(slave1).getPartitionStateVersion());
-            assertEquals(nextPartitionStateVersion, getPartitionService(slave2).getPartitionStateVersion());
-            assertEquals(nextPartitionStateVersion, getPartitionService(slave3).getPartitionStateVersion());
+            assertEquals(nextPartitionStateStamp, getPartitionService(slave1).getPartitionStateStamp());
+            assertEquals(nextPartitionStateStamp, getPartitionService(slave2).getPartitionStateStamp());
+            assertEquals(nextPartitionStateStamp, getPartitionService(slave3).getPartitionStateStamp());
         });
 
     }
@@ -139,11 +134,11 @@ public class MigrationInvocationsSafetyTest extends PartitionCorrectnessTestSupp
 
         ensurePartitionsInitialized(initialMaster, slave2, slave3);
 
-        final int initialPartitionStateVersion = getPartitionService(initialMaster).getPartitionStateVersion();
-        assertEquals(initialPartitionStateVersion, getPartitionService(slave2).getPartitionStateVersion());
-        assertEquals(initialPartitionStateVersion, getPartitionService(slave3).getPartitionStateVersion());
-        assertEquals(0, getPartitionService(nextMaster).getPartitionStateVersion());
-        assertEquals(0, getPartitionService(slave1).getPartitionStateVersion());
+        long initialPartitionStateStamp = getPartitionService(initialMaster).getPartitionStateStamp();
+        assertEquals(initialPartitionStateStamp, getPartitionService(slave2).getPartitionStateStamp());
+        assertEquals(initialPartitionStateStamp, getPartitionService(slave3).getPartitionStateStamp());
+        assertEquals(0, getPartitionService(nextMaster).getPartitionStateStamp());
+        assertEquals(0, getPartitionService(slave1).getPartitionStateStamp());
 
         dropOperationsBetween(nextMaster, slave3, F_ID, singletonList(FETCH_PARTITION_STATE));
 
@@ -156,11 +151,11 @@ public class MigrationInvocationsSafetyTest extends PartitionCorrectnessTestSupp
         });
 
         assertTrueEventually(() -> {
-            int nextPartitionStateVersion = getPartitionService(nextMaster).getPartitionStateVersion();
-            assertThat(nextPartitionStateVersion, greaterThan(initialPartitionStateVersion));
+            long nextPartitionStateStamp = getPartitionService(nextMaster).getPartitionStateStamp();
+            assertNotEquals(nextPartitionStateStamp, initialPartitionStateStamp);
 
-            assertEquals(nextPartitionStateVersion, getPartitionService(slave1).getPartitionStateVersion());
-            assertEquals(nextPartitionStateVersion, getPartitionService(slave2).getPartitionStateVersion());
+            assertEquals(nextPartitionStateStamp, getPartitionService(slave1).getPartitionStateStamp());
+            assertEquals(nextPartitionStateStamp, getPartitionService(slave2).getPartitionStateStamp());
         });
 
     }
@@ -204,7 +199,11 @@ public class MigrationInvocationsSafetyTest extends PartitionCorrectnessTestSupp
     @Test
     public void migrationCommit_shouldBeRetried_whenTargetNotResponds() throws Exception {
         Config config = getConfig(true, true)
-                .setProperty(ClusterProperty.OPERATION_CALL_TIMEOUT_MILLIS.getName(), "4000");
+                .setProperty(ClusterProperty.OPERATION_CALL_TIMEOUT_MILLIS.getName(), "4000")
+                // Allow single migration per-member.
+                // This is required to be able to block only migration commit invocations,
+                // otherwise we can drop responses of usual migration operations and that breaks the test.
+                .setProperty(ClusterProperty.PARTITION_MAX_PARALLEL_MIGRATIONS.getName(), "1");
 
         HazelcastInstance master = factory.newHazelcastInstance(config);
         HazelcastInstance slave1 = factory.newHazelcastInstance(config);
@@ -237,7 +236,7 @@ public class MigrationInvocationsSafetyTest extends PartitionCorrectnessTestSupp
 
         waitAllForSafeState(master, slave1, slave2, slave3);
 
-        final PartitionTableView masterPartitionTable = getPartitionService(master).createPartitionTableView();
+        PartitionTableView masterPartitionTable = getPartitionService(master).createPartitionTableView();
         assertTrueEventually(() -> {
             assertEquals(masterPartitionTable, getPartitionService(slave1).createPartitionTableView());
             assertEquals(masterPartitionTable, getPartitionService(slave2).createPartitionTableView());
@@ -264,6 +263,12 @@ public class MigrationInvocationsSafetyTest extends PartitionCorrectnessTestSupp
 
             @Override
             public void onMigrationCommit(MigrationParticipant participant, MigrationInfo migrationInfo) {
+                if (getAddress(master).equals(migrationInfo.getSourceAddress())
+                        || migrationInfo.getDestinationNewReplicaIndex() != 0) {
+                    // Skip the migrations which master is the source or can be the source...
+                    // Because we want to block migration commit invocation not the usual migration operations.
+                    return;
+                }
                 if (participant == MigrationParticipant.DESTINATION && committedMigrationInfoRef.compareAndSet(null, migrationInfo)) {
                     dropOperationsBetween(destination, master, SpiDataSerializerHook.F_ID, singletonList(NORMAL_RESPONSE));
                 }
@@ -272,6 +277,7 @@ public class MigrationInvocationsSafetyTest extends PartitionCorrectnessTestSupp
     }
 
     @Test
+    @Ignore("https://github.com/hazelcast/hazelcast/issues/12788")
     public void migrationCommit_shouldRollback_whenTargetCrashes() throws Exception {
         Config config = getConfig(true, true)
                 .setProperty(ClusterProperty.OPERATION_CALL_TIMEOUT_MILLIS.getName(), "4000");
@@ -306,13 +312,13 @@ public class MigrationInvocationsSafetyTest extends PartitionCorrectnessTestSupp
 
         waitAllForSafeState(master, slave1, slave2);
 
-        final PartitionTableView masterPartitionTable = getPartitionService(master).createPartitionTableView();
+        PartitionTableView masterPartitionTable = getPartitionService(master).createPartitionTableView();
         assertTrueEventually(() -> {
             assertEquals(masterPartitionTable, getPartitionService(slave1).createPartitionTableView());
             assertEquals(masterPartitionTable, getPartitionService(slave2).createPartitionTableView());
         });
 
-        assertSizeAndData();
+        assertSizeAndDataEventually();
 
         assertNoDuplicateMigrations(master);
         assertNoDuplicateMigrations(slave1);
@@ -353,7 +359,7 @@ public class MigrationInvocationsSafetyTest extends PartitionCorrectnessTestSupp
 
         waitAllForSafeState(master, slave1, slave2);
 
-        final PartitionTableView masterPartitionTable = getPartitionService(master).createPartitionTableView();
+        PartitionTableView masterPartitionTable = getPartitionService(master).createPartitionTableView();
         assertTrueEventually(() -> {
             assertEquals(masterPartitionTable, getPartitionService(slave1).createPartitionTableView());
             assertEquals(masterPartitionTable, getPartitionService(slave2).createPartitionTableView());
@@ -400,7 +406,7 @@ public class MigrationInvocationsSafetyTest extends PartitionCorrectnessTestSupp
 
         waitAllForSafeState(master, slave1);
 
-        final PartitionTableView masterPartitionTable = getPartitionService(master).createPartitionTableView();
+        PartitionTableView masterPartitionTable = getPartitionService(master).createPartitionTableView();
         assertTrueEventually(() -> assertEquals(masterPartitionTable, getPartitionService(slave1).createPartitionTableView()));
 
         assertSizeAndData();
@@ -448,11 +454,11 @@ public class MigrationInvocationsSafetyTest extends PartitionCorrectnessTestSupp
     private static void ensurePartitionsInitialized(HazelcastInstance... instances) {
         warmUpPartitions(instances);
         for (HazelcastInstance instance : instances) {
-            assertPartitionStateVersionInitialized(instance);
+            assertPartitionStateInitialized(instance);
         }
     }
 
-    private static void assertPartitionStateVersionInitialized(HazelcastInstance instance) {
-        assertTrueEventually(() -> assertThat(getPartitionService(instance).getPartitionStateVersion(), greaterThan(0)));
+    private static void assertPartitionStateInitialized(HazelcastInstance instance) {
+        assertTrueEventually(() -> assertTrue(getPartitionServiceImpl(instance).getPartitionStateManager().isInitialized()));
     }
 }

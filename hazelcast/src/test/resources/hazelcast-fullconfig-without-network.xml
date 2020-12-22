@@ -44,7 +44,12 @@
     <cluster-name>my-cluster</cluster-name>
     <license-key>HAZELCAST_ENTERPRISE_LICENSE_KEY</license-key>
     <instance-name>dummy</instance-name>
-    <management-center scripting-enabled="false" />
+    <management-center scripting-enabled="false">
+        <trusted-interfaces>
+            <interface>10.10.1.*</interface>
+            <interface>10.10.2.*</interface>
+        </trusted-interfaces>
+    </management-center>
 
     <properties>
         <property name="foo">bar</property>
@@ -87,12 +92,14 @@
                 <zones>us-east1-b,us-east1-c</zones>
             </gcp>
             <azure enabled="false">
+                <instance-metadata-available>false</instance-metadata-available>
                 <client-id>CLIENT_ID</client-id>
                 <client-secret>CLIENT_SECRET</client-secret>
                 <tenant-id>TENANT_ID</tenant-id>
                 <subscription-id>SUB_ID</subscription-id>
-                <cluster-id>HZLCAST001</cluster-id>
-                <group-name>RESOURCE-GROUP-NAME</group-name>
+                <resource-group>RESOURCE-GROUP-NAME</resource-group>
+                <scale-set>SCALE-SET-NAME</scale-set>
+                <tag>TAG-NAME=HZLCAST001</tag>
             </azure>
             <kubernetes enabled="false">
                 <namespace>MY-KUBERNETES-NAMESPACE</namespace>
@@ -145,12 +152,14 @@
         <split-brain-protection-ref>splitBrainProtectionRuleWithThreeMembers</split-brain-protection-ref>
     </executor-service>
     <durable-executor-service name="dummy">
+        <statistics-enabled>false</statistics-enabled>
         <pool-size>10</pool-size>
         <durability>2</durability>
         <capacity>10</capacity>
         <split-brain-protection-ref>splitBrainProtectionRuleWithThreeMembers</split-brain-protection-ref>
     </durable-executor-service>
     <scheduled-executor-service name="dummy">
+        <statistics-enabled>false</statistics-enabled>
         <pool-size>10</pool-size>
         <durability>2</durability>
         <capacity>50</capacity>
@@ -192,6 +201,7 @@
 
         <split-brain-protection-ref>splitBrainProtectionRuleWithThreeMembers</split-brain-protection-ref>
         <merge-policy batch-size="100">PutIfAbsentMergePolicy</merge-policy>
+        <priority-comparator-class-name>com.hazelcast.collection.impl.queue.model.PriorityElementComparator</priority-comparator-class-name>
     </queue>
 
     <map name="default">
@@ -597,6 +607,12 @@
         <min-block-size>123</min-block-size>
         <page-size>123</page-size>
         <metadata-space-percentage>12.5</metadata-space-percentage>
+        <persistent-memory enabled="true" mode="MOUNTED">
+            <directories>
+                <directory numa-node="0">/mnt/pmem0</directory>
+                <directory numa-node="1">/mnt/pmem1</directory>
+            </directories>
+        </persistent-memory>
     </native-memory>
 
     <security enabled="false">
@@ -630,6 +646,122 @@
                         <login-module class-name="com.hazelcast.examples.MyRequiredLoginModule" usage="REQUIRED">
                             <properties>
                                 <property name="property">value</property>
+                            </properties>
+                        </login-module>
+                    </jaas>
+                </authentication>
+            </realm>
+            <realm name="ldapRealm">
+                <authentication>
+                    <ldap>
+                        <url>ldap://ldap.my-company.example</url>
+                        <socket-factory-class-name>socketFactoryClassName</socket-factory-class-name>
+                        <parse-dn>true</parse-dn>
+                        <role-context>roleContext</role-context>
+                        <role-filter>roleFilter</role-filter>
+                        <role-mapping-attribute>roleMappingAttribute</role-mapping-attribute>
+                        <role-mapping-mode>reverse</role-mapping-mode>
+                        <role-name-attribute>roleNameAttribute</role-name-attribute>
+                        <role-recursion-max-depth>25</role-recursion-max-depth>
+                        <role-search-scope>object</role-search-scope>
+                        <user-name-attribute>userNameAttribute</user-name-attribute>
+                        <system-user-dn>systemUserDn</system-user-dn>
+                        <system-user-password>systemUserPassword</system-user-password>
+                        <system-authentication>simple</system-authentication>
+                        <security-realm>realmName</security-realm>
+                        <password-attribute>passwordAttribute</password-attribute>
+                        <user-context>userContext</user-context>
+                        <user-filter>userFilter</user-filter>
+                        <user-search-scope>one-level</user-search-scope>
+                    </ldap>
+                </authentication>
+            </realm>
+            <realm name="tlsRealm">
+                <authentication>
+                    <tls roleAttribute="cn"/>
+                </authentication>
+            </realm>
+            <realm name="usernamePasswordIdentityRealm">
+                <identity>
+                    <username-password username="user" password="Hazelcast" />
+                </identity>
+            </realm>
+            <realm name="tokenIdentityRealm">
+                <identity>
+                    <token encoding="base64">SGF6ZWxjYXN0</token>
+                </identity>
+            </realm>
+            <realm name="kerberosRealm">
+                <authentication>
+                    <kerberos>
+                        <skip-role>true</skip-role>
+                        <relax-flags-check>true</relax-flags-check>
+                        <use-name-without-realm>true</use-name-without-realm>
+                        <security-realm>krb5Acceptor</security-realm>
+                        <ldap>
+                            <url>ldap://127.0.0.1/</url>
+                            <system-authentication>GSSAPI</system-authentication>
+                            <security-realm>krb5Initiator</security-realm>
+                            <skip-authentication>true</skip-authentication>
+                            <user-filter>(krb5PrincipalName={login})</user-filter>
+                            <role-mapping-attribute>cn</role-mapping-attribute>
+                        </ldap>
+                    </kerberos>
+                </authentication>
+                <identity>
+                    <kerberos>
+                        <realm>HAZELCAST.COM</realm>
+                        <security-realm>krb5Initiator</security-realm>
+                        <service-name-prefix>hz/</service-name-prefix>
+                        <use-canonical-hostname>true</use-canonical-hostname>
+                        <spn>hz/127.0.0.1@HAZELCAST.COM</spn>
+                    </kerberos>
+                </identity>
+            </realm>
+            <realm name="simpleKerberosRealm">
+                <authentication>
+                    <kerberos>
+                        <principal>hz/127.0.0.1@HAZELCAST.COM</principal>
+                        <keytab-file>/opt/localhost.keytab</keytab-file>
+                    </kerberos>
+                </authentication>
+                <identity>
+                    <kerberos>
+                        <realm>HAZELCAST.COM</realm>
+                        <principal>hz/127.0.0.1@HAZELCAST.COM</principal>
+                        <keytab-file>/opt/localhost.keytab</keytab-file>
+                    </kerberos>
+                </identity>
+            </realm>
+            <realm name="krb5Acceptor">
+                <authentication>
+                    <jaas>
+                        <login-module class-name="com.sun.security.auth.module.Krb5LoginModule" usage="REQUIRED">
+                            <properties>
+                                <property name="isInitiator">false</property>
+                                <property name="useTicketCache">false</property>
+                                <property name="doNotPrompt">true</property>
+                                <property name="useKeyTab">true</property>
+                                <property name="storeKey">true</property>
+                                <property name="principal">hz/127.0.0.1@HAZELCAST.COM</property>
+                                <property name="keyTab">/opt/hz-localhost.keytab</property>
+                            </properties>
+                        </login-module>
+                    </jaas>
+                </authentication>
+            </realm>
+            <realm name="krb5Initiator">
+                <authentication>
+                    <jaas>
+                        <login-module class-name="com.sun.security.auth.module.Krb5LoginModule" usage="REQUIRED">
+                            <properties>
+                                <property name="isInitiator">true</property>
+                                <property name="useTicketCache">false</property>
+                                <property name="doNotPrompt">true</property>
+                                <property name="useKeyTab">true</property>
+                                <property name="storeKey">true</property>
+                                <property name="principal">hz/127.0.0.1@HAZELCAST.COM</property>
+                                <property name="keyTab">/opt/hz-localhost.keytab</property>
                             </properties>
                         </login-module>
                     </jaas>
@@ -752,6 +884,21 @@
                     <action>all</action>
                 </actions>
             </pn-counter-permission>
+            <ring-buffer-permission name="*">
+                <actions>
+                    <action>all</action>
+                </actions>
+            </ring-buffer-permission>
+            <reliable-topic-permission name="*">
+                <actions>
+                    <action>all</action>
+                </actions>
+            </reliable-topic-permission>
+            <replicatedmap-permission name="*">
+                <actions>
+                    <action>all</action>
+                </actions>
+            </replicatedmap-permission>
         </client-permissions>
         <client-block-unmapped-actions>true</client-block-unmapped-actions>
     </security>
@@ -786,13 +933,14 @@
     <split-brain-protection enabled="true" name="probabilistic-split-brain-protection">
         <minimum-cluster-size>3</minimum-cluster-size>
         <protect-on>READ_WRITE</protect-on>
-        <probabilistic-split-brain-protection acceptable-heartbeat-pause-millis="100" max-sample-size="20" suspicion-threshold="10" />
+        <probabilistic-split-brain-protection acceptable-heartbeat-pause-millis="100" max-sample-size="20"
+                                              suspicion-threshold="10"/>
     </split-brain-protection>
 
     <split-brain-protection enabled="true" name="recently-active-split-brain-protection">
         <minimum-cluster-size>4</minimum-cluster-size>
         <protect-on>READ_WRITE</protect-on>
-        <recently-active-split-brain-protection heartbeat-tolerance-millis="60000" />
+        <recently-active-split-brain-protection heartbeat-tolerance-millis="60000"/>
     </split-brain-protection>
 
     <hot-restart-persistence enabled="false">
@@ -847,6 +995,15 @@
         </locks>
     </cp-subsystem>
 
+    <auditlog enabled="false">
+        <factory-class-name>com.acme.AuditlogToSyslogFactory</factory-class-name>
+        <properties>
+            <property name="host">syslogserver.acme.com</property>
+            <property name="port">514</property>
+            <property name="type">tcp</property>
+        </properties>
+    </auditlog>
+
     <metrics enabled="false">
         <management-center enabled="false">
             <retention-seconds>42</retention-seconds>
@@ -854,4 +1011,14 @@
         <jmx enabled="false"/>
         <collection-frequency-seconds>24</collection-frequency-seconds>
     </metrics>
+
+    <instance-tracking enabled="false">
+
+    </instance-tracking>
+
+    <sql>
+        <executor-pool-size>16</executor-pool-size>
+        <operation-pool-size>8</operation-pool-size>
+        <statement-timeout-millis>0</statement-timeout-millis>
+    </sql>
 </hazelcast>

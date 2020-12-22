@@ -28,11 +28,15 @@ import com.hazelcast.config.IndexType;
 import com.hazelcast.config.MerkleTreeConfig;
 import com.hazelcast.config.NearCachePreloaderConfig;
 import com.hazelcast.core.HazelcastException;
+import com.hazelcast.instance.EndpointQualifier;
+import com.hazelcast.instance.ProtocolType;
 import com.hazelcast.internal.management.dto.ClientBwListEntryDTO;
 import com.hazelcast.map.impl.SimpleEntryView;
 import com.hazelcast.map.impl.querycache.event.DefaultQueryCacheEventData;
 import com.hazelcast.cluster.Address;
 import com.hazelcast.internal.serialization.Data;
+import com.hazelcast.sql.SqlColumnMetadata;
+import com.hazelcast.sql.SqlColumnType;
 
 import java.net.UnknownHostException;
 import java.util.List;
@@ -42,6 +46,7 @@ import static com.hazelcast.config.CacheSimpleConfig.ExpiryPolicyFactoryConfig.T
 import static com.hazelcast.config.CacheSimpleConfig.ExpiryPolicyFactoryConfig.TimedExpiryPolicyFactoryConfig.ExpiryPolicyType;
 import static com.hazelcast.config.CacheSimpleConfig.ExpiryPolicyFactoryConfig.DurationConfig;
 
+@SuppressWarnings("checkstyle:ClassDataAbstractionCoupling")
 public final class CustomTypeFactory {
 
     private CustomTypeFactory() {
@@ -186,5 +191,23 @@ public final class CustomTypeFactory {
             throw new HazelcastException("Unexpected client B/W list entry type = [" + type + "]");
         }
         return new ClientBwListEntryDTO(entryType, value);
+    }
+
+    public static EndpointQualifier createEndpointQualifier(int type, String identifier) {
+        ProtocolType protocolType = ProtocolType.getById(type);
+        if (protocolType == null) {
+            throw new HazelcastException("Unexpected protocol type = [" + type + "]");
+        }
+        return EndpointQualifier.resolve(protocolType, identifier);
+    }
+
+    public static SqlColumnMetadata createSqlColumnMetadata(String name, int type) {
+        SqlColumnType sqlColumnType = SqlColumnType.getById(type);
+
+        if (sqlColumnType == null) {
+            throw new HazelcastException("Unexpected SQL column type = [" + type + "]");
+        }
+
+        return new SqlColumnMetadata(name, sqlColumnType);
     }
 }

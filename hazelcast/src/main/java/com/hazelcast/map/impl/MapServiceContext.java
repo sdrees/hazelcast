@@ -22,6 +22,7 @@ import com.hazelcast.config.MapConfig;
 import com.hazelcast.config.PartitioningStrategyConfig;
 import com.hazelcast.internal.eviction.ExpirationManager;
 import com.hazelcast.internal.monitor.impl.LocalMapStatsImpl;
+import com.hazelcast.internal.serialization.Data;
 import com.hazelcast.internal.util.collection.PartitionIdSet;
 import com.hazelcast.internal.util.comparators.ValueComparator;
 import com.hazelcast.map.impl.event.MapEventPublisher;
@@ -35,7 +36,6 @@ import com.hazelcast.map.impl.query.QueryRunner;
 import com.hazelcast.map.impl.query.ResultProcessorRegistry;
 import com.hazelcast.map.impl.querycache.QueryCacheContext;
 import com.hazelcast.map.impl.recordstore.RecordStore;
-import com.hazelcast.internal.serialization.Data;
 import com.hazelcast.partition.PartitioningStrategy;
 import com.hazelcast.query.impl.IndexCopyBehavior;
 import com.hazelcast.query.impl.IndexProvider;
@@ -48,6 +48,7 @@ import com.hazelcast.spi.impl.operationservice.Operation;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.Semaphore;
 import java.util.function.Predicate;
 
 /**
@@ -133,12 +134,13 @@ public interface MapServiceContext extends MapServiceContextInterceptorSupport,
 
     RecordStore getExistingRecordStore(int partitionId, String mapName);
 
-    PartitionIdSet getOwnedPartitions();
-
     /**
-     * Reloads the cached collection of partitions owned by this node.
+     * Returns cached cached collection of owned partitions,
+     * When it is null, reloads and caches it again.
      */
-    void reloadOwnedPartitions();
+    PartitionIdSet getOrInitCachedMemberPartitions();
+
+    void nullifyOwnedPartitions();
 
     ExpirationManager getExpirationManager();
 
@@ -192,7 +194,13 @@ public interface MapServiceContext extends MapServiceContextInterceptorSupport,
 
     IndexCopyBehavior getIndexCopyBehavior();
 
+    boolean globalIndexEnabled();
+
     ValueComparator getValueComparatorOf(InMemoryFormat inMemoryFormat);
 
     NodeWideUsedCapacityCounter getNodeWideUsedCapacityCounter();
+
+    ExecutorStats getOffloadedEntryProcessorExecutorStats();
+
+    Semaphore getNodeWideLoadedKeyLimiter();
 }

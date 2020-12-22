@@ -131,7 +131,13 @@ public interface IPartitionService extends CoreService {
 
     UUID addMigrationListener(MigrationListener migrationListener);
 
+    CompletableFuture<UUID> addMigrationListenerAsync(MigrationListener migrationListener);
+
+    UUID addLocalMigrationListener(MigrationListener migrationListener);
+
     boolean removeMigrationListener(UUID registrationId);
+
+    CompletableFuture<Boolean> removeMigrationListenerAsync(UUID registrationId);
 
     UUID addPartitionLostListener(PartitionLostListener partitionLostListener);
 
@@ -164,7 +170,10 @@ public interface IPartitionService extends CoreService {
      */
     int getMaxAllowedBackupCount();
 
-    int getPartitionStateVersion();
+    /**
+     * Returns stamp of the current partition state.
+     */
+    long getPartitionStateStamp();
 
     /**
      * Checks if there are any cluster-wide migrations.

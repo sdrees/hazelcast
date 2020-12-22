@@ -115,10 +115,10 @@ public final class SerializationUtil {
         throw new HazelcastSerializationException("Failed to serialize '" + clazz + '\'', e);
     }
 
-    static SerializerAdapter createSerializerAdapter(Serializer serializer, InternalSerializationService serializationService) {
+    public static SerializerAdapter createSerializerAdapter(Serializer serializer) {
         final SerializerAdapter s;
         if (serializer instanceof StreamSerializer) {
-            s = new StreamSerializerAdapter(serializationService, (StreamSerializer) serializer);
+            s = new StreamSerializerAdapter((StreamSerializer) serializer);
         } else if (serializer instanceof ByteArraySerializer) {
             s = new ByteArraySerializerAdapter((ByteArraySerializer) serializer);
         } else {
@@ -194,11 +194,16 @@ public final class SerializationUtil {
     }
 
     public static <K, V> void writeMap(@Nonnull Map<K, V> map, ObjectDataOutput out) throws IOException {
-        out.writeInt(map.size());
+        int size = map.size();
+        out.writeInt(size);
+
+        int k = 0;
         for (Map.Entry<K, V> entry : map.entrySet()) {
             out.writeObject(entry.getKey());
             out.writeObject(entry.getValue());
+            k++;
         }
+        assert size == k : "Map has been updated during serialization! Initial size: " + size + ", written size: " + k;
     }
 
     /**
@@ -277,10 +282,15 @@ public final class SerializationUtil {
      * @throws IOException when an error occurs while writing to the output
      */
     public static <T> void writeCollection(Collection<T> items, ObjectDataOutput out) throws IOException {
-        out.writeInt(items.size());
+        int size = items.size();
+        out.writeInt(size);
+
+        int k = 0;
         for (T item : items) {
             out.writeObject(item);
+            k++;
         }
+        assert size == k : "Collection has been updated during serialization! Initial size: " + size + ", written size: " + k;
     }
 
     /**
@@ -396,6 +406,22 @@ public final class SerializationUtil {
             result.add(in.readInt());
         }
         return result;
+    }
+
+    public static boolean isClassStaticAndSerializable(Object object) {
+        Class clazz = object.getClass();
+        boolean isStatic = !clazz.isSynthetic() && !clazz.isAnonymousClass() && !clazz.isLocalClass();
+        if (!isStatic) {
+            return false;
+        }
+
+        try {
+            checkSerializable(object, "object");
+        } catch (Throwable t) {
+            return false;
+        }
+
+        return true;
     }
 
     private static class NullOutputStream extends OutputStream {

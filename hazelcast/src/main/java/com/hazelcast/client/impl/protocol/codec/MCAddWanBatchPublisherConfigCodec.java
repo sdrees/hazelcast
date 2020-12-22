@@ -36,7 +36,7 @@ import static com.hazelcast.client.impl.protocol.codec.builtin.FixedSizeTypesCod
 /**
  * Add a new WAN batch publisher configuration
  */
-@Generated("8b084e36fb19eec8062549b831c338d1")
+@Generated("ad64dbf4eb12e78cf40ae4777e4e86b8")
 public final class MCAddWanBatchPublisherConfigCodec {
     //hex: 0x201500
     public static final int REQUEST_MESSAGE_TYPE = 2102528;
@@ -170,7 +170,6 @@ public final class MCAddWanBatchPublisherConfigCodec {
          */
         public java.util.List<java.lang.String> ignoredPublisherIds;
     }
-
     public static ClientMessage encodeResponse(java.util.Collection<java.lang.String> addedPublisherIds, java.util.Collection<java.lang.String> ignoredPublisherIds) {
         ClientMessage clientMessage = ClientMessage.createForEncode();
         ClientMessage.Frame initialFrame = new ClientMessage.Frame(new byte[RESPONSE_INITIAL_FRAME_SIZE], UNFRAGMENTED_MESSAGE);

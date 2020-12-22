@@ -16,12 +16,18 @@
 
 package com.hazelcast.instance.impl;
 
+import com.hazelcast.auditlog.AuditlogService;
+import com.hazelcast.auditlog.impl.NoOpAuditlogService;
 import com.hazelcast.cache.impl.CacheService;
 import com.hazelcast.cache.impl.ICacheService;
 import com.hazelcast.client.impl.ClusterViewListenerService;
 import com.hazelcast.cluster.ClusterState;
+import com.hazelcast.config.AuditlogConfig;
 import com.hazelcast.config.Config;
 import com.hazelcast.config.HotRestartPersistenceConfig;
+import com.hazelcast.config.InstanceTrackingConfig;
+import com.hazelcast.config.InstanceTrackingConfig.InstanceMode;
+import com.hazelcast.config.InstanceTrackingConfig.InstanceProductName;
 import com.hazelcast.config.SecurityConfig;
 import com.hazelcast.config.SerializationConfig;
 import com.hazelcast.config.SymmetricEncryptionConfig;
@@ -36,8 +42,6 @@ import com.hazelcast.instance.BuildInfoProvider;
 import com.hazelcast.instance.EndpointQualifier;
 import com.hazelcast.internal.ascii.TextCommandService;
 import com.hazelcast.internal.ascii.TextCommandServiceImpl;
-import com.hazelcast.internal.auditlog.AuditlogService;
-import com.hazelcast.internal.auditlog.impl.NoOpAuditlogService;
 import com.hazelcast.internal.cluster.ClusterStateListener;
 import com.hazelcast.internal.cluster.ClusterVersionListener;
 import com.hazelcast.internal.cluster.impl.JoinMessage;
@@ -46,12 +50,14 @@ import com.hazelcast.internal.diagnostics.BuildInfoPlugin;
 import com.hazelcast.internal.diagnostics.ConfigPropertiesPlugin;
 import com.hazelcast.internal.diagnostics.Diagnostics;
 import com.hazelcast.internal.diagnostics.EventQueuePlugin;
-import com.hazelcast.internal.diagnostics.InvocationPlugin;
+import com.hazelcast.internal.diagnostics.InvocationProfilerPlugin;
+import com.hazelcast.internal.diagnostics.InvocationSamplePlugin;
 import com.hazelcast.internal.diagnostics.MemberHazelcastInstanceInfoPlugin;
 import com.hazelcast.internal.diagnostics.MemberHeartbeatPlugin;
 import com.hazelcast.internal.diagnostics.MetricsPlugin;
 import com.hazelcast.internal.diagnostics.NetworkingImbalancePlugin;
 import com.hazelcast.internal.diagnostics.OperationHeartbeatPlugin;
+import com.hazelcast.internal.diagnostics.OperationProfilerPlugin;
 import com.hazelcast.internal.diagnostics.OperationThreadSamplerPlugin;
 import com.hazelcast.internal.diagnostics.OverloadedConnectionsPlugin;
 import com.hazelcast.internal.diagnostics.PendingInvocationsPlugin;
@@ -68,21 +74,23 @@ import com.hazelcast.internal.jmx.ManagementService;
 import com.hazelcast.internal.management.TimedMemberStateFactory;
 import com.hazelcast.internal.memory.DefaultMemoryStats;
 import com.hazelcast.internal.memory.MemoryStats;
-import com.hazelcast.internal.networking.ChannelInitializerProvider;
+import com.hazelcast.internal.networking.ChannelInitializer;
 import com.hazelcast.internal.networking.InboundHandler;
 import com.hazelcast.internal.networking.OutboundHandler;
 import com.hazelcast.internal.nio.ClassLoaderUtil;
-import com.hazelcast.internal.nio.IOService;
-import com.hazelcast.internal.nio.tcp.DefaultChannelInitializerProvider;
-import com.hazelcast.internal.nio.tcp.PacketDecoder;
-import com.hazelcast.internal.nio.tcp.PacketEncoder;
-import com.hazelcast.internal.nio.tcp.TcpIpConnection;
 import com.hazelcast.internal.serialization.InternalSerializationService;
 import com.hazelcast.internal.serialization.SerializationServiceBuilder;
 import com.hazelcast.internal.serialization.impl.DefaultSerializationServiceBuilder;
+import com.hazelcast.internal.server.ServerConnection;
+import com.hazelcast.internal.server.ServerContext;
+import com.hazelcast.internal.server.tcp.ChannelInitializerFunction;
+import com.hazelcast.internal.server.tcp.PacketDecoder;
+import com.hazelcast.internal.server.tcp.PacketEncoder;
 import com.hazelcast.internal.util.ByteArrayProcessor;
 import com.hazelcast.internal.util.ConstructorFunction;
 import com.hazelcast.internal.util.ExceptionUtil;
+import com.hazelcast.internal.util.JVMUtil;
+import com.hazelcast.internal.util.MapUtil;
 import com.hazelcast.internal.util.PhoneHome;
 import com.hazelcast.internal.util.Preconditions;
 import com.hazelcast.internal.util.UuidUtil;
@@ -108,9 +116,17 @@ import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.function.Function;
 import java.util.function.Supplier;
 
 import static com.hazelcast.config.ConfigAccessor.getActiveMemberNetworkConfig;
+import static com.hazelcast.config.InstanceTrackingConfig.InstanceTrackingProperties.LICENSED;
+import static com.hazelcast.config.InstanceTrackingConfig.InstanceTrackingProperties.MODE;
+import static com.hazelcast.config.InstanceTrackingConfig.InstanceTrackingProperties.PID;
+import static com.hazelcast.config.InstanceTrackingConfig.InstanceTrackingProperties.PRODUCT;
+import static com.hazelcast.config.InstanceTrackingConfig.InstanceTrackingProperties.START_TIMESTAMP;
+import static com.hazelcast.config.InstanceTrackingConfig.InstanceTrackingProperties.VERSION;
+import static com.hazelcast.internal.util.InstanceTrackingUtil.writeInstanceTrackingFile;
 import static com.hazelcast.map.impl.MapServiceConstructor.getDefaultMapServiceConstructor;
 
 @SuppressWarnings({"checkstyle:methodcount", "checkstyle:classfanoutcomplexity", "checkstyle:classdataabstractioncoupling"})
@@ -163,6 +179,12 @@ public class DefaultNodeExtension implements NodeExtension {
                 throw new IllegalStateException("Symmetric Encryption requires Hazelcast Enterprise Edition");
             }
         }
+        AuditlogConfig auditlogConfig = node.getConfig().getAuditlogConfig();
+        if (auditlogConfig != null && auditlogConfig.isEnabled()) {
+            if (!BuildInfoProvider.getBuildInfo().isEnterprise()) {
+                throw new IllegalStateException("Auditlog requires Hazelcast Enterprise Edition");
+            }
+        }
     }
 
     @Override
@@ -177,6 +199,34 @@ public class DefaultNodeExtension implements NodeExtension {
 
         String build = constructBuildString(buildInfo);
         printNodeInfoInternal(buildInfo, build);
+    }
+
+    @Override
+    public void logInstanceTrackingMetadata() {
+        InstanceTrackingConfig trackingConfig = node.getConfig().getInstanceTrackingConfig();
+        if (trackingConfig.isEnabled()) {
+            writeInstanceTrackingFile(trackingConfig.getFileName(), trackingConfig.getFormatPattern(),
+                    getTrackingFileProperties(node.getBuildInfo()), systemLogger);
+        }
+    }
+
+    /**
+     * Returns a map with supported instance tracking properties.
+     *
+     * @param buildInfo this node's build information
+     */
+    @SuppressWarnings("checkstyle:magicnumber")
+    protected Map<String, Object> getTrackingFileProperties(BuildInfo buildInfo) {
+        Map<String, Object> props = MapUtil.createHashMap(6);
+        props.put(PRODUCT.getPropertyName(), InstanceProductName.HAZELCAST.getProductName());
+        props.put(VERSION.getPropertyName(), buildInfo.getVersion());
+        props.put(MODE.getPropertyName(), Boolean.getBoolean("hazelcast.tracking.server")
+                ? InstanceMode.SERVER.getModeName()
+                : InstanceMode.EMBEDDED.getModeName());
+        props.put(START_TIMESTAMP.getPropertyName(), System.currentTimeMillis());
+        props.put(LICENSED.getPropertyName(), 0);
+        props.put(PID.getPropertyName(), JVMUtil.getPid());
+        return props;
     }
 
     protected void printBannersBeforeNodeInfo() {
@@ -194,7 +244,6 @@ public class DefaultNodeExtension implements NodeExtension {
     private void printNodeInfoInternal(BuildInfo buildInfo, String build) {
         systemLogger.info(getEditionString() + " " + buildInfo.getVersion()
                 + " (" + build + ") starting at " + node.getThisAddress());
-        systemLogger.info("Copyright (c) 2008-2020, Hazelcast, Inc. All Rights Reserved.");
         systemLogger.fine("Configured Hazelcast Serialization version: " + buildInfo.getSerializationVersion());
     }
 
@@ -302,7 +351,7 @@ public class DefaultNodeExtension implements NodeExtension {
 
     @Override
     public InboundHandler[] createInboundHandlers(EndpointQualifier qualifier,
-            TcpIpConnection connection, IOService ioService) {
+                                                  ServerConnection connection, ServerContext serverContext) {
         NodeEngineImpl nodeEngine = node.nodeEngine;
         PacketDecoder decoder = new PacketDecoder(connection, nodeEngine.getPacketDispatcher());
         return new InboundHandler[]{decoder};
@@ -310,13 +359,13 @@ public class DefaultNodeExtension implements NodeExtension {
 
     @Override
     public OutboundHandler[] createOutboundHandlers(EndpointQualifier qualifier,
-            TcpIpConnection connection, IOService ioService) {
+                                                    ServerConnection connection, ServerContext serverContext) {
         return new OutboundHandler[]{new PacketEncoder()};
     }
 
     @Override
-    public ChannelInitializerProvider createChannelInitializerProvider(IOService ioService) {
-        DefaultChannelInitializerProvider provider = new DefaultChannelInitializerProvider(ioService, node.getConfig());
+    public Function<EndpointQualifier, ChannelInitializer> createChannelInitializerFn(ServerContext serverContext) {
+        ChannelInitializerFunction provider = new ChannelInitializerFunction(serverContext, node.getConfig());
         provider.init();
         return provider;
     }
@@ -456,12 +505,12 @@ public class DefaultNodeExtension implements NodeExtension {
     }
 
     @Override
-    public ByteArrayProcessor createMulticastInputProcessor(IOService ioService) {
+    public ByteArrayProcessor createMulticastInputProcessor(ServerContext serverContext) {
         return null;
     }
 
     @Override
-    public ByteArrayProcessor createMulticastOutputProcessor(IOService ioService) {
+    public ByteArrayProcessor createMulticastOutputProcessor(ServerContext serverContext) {
         return null;
     }
 
@@ -504,7 +553,9 @@ public class DefaultNodeExtension implements NodeExtension {
         diagnostics.register(new PendingInvocationsPlugin(nodeEngine));
         diagnostics.register(new MetricsPlugin(nodeEngine));
         diagnostics.register(new SlowOperationPlugin(nodeEngine));
-        diagnostics.register(new InvocationPlugin(nodeEngine));
+        diagnostics.register(new InvocationSamplePlugin(nodeEngine));
+        diagnostics.register(new InvocationProfilerPlugin(nodeEngine));
+        diagnostics.register(new OperationProfilerPlugin(nodeEngine));
         diagnostics.register(new MemberHazelcastInstanceInfoPlugin(nodeEngine));
         diagnostics.register(new SystemLogPlugin(nodeEngine));
         diagnostics.register(new StoreLatencyPlugin(nodeEngine));

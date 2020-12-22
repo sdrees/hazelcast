@@ -23,12 +23,16 @@ import com.hazelcast.config.cp.CPSubsystemConfig;
 import com.hazelcast.config.cp.FencedLockConfig;
 import com.hazelcast.config.cp.RaftAlgorithmConfig;
 import com.hazelcast.config.cp.SemaphoreConfig;
+import com.hazelcast.config.security.AbstractClusterLoginConfig;
 import com.hazelcast.config.security.JaasAuthenticationConfig;
+import com.hazelcast.config.security.KerberosAuthenticationConfig;
+import com.hazelcast.config.security.KerberosIdentityConfig;
 import com.hazelcast.config.security.LdapAuthenticationConfig;
 import com.hazelcast.config.security.RealmConfig;
 import com.hazelcast.config.security.TlsAuthenticationConfig;
 import com.hazelcast.config.security.TokenIdentityConfig;
 import com.hazelcast.config.security.UsernamePasswordIdentityConfig;
+import com.hazelcast.internal.cluster.Versions;
 import com.hazelcast.internal.config.AliasedDiscoveryConfigUtils;
 import com.hazelcast.internal.util.CollectionUtil;
 import com.hazelcast.internal.util.MapUtil;
@@ -40,14 +44,6 @@ import com.hazelcast.query.impl.IndexUtils;
 import com.hazelcast.splitbrainprotection.impl.ProbabilisticSplitBrainProtectionFunction;
 import com.hazelcast.splitbrainprotection.impl.RecentlyActiveSplitBrainProtectionFunction;
 
-import javax.xml.transform.OutputKeys;
-import javax.xml.transform.Source;
-import javax.xml.transform.Transformer;
-import javax.xml.transform.TransformerFactory;
-import javax.xml.transform.stream.StreamResult;
-import javax.xml.transform.stream.StreamSource;
-import java.io.StringReader;
-import java.io.StringWriter;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Collection;
@@ -60,8 +56,8 @@ import static com.hazelcast.config.PermissionConfig.PermissionType.ALL;
 import static com.hazelcast.config.PermissionConfig.PermissionType.CONFIG;
 import static com.hazelcast.config.PermissionConfig.PermissionType.TRANSACTION;
 import static com.hazelcast.internal.config.AliasedDiscoveryConfigUtils.aliasedDiscoveryConfigsFrom;
-import static com.hazelcast.internal.nio.IOUtil.closeResource;
 import static com.hazelcast.internal.util.Preconditions.isNotNull;
+import static com.hazelcast.internal.util.StringUtil.formatXml;
 import static com.hazelcast.internal.util.StringUtil.isNullOrEmpty;
 import static com.hazelcast.internal.util.StringUtil.isNullOrEmptyAfterTrim;
 import static java.util.Arrays.asList;
@@ -125,11 +121,15 @@ public class ConfigXmlGenerator {
                 .append("xmlns=\"http://www.hazelcast.com/schema/config\"\n")
                 .append("xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\"\n")
                 .append("xsi:schemaLocation=\"http://www.hazelcast.com/schema/config ")
-                .append("http://www.hazelcast.com/schema/config/hazelcast-config-4.1.xsd\">");
+                .append("http://www.hazelcast.com/schema/config/hazelcast-config-")
+                .append(Versions.CURRENT_CLUSTER_VERSION.getMajor())
+                .append('.')
+                .append(Versions.CURRENT_CLUSTER_VERSION.getMinor())
+                .append(".xsd\">");
         gen.node("license-key", getOrMaskValue(config.getLicenseKey()))
                 .node("instance-name", config.getInstanceName())
                 .node("cluster-name", config.getClusterName())
-                ;
+        ;
 
         managementCenterXmlGenerator(gen, config);
         gen.appendProperties(config.getProperties());
@@ -163,11 +163,15 @@ public class ConfigXmlGenerator {
         splitBrainProtectionXmlGenerator(gen, config);
         cpSubsystemConfig(gen, config);
         metricsConfig(gen, config);
+        instanceTrackingConfig(gen, config);
+        sqlConfig(gen, config);
+        factoryWithPropertiesXmlGenerator(gen, "auditlog", config.getAuditlogConfig());
         userCodeDeploymentConfig(gen, config);
 
         xml.append("</hazelcast>");
 
-        return format(xml.toString(), INDENT);
+        String xmlString = xml.toString();
+        return formatted ? formatXml(xmlString, INDENT) : xmlString;
     }
 
     private String getOrMaskValue(String value) {
@@ -175,10 +179,11 @@ public class ConfigXmlGenerator {
     }
 
     private void managementCenterXmlGenerator(XmlGenerator gen, Config config) {
-        if (config.getManagementCenterConfig() != null) {
-            ManagementCenterConfig mcConfig = config.getManagementCenterConfig();
+        ManagementCenterConfig mcConfig = config.getManagementCenterConfig();
+        if (mcConfig != null) {
             gen.open("management-center",
                     "scripting-enabled", mcConfig.isScriptingEnabled());
+            trustedInterfacesXmlGenerator(gen, mcConfig.getTrustedInterfaces());
             gen.close();
         }
     }
@@ -283,13 +288,14 @@ public class ConfigXmlGenerator {
         }
     }
 
-    private void securityRealmGenerator(XmlGenerator gen, String name, RealmConfig c) {
+    protected void securityRealmGenerator(XmlGenerator gen, String name, RealmConfig c) {
         gen.open("realm", "name", name);
         if (c.isAuthenticationConfigured()) {
             gen.open("authentication");
             jaasAuthenticationGenerator(gen, c.getJaasAuthenticationConfig());
             tlsAuthenticationGenerator(gen, c.getTlsAuthenticationConfig());
             ldapAuthenticationGenerator(gen, c.getLdapAuthenticationConfig());
+            kerberosAuthenticationGenerator(gen, c.getKerberosAuthenticationConfig());
             gen.close();
         }
         if (c.isIdentityConfigured()) {
@@ -306,6 +312,7 @@ public class ConfigXmlGenerator {
             if (ti != null) {
                 gen.node("token", getOrMaskValue(ti.getTokenEncoded()), "encoding", ti.getEncoding().toString());
             }
+            kerberosIdentityGenerator(gen, c.getKerberosIdentityConfig());
             gen.close();
         }
         gen.close();
@@ -315,32 +322,74 @@ public class ConfigXmlGenerator {
         if (c == null) {
             return;
         }
-        gen.node("tls", null, "roleAttribute", c.getRoleAttribute());
+        XmlGenerator tlsGen = gen.open("tls", "roleAttribute", c.getRoleAttribute());
+        addClusterLoginElements(tlsGen, c)
+                .close();
     }
 
     private static void ldapAuthenticationGenerator(XmlGenerator gen, LdapAuthenticationConfig c) {
         if (c == null) {
             return;
         }
-        gen.open("ldap")
-            .node("url", c.getUrl())
-            .nodeIfContents("socket-factory-class-name", c.getSocketFactoryClassName())
-            .nodeIfContents("parse-dn", c.isParseDn())
-            .nodeIfContents("role-context", c.getRoleContext())
-            .nodeIfContents("role-filter", c.getRoleFilter())
-            .nodeIfContents("role-mapping-attribute", c.getRoleMappingAttribute())
-            .nodeIfContents("role-mapping-mode", c.getRoleMappingMode())
-            .nodeIfContents("role-name-attribute", c.getRoleNameAttribute())
-            .nodeIfContents("role-recursion-max-depth", c.getRoleRecursionMaxDepth())
-            .nodeIfContents("role-search-scope", c.getRoleSearchScope())
-            .nodeIfContents("user-name-attribute", c.getUserNameAttribute())
-            .nodeIfContents("system-user-dn", c.getSystemUserDn())
-            .nodeIfContents("system-user-password", c.getSystemUserPassword())
-            .nodeIfContents("password-attribute", c.getPasswordAttribute())
-            .nodeIfContents("user-context", c.getUserContext())
-            .nodeIfContents("user-filter", c.getUserFilter())
-            .nodeIfContents("user-search-scope", c.getUserSearchScope())
-            .close();
+        addClusterLoginElements(gen.open("ldap"), c)
+                .node("url", c.getUrl())
+                .nodeIfContents("socket-factory-class-name", c.getSocketFactoryClassName())
+                .nodeIfContents("parse-dn", c.isParseDn())
+                .nodeIfContents("role-context", c.getRoleContext())
+                .nodeIfContents("role-filter", c.getRoleFilter())
+                .nodeIfContents("role-mapping-attribute", c.getRoleMappingAttribute())
+                .nodeIfContents("role-mapping-mode", c.getRoleMappingMode())
+                .nodeIfContents("role-name-attribute", c.getRoleNameAttribute())
+                .nodeIfContents("role-recursion-max-depth", c.getRoleRecursionMaxDepth())
+                .nodeIfContents("role-search-scope", c.getRoleSearchScope())
+                .nodeIfContents("user-name-attribute", c.getUserNameAttribute())
+                .nodeIfContents("system-user-dn", c.getSystemUserDn())
+                .nodeIfContents("system-user-password", c.getSystemUserPassword())
+                .nodeIfContents("system-authentication", c.getSystemAuthentication())
+                .nodeIfContents("security-realm", c.getSecurityRealm())
+                .nodeIfContents("password-attribute", c.getPasswordAttribute())
+                .nodeIfContents("user-context", c.getUserContext())
+                .nodeIfContents("user-filter", c.getUserFilter())
+                .nodeIfContents("user-search-scope", c.getUserSearchScope())
+                .nodeIfContents("skip-authentication", c.getSkipAuthentication())
+                .close();
+    }
+
+    private static void kerberosAuthenticationGenerator(XmlGenerator gen, KerberosAuthenticationConfig c) {
+        if (c == null) {
+            return;
+        }
+        XmlGenerator kerberosGen = gen.open("kerberos");
+        addClusterLoginElements(kerberosGen, c)
+                .nodeIfContents("relax-flags-check", c.getRelaxFlagsCheck())
+                .nodeIfContents("use-name-without-realm", c.getUseNameWithoutRealm())
+                .nodeIfContents("security-realm", c.getSecurityRealm())
+                .nodeIfContents("keytab-file", c.getKeytabFile())
+                .nodeIfContents("principal", c.getPrincipal());
+        ldapAuthenticationGenerator(kerberosGen, c.getLdapAuthenticationConfig());
+        kerberosGen.close();
+    }
+
+    private static void kerberosIdentityGenerator(XmlGenerator gen, KerberosIdentityConfig c) {
+        if (c == null) {
+            return;
+        }
+        gen.open("kerberos")
+                .nodeIfContents("realm", c.getRealm())
+                .nodeIfContents("security-realm", c.getSecurityRealm())
+                .nodeIfContents("keytab-file", c.getKeytabFile())
+                .nodeIfContents("principal", c.getPrincipal())
+                .nodeIfContents("service-name-prefix", c.getServiceNamePrefix())
+                .nodeIfContents("spn", c.getSpn())
+                .nodeIfContents("use-canonical-hostname", c.getUseCanonicalHostname())
+                .close();
+    }
+
+    private static XmlGenerator addClusterLoginElements(XmlGenerator gen, AbstractClusterLoginConfig<?> c) {
+        gen.nodeIfContents("skip-identity", c.getSkipIdentity());
+        gen.nodeIfContents("skip-endpoint", c.getSkipEndpoint());
+        gen.nodeIfContents("skip-role", c.getSkipRole());
+        return gen;
     }
 
     private static void jaasAuthenticationGenerator(XmlGenerator gen, JaasAuthenticationConfig c) {
@@ -515,6 +564,7 @@ public class ConfigXmlGenerator {
                     .node("durability", ex.getDurability())
                     .node("capacity", ex.getCapacity())
                     .node("split-brain-protection-ref", ex.getSplitBrainProtectionName())
+                    .node("statistics-enabled", ex.isStatisticsEnabled())
                     .close();
         }
     }
@@ -530,6 +580,7 @@ public class ConfigXmlGenerator {
                     .node("capacity-policy", ex.getCapacityPolicy().name())
                     .node("split-brain-protection-ref", ex.getSplitBrainProtectionName())
                     .node("merge-policy", mergePolicyConfig.getPolicy(), "batch-size", mergePolicyConfig.getBatchSize())
+                    .node("statistics-enabled", ex.isStatisticsEnabled())
                     .close();
         }
     }
@@ -614,6 +665,7 @@ public class ConfigXmlGenerator {
         Collection<QueueConfig> qCfgs = config.getQueueConfigs().values();
         for (QueueConfig q : qCfgs) {
             gen.open("queue", "name", q.getName())
+                    .node("priority-comparator-class-name", q.getPriorityComparatorClassName())
                     .node("statistics-enabled", q.isStatisticsEnabled())
                     .node("max-size", q.getMaxSize())
                     .node("backup-count", q.getBackupCount())
@@ -624,9 +676,9 @@ public class ConfigXmlGenerator {
             if (storeConfig != null) {
                 gen.open("queue-store", "enabled", storeConfig.isEnabled())
                         .node("class-name",
-                            classNameOrImplClass(storeConfig.getClassName(), storeConfig.getStoreImplementation()))
+                                classNameOrImplClass(storeConfig.getClassName(), storeConfig.getStoreImplementation()))
                         .node("factory-class-name",
-                            classNameOrImplClass(storeConfig.getFactoryClassName(), storeConfig.getFactoryImplementation()))
+                                classNameOrImplClass(storeConfig.getFactoryClassName(), storeConfig.getFactoryImplementation()))
                         .appendProperties(storeConfig.getProperties())
                         .close();
             }
@@ -652,9 +704,9 @@ public class ConfigXmlGenerator {
             if (storeConfig != null) {
                 gen.open("ringbuffer-store", "enabled", storeConfig.isEnabled())
                         .node("class-name",
-                            classNameOrImplClass(storeConfig.getClassName(), storeConfig.getStoreImplementation()))
+                                classNameOrImplClass(storeConfig.getClassName(), storeConfig.getStoreImplementation()))
                         .node("factory-class-name",
-                            classNameOrImplClass(storeConfig.getFactoryClassName(), storeConfig.getFactoryImplementation()))
+                                classNameOrImplClass(storeConfig.getFactoryClassName(), storeConfig.getFactoryImplementation()))
                         .appendProperties(storeConfig.getProperties());
                 gen.close();
             }
@@ -768,6 +820,7 @@ public class ConfigXmlGenerator {
 
         JoinConfig join = netCfg.getJoin();
         gen.open("join");
+        autoDetectionConfigXmlGenerator(gen, join);
         multicastConfigXmlGenerator(gen, join);
         tcpConfigXmlGenerator(gen, join);
         aliasedDiscoveryConfigsGenerator(gen, aliasedDiscoveryConfigsFrom(join));
@@ -795,6 +848,7 @@ public class ConfigXmlGenerator {
 
         JoinConfig join = netCfg.getJoin();
         gen.open("join");
+        autoDetectionConfigXmlGenerator(gen, join);
         multicastConfigXmlGenerator(gen, join);
         tcpConfigXmlGenerator(gen, join);
         aliasedDiscoveryConfigsGenerator(gen, aliasedDiscoveryConfigsFrom(join));
@@ -1208,6 +1262,10 @@ public class ConfigXmlGenerator {
                 "comparator-class-name", comparatorClassName);
     }
 
+    private static void autoDetectionConfigXmlGenerator(XmlGenerator gen, JoinConfig join) {
+        gen.open("auto-detection", "enabled", join.getAutoDetectionConfig().isEnabled()).close();
+    }
+
     private static void multicastConfigXmlGenerator(XmlGenerator gen, JoinConfig join) {
         MulticastConfig mcConfig = join.getMulticastConfig();
         gen.open("multicast", "enabled", mcConfig.isEnabled(), "loopbackModeEnabled", mcConfig.isLoopbackModeEnabled())
@@ -1216,14 +1274,18 @@ public class ConfigXmlGenerator {
                 .node("multicast-timeout-seconds", mcConfig.getMulticastTimeoutSeconds())
                 .node("multicast-time-to-live", mcConfig.getMulticastTimeToLive());
 
-        if (!mcConfig.getTrustedInterfaces().isEmpty()) {
+        trustedInterfacesXmlGenerator(gen, mcConfig.getTrustedInterfaces());
+        gen.close();
+    }
+
+    private static void trustedInterfacesXmlGenerator(XmlGenerator gen, Set<String> trustedInterfaces) {
+        if (!trustedInterfaces.isEmpty()) {
             gen.open("trusted-interfaces");
-            for (String trustedInterface : mcConfig.getTrustedInterfaces()) {
+            for (String trustedInterface : trustedInterfaces) {
                 gen.node("interface", trustedInterface);
             }
             gen.close();
         }
-        gen.close();
     }
 
     private static void tcpConfigXmlGenerator(XmlGenerator gen, JoinConfig join) {
@@ -1286,10 +1348,13 @@ public class ConfigXmlGenerator {
     }
 
     private void sslConfigXmlGenerator(XmlGenerator gen, SSLConfig ssl) {
-        gen.open("ssl", "enabled", ssl != null && ssl.isEnabled());
         if (ssl != null) {
-            Properties props = new Properties();
-            props.putAll(ssl.getProperties());
+            ssl = new SSLConfig(ssl);
+            String factoryClassName = classNameOrImplClass(ssl.getFactoryClassName(), ssl.getFactoryImplementation());
+            if (factoryClassName != null) {
+                ssl.setFactoryClassName(factoryClassName);
+            }
+            Properties props = ssl.getProperties();
 
             if (maskSensitiveFields && props.containsKey("trustStorePassword")) {
                 props.setProperty("trustStorePassword", MASK_FOR_SENSITIVE_DATA);
@@ -1298,10 +1363,17 @@ public class ConfigXmlGenerator {
             if (maskSensitiveFields && props.containsKey("keyStorePassword")) {
                 props.setProperty("keyStorePassword", MASK_FOR_SENSITIVE_DATA);
             }
+        }
 
-            gen.node("factory-class-name",
-                    classNameOrImplClass(ssl.getFactoryClassName(), ssl.getFactoryImplementation()))
-                    .appendProperties(props);
+        factoryWithPropertiesXmlGenerator(gen, "ssl", ssl);
+    }
+
+    protected void factoryWithPropertiesXmlGenerator(XmlGenerator gen, String elementName,
+                                                     AbstractFactoryWithPropertiesConfig<?> factoryWithProps) {
+        gen.open(elementName, "enabled", factoryWithProps != null && factoryWithProps.isEnabled());
+        if (factoryWithProps != null) {
+            gen.node("factory-class-name", factoryWithProps.getFactoryClassName())
+                    .appendProperties(factoryWithProps.getProperties());
         }
         gen.close();
     }
@@ -1321,7 +1393,7 @@ public class ConfigXmlGenerator {
             return;
         }
         gen.node("algorithm", sec.getAlgorithm())
-           .node("salt", getOrMaskValue(sec.getSalt()));
+                .node("salt", getOrMaskValue(sec.getSalt()));
     }
 
     private void symmetricEncInterceptorConfigXmlGenerator(XmlGenerator gen, SymmetricEncryptionConfig sec) {
@@ -1331,7 +1403,7 @@ public class ConfigXmlGenerator {
         gen.open("symmetric-encryption", "enabled", sec.isEnabled());
         commonSymmetricEncInterceptorConfigXmlBodyGenerator(gen, sec);
         gen.node("password", getOrMaskValue(sec.getPassword()))
-           .node("iteration-count", sec.getIterationCount());
+                .node("iteration-count", sec.getIterationCount());
         gen.close();
     }
 
@@ -1396,7 +1468,7 @@ public class ConfigXmlGenerator {
             return;
         }
         gen.open("encryption-at-rest", "enabled", encryptionAtRestConfig.isEnabled())
-           .node("key-size", encryptionAtRestConfig.getKeySize());
+                .node("key-size", encryptionAtRestConfig.getKeySize());
         commonSymmetricEncInterceptorConfigXmlBodyGenerator(gen, encryptionAtRestConfig);
         secureStoreXmlGenerator(gen, encryptionAtRestConfig.getSecureStoreConfig());
         gen.close();
@@ -1416,20 +1488,20 @@ public class ConfigXmlGenerator {
 
     private void javaKeyStoreSecureStoreXmlGenerator(XmlGenerator gen, JavaKeyStoreSecureStoreConfig secureStoreConfig) {
         gen.open("keystore")
-           .node("path", secureStoreConfig.getPath().getAbsolutePath())
-           .node("type", secureStoreConfig.getType())
-           .node("password", getOrMaskValue(secureStoreConfig.getPassword()))
-           .node("polling-interval", secureStoreConfig.getPollingInterval())
-           .node("current-key-alias", secureStoreConfig.getCurrentKeyAlias());
+                .node("path", secureStoreConfig.getPath().getAbsolutePath())
+                .node("type", secureStoreConfig.getType())
+                .node("password", getOrMaskValue(secureStoreConfig.getPassword()))
+                .node("polling-interval", secureStoreConfig.getPollingInterval())
+                .node("current-key-alias", secureStoreConfig.getCurrentKeyAlias());
         gen.close();
     }
 
     private void vaultSecureStoreXmlGenerator(XmlGenerator gen, VaultSecureStoreConfig secureStoreConfig) {
         gen.open("vault")
-           .node("address", secureStoreConfig.getAddress())
-           .node("secret-path", secureStoreConfig.getSecretPath())
-           .node("token", getOrMaskValue(secureStoreConfig.getToken()))
-           .node("polling-interval", secureStoreConfig.getPollingInterval());
+                .node("address", secureStoreConfig.getAddress())
+                .node("secret-path", secureStoreConfig.getSecretPath())
+                .node("token", getOrMaskValue(secureStoreConfig.getToken()))
+                .node("polling-interval", secureStoreConfig.getPollingInterval());
         sslConfigXmlGenerator(gen, secureStoreConfig.getSSLConfig());
         gen.close();
     }
@@ -1481,15 +1553,15 @@ public class ConfigXmlGenerator {
     private static void cpSubsystemConfig(XmlGenerator gen, Config config) {
         CPSubsystemConfig cpSubsystemConfig = config.getCPSubsystemConfig();
         gen.open("cp-subsystem")
-           .node("cp-member-count", cpSubsystemConfig.getCPMemberCount())
-           .node("group-size", cpSubsystemConfig.getGroupSize())
-           .node("session-time-to-live-seconds", cpSubsystemConfig.getSessionTimeToLiveSeconds())
-           .node("session-heartbeat-interval-seconds", cpSubsystemConfig.getSessionHeartbeatIntervalSeconds())
-           .node("missing-cp-member-auto-removal-seconds", cpSubsystemConfig.getMissingCPMemberAutoRemovalSeconds())
-           .node("fail-on-indeterminate-operation-state", cpSubsystemConfig.isFailOnIndeterminateOperationState())
-           .node("persistence-enabled", cpSubsystemConfig.isPersistenceEnabled())
-           .node("base-dir", cpSubsystemConfig.getBaseDir().getAbsolutePath())
-           .node("data-load-timeout-seconds", cpSubsystemConfig.getDataLoadTimeoutSeconds());
+                .node("cp-member-count", cpSubsystemConfig.getCPMemberCount())
+                .node("group-size", cpSubsystemConfig.getGroupSize())
+                .node("session-time-to-live-seconds", cpSubsystemConfig.getSessionTimeToLiveSeconds())
+                .node("session-heartbeat-interval-seconds", cpSubsystemConfig.getSessionHeartbeatIntervalSeconds())
+                .node("missing-cp-member-auto-removal-seconds", cpSubsystemConfig.getMissingCPMemberAutoRemovalSeconds())
+                .node("fail-on-indeterminate-operation-state", cpSubsystemConfig.isFailOnIndeterminateOperationState())
+                .node("persistence-enabled", cpSubsystemConfig.isPersistenceEnabled())
+                .node("base-dir", cpSubsystemConfig.getBaseDir().getAbsolutePath())
+                .node("data-load-timeout-seconds", cpSubsystemConfig.getDataLoadTimeoutSeconds());
 
         RaftAlgorithmConfig raftAlgorithmConfig = cpSubsystemConfig.getRaftAlgorithmConfig();
         gen.open("raft-algorithm")
@@ -1525,16 +1597,33 @@ public class ConfigXmlGenerator {
         gen.close().close();
     }
 
+    private static void instanceTrackingConfig(XmlGenerator gen, Config config) {
+        InstanceTrackingConfig trackingConfig = config.getInstanceTrackingConfig();
+        gen.open("instance-tracking", "enabled", trackingConfig.isEnabled())
+                .node("file-name", trackingConfig.getFileName())
+                .node("format-pattern", trackingConfig.getFormatPattern())
+                .close();
+    }
+
     private static void metricsConfig(XmlGenerator gen, Config config) {
         MetricsConfig metricsConfig = config.getMetricsConfig();
         gen.open("metrics", "enabled", metricsConfig.isEnabled())
-           .open("management-center", "enabled", metricsConfig.getManagementCenterConfig().isEnabled())
-           .node("retention-seconds", metricsConfig.getManagementCenterConfig().getRetentionSeconds())
-           .close()
-           .open("jmx", "enabled", metricsConfig.getJmxConfig().isEnabled())
-           .close()
-           .node("collection-frequency-seconds", metricsConfig.getCollectionFrequencySeconds())
-           .close();
+                .open("management-center", "enabled", metricsConfig.getManagementCenterConfig().isEnabled())
+                .node("retention-seconds", metricsConfig.getManagementCenterConfig().getRetentionSeconds())
+                .close()
+                .open("jmx", "enabled", metricsConfig.getJmxConfig().isEnabled())
+                .close()
+                .node("collection-frequency-seconds", metricsConfig.getCollectionFrequencySeconds())
+                .close();
+    }
+
+    private static void sqlConfig(XmlGenerator gen, Config config) {
+        SqlConfig sqlConfig = config.getSqlConfig();
+        gen.open("sql")
+                .node("executor-pool-size", sqlConfig.getExecutorPoolSize())
+                .node("operation-pool-size", sqlConfig.getOperationPoolSize())
+                .node("statement-timeout-millis", sqlConfig.getStatementTimeoutMillis())
+                .close();
     }
 
     private static void userCodeDeploymentConfig(XmlGenerator gen, Config config) {
@@ -1595,9 +1684,27 @@ public class ConfigXmlGenerator {
                         "value", nativeMemoryConfig.getSize().getValue())
                 .node("min-block-size", nativeMemoryConfig.getMinBlockSize())
                 .node("page-size", nativeMemoryConfig.getPageSize())
-                .node("metadata-space-percentage", nativeMemoryConfig.getMetadataSpacePercentage())
-                .node("persistent-memory-directory", nativeMemoryConfig.getPersistentMemoryDirectory())
-                .close();
+                .node("metadata-space-percentage", nativeMemoryConfig.getMetadataSpacePercentage());
+
+        PersistentMemoryConfig pmemConfig = nativeMemoryConfig.getPersistentMemoryConfig();
+        List<PersistentMemoryDirectoryConfig> directoryConfigs = pmemConfig.getDirectoryConfigs();
+        gen.open("persistent-memory",
+                "enabled", pmemConfig.isEnabled(),
+                "mode", pmemConfig.getMode().name()
+        );
+        if (!directoryConfigs.isEmpty()) {
+            gen.open("directories");
+            for (PersistentMemoryDirectoryConfig dirConfig : directoryConfigs) {
+                if (dirConfig.isNumaNodeSet()) {
+                    gen.node("directory", dirConfig.getDirectory(),
+                            "numa-node", dirConfig.getNumaNode());
+                } else {
+                    gen.node("directory", dirConfig.getDirectory());
+                }
+            }
+            gen.close();
+        }
+        gen.close().close();
     }
 
     private static void liteMemberXmlGenerator(XmlGenerator gen, Config config) {
@@ -1622,53 +1729,6 @@ public class ConfigXmlGenerator {
             return;
         }
         gen.node("memcache-protocol", null, "enabled", c.isEnabled());
-    }
-
-    private String format(String input, int indent) {
-        if (!formatted) {
-            return input;
-        }
-        StreamResult xmlOutput = null;
-        try {
-            Source xmlInput = new StreamSource(new StringReader(input));
-            xmlOutput = new StreamResult(new StringWriter());
-            TransformerFactory transformerFactory = TransformerFactory.newInstance();
-            /*
-             * Older versions of Xalan still use this method of setting indent values.
-             * Attempt to make this work but don't completely fail if it's a problem.
-             */
-            try {
-                transformerFactory.setAttribute("indent-number", indent);
-            } catch (IllegalArgumentException e) {
-                if (LOGGER.isFinestEnabled()) {
-                    LOGGER.finest("Failed to set indent-number attribute; cause: " + e.getMessage());
-                }
-            }
-            Transformer transformer = transformerFactory.newTransformer();
-            transformer.setOutputProperty(OutputKeys.OMIT_XML_DECLARATION, "yes");
-            transformer.setOutputProperty(OutputKeys.ENCODING, "UTF-8");
-            transformer.setOutputProperty(OutputKeys.INDENT, "yes");
-            /*
-             * Newer versions of Xalan will look for a fully-qualified output property in order to specify amount of
-             * indentation to use. Attempt to make this work as well but again don't completely fail if it's a problem.
-             */
-            try {
-                transformer.setOutputProperty("{http://xml.apache.org/xslt}indent-amount", Integer.toString(indent));
-            } catch (IllegalArgumentException e) {
-                if (LOGGER.isFinestEnabled()) {
-                    LOGGER.finest("Failed to set indent-amount property; cause: " + e.getMessage());
-                }
-            }
-            transformer.transform(xmlInput, xmlOutput);
-            return xmlOutput.getWriter().toString();
-        } catch (Exception e) {
-            LOGGER.warning(e);
-            return input;
-        } finally {
-            if (xmlOutput != null) {
-                closeResource(xmlOutput.getWriter());
-            }
-        }
     }
 
     private static void appendItemListenerConfigs(XmlGenerator gen, Collection<ItemListenerConfig> configs) {

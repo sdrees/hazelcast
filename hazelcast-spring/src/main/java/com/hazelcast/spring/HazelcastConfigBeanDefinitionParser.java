@@ -16,9 +16,23 @@
 
 package com.hazelcast.spring;
 
+import static com.hazelcast.internal.config.DomConfigHelper.childElementWithName;
+import static com.hazelcast.internal.config.DomConfigHelper.childElements;
+import static com.hazelcast.internal.config.DomConfigHelper.cleanNodeName;
+import static com.hazelcast.internal.config.DomConfigHelper.getBooleanValue;
+import static com.hazelcast.internal.config.DomConfigHelper.getDoubleValue;
+import static com.hazelcast.internal.config.DomConfigHelper.getIntegerValue;
+import static com.hazelcast.internal.config.DomConfigHelper.getLongValue;
+import static com.hazelcast.internal.util.StringUtil.isNullOrEmpty;
+import static com.hazelcast.internal.util.StringUtil.upperCaseInternal;
+import static java.lang.Boolean.parseBoolean;
+import static java.lang.Integer.parseInt;
+import static org.springframework.util.Assert.isTrue;
+
 import com.hazelcast.config.AdvancedNetworkConfig;
 import com.hazelcast.config.AliasedDiscoveryConfig;
 import com.hazelcast.config.AttributeConfig;
+import com.hazelcast.config.AuditlogConfig;
 import com.hazelcast.config.CRDTReplicationConfig;
 import com.hazelcast.config.CachePartitionLostListenerConfig;
 import com.hazelcast.config.CacheSimpleConfig;
@@ -30,8 +44,6 @@ import com.hazelcast.config.CacheSimpleEntryListenerConfig;
 import com.hazelcast.config.CardinalityEstimatorConfig;
 import com.hazelcast.config.Config;
 import com.hazelcast.config.CredentialsFactoryConfig;
-import com.hazelcast.config.WanBatchPublisherConfig;
-import com.hazelcast.config.WanCustomPublisherConfig;
 import com.hazelcast.config.DurableExecutorConfig;
 import com.hazelcast.config.EncryptionAtRestConfig;
 import com.hazelcast.config.EndpointConfig;
@@ -43,6 +55,7 @@ import com.hazelcast.config.HotRestartConfig;
 import com.hazelcast.config.HotRestartPersistenceConfig;
 import com.hazelcast.config.IcmpFailureDetectorConfig;
 import com.hazelcast.config.InMemoryFormat;
+import com.hazelcast.config.InstanceTrackingConfig;
 import com.hazelcast.config.InterfacesConfig;
 import com.hazelcast.config.InvalidConfigurationException;
 import com.hazelcast.config.ItemListenerConfig;
@@ -67,7 +80,6 @@ import com.hazelcast.config.MetricsJmxConfig;
 import com.hazelcast.config.MetricsManagementCenterConfig;
 import com.hazelcast.config.MultiMapConfig;
 import com.hazelcast.config.MulticastConfig;
-import com.hazelcast.config.NativeMemoryConfig;
 import com.hazelcast.config.NearCacheConfig;
 import com.hazelcast.config.NetworkConfig;
 import com.hazelcast.config.OnJoinPermissionOperationName;
@@ -99,11 +111,14 @@ import com.hazelcast.config.SetConfig;
 import com.hazelcast.config.SplitBrainProtectionConfig;
 import com.hazelcast.config.SplitBrainProtectionConfigBuilder;
 import com.hazelcast.config.SplitBrainProtectionListenerConfig;
+import com.hazelcast.config.SqlConfig;
 import com.hazelcast.config.SymmetricEncryptionConfig;
 import com.hazelcast.config.TcpIpConfig;
 import com.hazelcast.config.TopicConfig;
 import com.hazelcast.config.VaultSecureStoreConfig;
+import com.hazelcast.config.WanBatchPublisherConfig;
 import com.hazelcast.config.WanConsumerConfig;
+import com.hazelcast.config.WanCustomPublisherConfig;
 import com.hazelcast.config.WanReplicationConfig;
 import com.hazelcast.config.WanReplicationRef;
 import com.hazelcast.config.WanSyncConfig;
@@ -112,6 +127,8 @@ import com.hazelcast.config.cp.FencedLockConfig;
 import com.hazelcast.config.cp.RaftAlgorithmConfig;
 import com.hazelcast.config.cp.SemaphoreConfig;
 import com.hazelcast.config.security.JaasAuthenticationConfig;
+import com.hazelcast.config.security.KerberosAuthenticationConfig;
+import com.hazelcast.config.security.KerberosIdentityConfig;
 import com.hazelcast.config.security.LdapAuthenticationConfig;
 import com.hazelcast.config.security.LdapRoleMappingMode;
 import com.hazelcast.config.security.LdapSearchScope;
@@ -124,9 +141,13 @@ import com.hazelcast.instance.EndpointQualifier;
 import com.hazelcast.instance.ProtocolType;
 import com.hazelcast.internal.config.AliasedDiscoveryConfigUtils;
 import com.hazelcast.internal.util.StringUtil;
-import com.hazelcast.memory.MemorySize;
-import com.hazelcast.memory.MemoryUnit;
 import com.hazelcast.splitbrainprotection.SplitBrainProtectionOn;
+import java.io.File;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.List;
+import java.util.Set;
+import java.util.concurrent.TimeUnit;
 import org.springframework.beans.factory.config.BeanDefinition;
 import org.springframework.beans.factory.support.AbstractBeanDefinition;
 import org.springframework.beans.factory.support.BeanDefinitionBuilder;
@@ -137,26 +158,6 @@ import org.springframework.beans.factory.xml.ParserContext;
 import org.w3c.dom.Element;
 import org.w3c.dom.NamedNodeMap;
 import org.w3c.dom.Node;
-
-import java.io.File;
-import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.List;
-import java.util.Set;
-import java.util.concurrent.TimeUnit;
-
-import static com.hazelcast.internal.config.DomConfigHelper.childElementWithName;
-import static com.hazelcast.internal.config.DomConfigHelper.childElements;
-import static com.hazelcast.internal.config.DomConfigHelper.cleanNodeName;
-import static com.hazelcast.internal.config.DomConfigHelper.getBooleanValue;
-import static com.hazelcast.internal.config.DomConfigHelper.getDoubleValue;
-import static com.hazelcast.internal.config.DomConfigHelper.getIntegerValue;
-import static com.hazelcast.internal.config.DomConfigHelper.getLongValue;
-import static com.hazelcast.internal.util.StringUtil.isNullOrEmpty;
-import static com.hazelcast.internal.util.StringUtil.upperCaseInternal;
-import static java.lang.Boolean.parseBoolean;
-import static java.lang.Integer.parseInt;
-import static org.springframework.util.Assert.isTrue;
 
 /**
  * BeanDefinitionParser for Hazelcast Config Configuration.
@@ -331,6 +332,12 @@ public class HazelcastConfigBeanDefinitionParser extends AbstractHazelcastBeanDe
                         handleCPSubSystem(node);
                     } else if ("metrics".equals(nodeName)) {
                         handleMetrics(node);
+                    } else if ("instance-tracking".equals(nodeName)) {
+                        handleInstanceTracking(node);
+                    } else if ("sql".equals(nodeName)) {
+                        handleSql(node);
+                    } else if ("auditlog".equals(nodeName)) {
+                        handleAuditlog(node);
                     }
                 }
             }
@@ -364,7 +371,7 @@ public class HazelcastConfigBeanDefinitionParser extends AbstractHazelcastBeanDe
             BeanDefinitionBuilder encryptionAtRestConfigBuilder = createBeanBuilder(EncryptionAtRestConfig.class);
             fillAttributeValues(node, encryptionAtRestConfigBuilder);
             fillValues(node, encryptionAtRestConfigBuilder, "secureStore");
-            Node secureStoreNode = childElementWithName(node, "secure-store");
+            Node secureStoreNode = childElementWithName(node, "secure-store", true);
             for (Node child : childElements(secureStoreNode)) {
                 String nodeName = cleanNodeName(child);
                 AbstractBeanDefinition secureStoreBeanDefinition = null;
@@ -382,7 +389,7 @@ public class HazelcastConfigBeanDefinitionParser extends AbstractHazelcastBeanDe
 
         private AbstractBeanDefinition handleKeyStoreSecureStoreConfig(Node node) {
             BeanDefinitionBuilder keyStoreConfigBuilder = createBeanBuilder(JavaKeyStoreSecureStoreConfig.class);
-            Node pathNode = childElementWithName(node, "path");
+            Node pathNode = childElementWithName(node, "path", true);
             keyStoreConfigBuilder.addConstructorArgValue(new File(getTextContent(pathNode).trim()).getAbsoluteFile());
             fillValues(node, keyStoreConfigBuilder);
             return keyStoreConfigBuilder.getBeanDefinition();
@@ -390,14 +397,14 @@ public class HazelcastConfigBeanDefinitionParser extends AbstractHazelcastBeanDe
 
         private AbstractBeanDefinition handleVaultSecureStoreConfig(Node node) {
             BeanDefinitionBuilder vaultConfigBuilder = createBeanBuilder(VaultSecureStoreConfig.class);
-            Node addressNode = childElementWithName(node, "address");
-            Node secretPathNode = childElementWithName(node, "secrets-path");
-            Node tokenNode = childElementWithName(node, "token");
+            Node addressNode = childElementWithName(node, "address", true);
+            Node secretPathNode = childElementWithName(node, "secrets-path", true);
+            Node tokenNode = childElementWithName(node, "token", true);
             vaultConfigBuilder.addConstructorArgValue(getTextContent(addressNode).trim());
             vaultConfigBuilder.addConstructorArgValue(getTextContent(secretPathNode).trim());
             vaultConfigBuilder.addConstructorArgValue(getTextContent(tokenNode).trim());
             fillValues(node, vaultConfigBuilder, "ssl");
-            Node ssl = childElementWithName(node, "ssl");
+            Node ssl = childElementWithName(node, "ssl", true);
             if (ssl != null) {
                 handleSSLConfig(ssl, vaultConfigBuilder);
             }
@@ -431,7 +438,7 @@ public class HazelcastConfigBeanDefinitionParser extends AbstractHazelcastBeanDe
                     cpSubsystemConfigBuilder.addPropertyValue("raftAlgorithmConfig",
                             raftAlgorithmConfigBuilder.getBeanDefinition());
                 } else if ("semaphores".equals(nodeName)) {
-                    ManagedMap<String, AbstractBeanDefinition> semaphores = new ManagedMap<String, AbstractBeanDefinition>();
+                    ManagedMap<String, AbstractBeanDefinition> semaphores = new ManagedMap<>();
                     handleSemaphores(semaphores, child);
                     cpSubsystemConfigBuilder.addPropertyValue("SemaphoreConfigs", semaphores);
                 } else if ("locks".equals(nodeName)) {
@@ -579,7 +586,7 @@ public class HazelcastConfigBeanDefinitionParser extends AbstractHazelcastBeanDe
             BeanDefinitionBuilder mergePolicyConfigBuilder = createBeanBuilder(MergePolicyConfig.class);
             AbstractBeanDefinition beanDefinition = mergePolicyConfigBuilder.getBeanDefinition();
             fillAttributeValues(node, mergePolicyConfigBuilder);
-            mergePolicyConfigBuilder.addPropertyValue("policy", getTextContent(node).trim());
+            mergePolicyConfigBuilder.addPropertyValue("policy", getTextContent(node));
             builder.addPropertyValue("mergePolicyConfig", beanDefinition);
         }
 
@@ -830,6 +837,8 @@ public class HazelcastConfigBeanDefinitionParser extends AbstractHazelcastBeanDe
                     handleAliasedDiscoveryStrategy(child, joinConfigBuilder, name);
                 } else if ("discovery-strategies".equals(name)) {
                     handleDiscoveryStrategies(child, joinConfigBuilder);
+                } else if ("auto-detection".equals(name)) {
+                    handleAutoDetection(child, joinConfigBuilder);
                 }
             }
             networkConfigBuilder.addPropertyValue("join", beanDefinition);
@@ -984,8 +993,13 @@ public class HazelcastConfigBeanDefinitionParser extends AbstractHazelcastBeanDe
         }
 
         public void handleMulticast(Node node, BeanDefinitionBuilder joinConfigBuilder) {
-            BeanDefinitionBuilder builder = createAndFillBeanBuilder(node, MulticastConfig.class, "multicastConfig",
-                    joinConfigBuilder, "trusted-interfaces", "interface");
+            handleTrustedInterfacesBean(node, joinConfigBuilder, MulticastConfig.class, "multicastConfig");
+        }
+
+        private void handleTrustedInterfacesBean(Node node, BeanDefinitionBuilder configBuilder,
+                Class<?> configClass, String propertyName) {
+            BeanDefinitionBuilder builder = createAndFillBeanBuilder(node, configClass, propertyName,
+                    configBuilder, "trusted-interfaces", "interface");
             ManagedList<String> interfaces = new ManagedList<>();
             for (Node n : childElements(node)) {
                 String name = cleanNodeName(n);
@@ -1481,9 +1495,7 @@ public class HazelcastConfigBeanDefinitionParser extends AbstractHazelcastBeanDe
         }
 
         private void handleManagementCenter(Node node) {
-            BeanDefinitionBuilder managementCenterConfigBuilder = createBeanBuilder(ManagementCenterConfig.class);
-            fillAttributeValues(node, managementCenterConfigBuilder);
-            configBuilder.addPropertyValue("managementCenterConfig", managementCenterConfigBuilder.getBeanDefinition());
+            handleTrustedInterfacesBean(node, configBuilder, ManagementCenterConfig.class, "managementCenterConfig");
         }
 
         public void handleNearCacheConfig(Node node, BeanDefinitionBuilder configBuilder) {
@@ -1675,19 +1687,33 @@ public class HazelcastConfigBeanDefinitionParser extends AbstractHazelcastBeanDe
                             realmConfigBuilder);
                 } else if ("ldap".equals(nodeName)) {
                     handleLdapAuthenticationConfig(realmConfigBuilder, child);
+                } else if ("kerberos".equals(nodeName)) {
+                    handleKerberosAuthenticationConfig(realmConfigBuilder, child);
                 }
             }
         }
 
-        private BeanDefinitionBuilder handleLdapAuthenticationConfig(BeanDefinitionBuilder realmConfigBuilder, Node node) {
+        private BeanDefinitionBuilder handleLdapAuthenticationConfig(BeanDefinitionBuilder parentBuilder, Node node) {
             BeanDefinitionBuilder builder = createAndFillBeanBuilder(node, LdapAuthenticationConfig.class,
-                    "LdapAuthenticationConfig", realmConfigBuilder, "roleMappingMode", "userSearchScope", "roleSearchScope");
+                    "LdapAuthenticationConfig", parentBuilder, "roleMappingMode", "userSearchScope", "roleSearchScope");
             for (Node n : childElements(node)) {
                 String name = xmlToJavaName(cleanNodeName(n));
                 if ("roleMappingMode".equals(name)) {
                     builder.addPropertyValue(name, LdapRoleMappingMode.getRoleMappingMode(getTextContent(n)));
                 } else if ("userSearchScope".equals(name) || "roleSearchScope".equals(name)) {
                     builder.addPropertyValue(name, LdapSearchScope.getSearchScope(getTextContent(n)));
+                }
+            }
+            return builder;
+        }
+
+        private BeanDefinitionBuilder handleKerberosAuthenticationConfig(BeanDefinitionBuilder realmConfigBuilder, Node node) {
+            BeanDefinitionBuilder builder = createAndFillBeanBuilder(node, KerberosAuthenticationConfig.class,
+                    "KerberosAuthenticationConfig", realmConfigBuilder, "ldap");
+            for (Node n : childElements(node)) {
+                String name = xmlToJavaName(cleanNodeName(n));
+                if ("ldap".equals(name)) {
+                    handleLdapAuthenticationConfig(builder, n);
                 }
             }
             return builder;
@@ -1708,6 +1734,9 @@ public class HazelcastConfigBeanDefinitionParser extends AbstractHazelcastBeanDe
                             .addConstructorArgValue(TokenEncoding.getTokenEncoding(getAttribute(child, "encoding")))
                             .addConstructorArgValue(getTextContent(child));
                     realmConfigBuilder.addPropertyValue("TokenIdentityConfig", configBuilder.getBeanDefinition());
+                } else if ("kerberos".equals(nodeName)) {
+                    createAndFillBeanBuilder(child, KerberosIdentityConfig.class, "KerberosIdentityConfig",
+                            realmConfigBuilder);
                 } else if ("credentials-ref".equals(nodeName)) {
                     realmConfigBuilder.addPropertyReference("credentials", getTextContent(child));
                 }
@@ -1750,29 +1779,6 @@ public class HazelcastConfigBeanDefinitionParser extends AbstractHazelcastBeanDe
             }
             memberAttributeConfigBuilder.addPropertyValue("attributes", attributes);
             configBuilder.addPropertyValue("memberAttributeConfig", beanDefinition);
-        }
-
-        private void handleNativeMemory(Node node) {
-            BeanDefinitionBuilder nativeMemoryConfigBuilder = createBeanBuilder(NativeMemoryConfig.class);
-            AbstractBeanDefinition beanDefinition = nativeMemoryConfigBuilder.getBeanDefinition();
-            fillAttributeValues(node, nativeMemoryConfigBuilder);
-            for (Node child : childElements(node)) {
-                String nodeName = cleanNodeName(child);
-                if ("size".equals(nodeName)) {
-                    handleMemorySizeConfig(child, nativeMemoryConfigBuilder);
-                }
-            }
-            configBuilder.addPropertyValue("nativeMemoryConfig", beanDefinition);
-        }
-
-        private void handleMemorySizeConfig(Node node, BeanDefinitionBuilder nativeMemoryConfigBuilder) {
-            BeanDefinitionBuilder memorySizeConfigBuilder = createBeanBuilder(MemorySize.class);
-            NamedNodeMap attributes = node.getAttributes();
-            Node value = attributes.getNamedItem("value");
-            Node unit = attributes.getNamedItem("unit");
-            memorySizeConfigBuilder.addConstructorArgValue(getTextContent(value));
-            memorySizeConfigBuilder.addConstructorArgValue(MemoryUnit.valueOf(getTextContent(unit)));
-            nativeMemoryConfigBuilder.addPropertyValue("size", memorySizeConfigBuilder.getBeanDefinition());
         }
 
         private void handleSecurityInterceptors(Node node, BeanDefinitionBuilder securityConfigBuilder) {
@@ -2031,6 +2037,21 @@ public class HazelcastConfigBeanDefinitionParser extends AbstractHazelcastBeanDe
             return EndpointQualifier.resolve(type, getAttribute(node, "name"));
         }
 
+        private void handleInstanceTracking(Node node) {
+            BeanDefinitionBuilder configBuilder = createBeanBuilder(InstanceTrackingConfig.class);
+            fillAttributeValues(node, configBuilder);
+
+            for (Node child : childElements(node)) {
+                final String name = cleanNodeName(child);
+                if ("file-name".equals(name)) {
+                    configBuilder.addPropertyValue("fileName", getTextContent(child));
+                } else if ("format-pattern".equals(name)) {
+                    configBuilder.addPropertyValue("formatPattern", getTextContent(child));
+                }
+            }
+            this.configBuilder.addPropertyValue("instanceTrackingConfig", configBuilder.getBeanDefinition());
+        }
+
         private void handleMetrics(Node node) {
             BeanDefinitionBuilder metricsConfigBuilder = createBeanBuilder(MetricsConfig.class);
 
@@ -2059,6 +2080,41 @@ public class HazelcastConfigBeanDefinitionParser extends AbstractHazelcastBeanDe
             }
 
             configBuilder.addPropertyValue("metricsConfig", metricsConfigBuilder.getBeanDefinition());
+        }
+
+        private void handleSql(Node node) {
+            BeanDefinitionBuilder sqlConfigBuilder = createBeanBuilder(SqlConfig.class);
+
+            fillValues(node, sqlConfigBuilder, "executorPoolSize", "operationPoolSize", "timeoutMillis");
+
+            for (Node child : childElements(node)) {
+                String nodeName = cleanNodeName(child);
+                String value = getTextContent(child).trim();
+                if ("executor-pool-size".equals(nodeName)) {
+                    sqlConfigBuilder.addPropertyValue("executorPoolSize", getIntegerValue("executor-pool-size", value));
+                } else if ("operation-pool-size".equals(nodeName)) {
+                    sqlConfigBuilder.addPropertyValue("operationPoolSize", getIntegerValue("operation-pool-size", value));
+                } else if ("statement-timeout-millis".equals(nodeName)) {
+                    sqlConfigBuilder.addPropertyValue(
+                        "statementTimeoutMillis",
+                        getLongValue("statement-timeout-millis", value)
+                    );
+                }
+            }
+
+            configBuilder.addPropertyValue("sqlConfig", sqlConfigBuilder.getBeanDefinition());
+        }
+
+        private void handleAuditlog(Node node) {
+            BeanDefinitionBuilder builder = createBeanBuilder(AuditlogConfig.class);
+            fillValues(node, builder);
+            for (Node child : childElements(node)) {
+                String nodeName = cleanNodeName(child);
+                if ("properties".equals(nodeName)) {
+                    handleProperties(child, builder);
+                }
+            }
+            configBuilder.addPropertyValue("auditlogConfig", builder.getBeanDefinition());
         }
     }
 }

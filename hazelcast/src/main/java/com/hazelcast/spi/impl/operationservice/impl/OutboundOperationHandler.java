@@ -16,11 +16,11 @@
 
 package com.hazelcast.spi.impl.operationservice.impl;
 
-import com.hazelcast.instance.impl.Node;
-import com.hazelcast.internal.serialization.InternalSerializationService;
 import com.hazelcast.cluster.Address;
-import com.hazelcast.internal.nio.Connection;
+import com.hazelcast.instance.impl.Node;
 import com.hazelcast.internal.nio.Packet;
+import com.hazelcast.internal.serialization.InternalSerializationService;
+import com.hazelcast.internal.server.ServerConnection;
 import com.hazelcast.spi.impl.operationservice.Operation;
 
 import static com.hazelcast.instance.EndpointQualifier.MEMBER;
@@ -48,11 +48,18 @@ public class OutboundOperationHandler {
             throw new IllegalArgumentException("Target is this node! -> " + target + ", op: " + op);
         }
 
-        Connection connection = node.getNetworkingService().getEndpointManager(MEMBER).getOrConnect(target);
-        return send(op, connection);
+        int streamId = op.getPartitionId();
+        return node.getServer()
+                .getConnectionManager(MEMBER)
+                .transmit(toPacket(op), target, streamId);
     }
 
-    public boolean send(Operation op, Connection connection) {
+    public boolean send(Operation op, ServerConnection connection) {
+        Packet packet = toPacket(op);
+        return connection.write(packet);
+    }
+
+    private Packet toPacket(Operation op) {
         byte[] bytes = serializationService.toBytes(op);
         int partitionId = op.getPartitionId();
         Packet packet = new Packet(bytes, partitionId).setPacketType(Packet.Type.OPERATION);
@@ -60,7 +67,6 @@ public class OutboundOperationHandler {
         if (op.isUrgent()) {
             packet.raiseFlags(FLAG_URGENT);
         }
-
-        return node.getEndpointManager(MEMBER).transmit(packet, connection);
+        return packet;
     }
 }

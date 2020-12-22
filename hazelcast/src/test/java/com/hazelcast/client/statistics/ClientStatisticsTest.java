@@ -20,7 +20,7 @@ import com.hazelcast.cache.ICache;
 import com.hazelcast.client.config.ClientConfig;
 import com.hazelcast.client.impl.ClientEngineImpl;
 import com.hazelcast.client.impl.clientside.HazelcastClientInstanceImpl;
-import com.hazelcast.client.impl.connection.nio.ClientConnection;
+import com.hazelcast.client.impl.connection.tcp.TcpClientConnection;
 import com.hazelcast.client.impl.statistics.ClientStatistics;
 import com.hazelcast.client.impl.statistics.ClientStatisticsService;
 import com.hazelcast.client.test.ClientTestSupport;
@@ -99,7 +99,7 @@ public class ClientStatisticsTest extends ClientTestSupport {
         Long connectionTimeStat = Long.valueOf(connStat);
         assertNotNull(format("connectionTimeStat should not be null (%s)", stats), connStat);
 
-        ClientConnection aConnection = client.getConnectionManager().getActiveConnections().iterator().next();
+        TcpClientConnection aConnection = (TcpClientConnection) client.getConnectionManager().getActiveConnections().iterator().next();
         String expectedClientAddress = aConnection.getLocalSocketAddress().getAddress().getHostAddress();
         assertEquals(expectedClientAddress, stats.get("clientAddress"));
         assertEquals(BuildInfoProvider.getBuildInfo().getVersion(), stats.get("clientVersion"));
@@ -108,9 +108,6 @@ public class ClientStatisticsTest extends ClientTestSupport {
         // time measured by us after client connection should be greater than the connection time reported by the statistics
         assertTrue(format("connectionTimeStat was %d, clientConnectionTime was %d (%s)",
                 connectionTimeStat, clientConnectionTime, stats), clientConnectionTime >= connectionTimeStat);
-
-        String queueSize = stats.get("executionService.userExecutorQueueSize");
-        assertNotNull(format("executionService.userExecutorQueueSize should not be null (%s)", stats), queueSize);
 
         String mapHits = stats.get(MAP_HITS_KEY);
         assertNull(format("%s should be null (%s)", MAP_HITS_KEY, stats), mapHits);
@@ -223,8 +220,8 @@ public class ClientStatisticsTest extends ClientTestSupport {
 
         ClientConfig clientConfig = new ClientConfig();
         clientConfig.getMetricsConfig()
-                    .setEnabled(false)
-                    .setCollectionFrequencySeconds(STATS_PERIOD_SECONDS);
+                .setEnabled(false)
+                .setCollectionFrequencySeconds(STATS_PERIOD_SECONDS);
 
         hazelcastFactory.newHazelcastClient(clientConfig);
 
@@ -260,7 +257,7 @@ public class ClientStatisticsTest extends ClientTestSupport {
 
         clientConfig.getConnectionStrategyConfig().getConnectionRetryConfig().setClusterConnectTimeoutMillis(Long.MAX_VALUE);
         clientConfig.getMetricsConfig()
-                    .setCollectionFrequencySeconds(STATS_PERIOD_SECONDS);
+                .setCollectionFrequencySeconds(STATS_PERIOD_SECONDS);
 
         HazelcastInstance clientInstance = hazelcastFactory.newHazelcastClient(clientConfig);
         return getHazelcastClientInstanceImpl(clientInstance);

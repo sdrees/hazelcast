@@ -37,6 +37,7 @@ import com.hazelcast.cluster.Member;
 import com.hazelcast.collection.ISet;
 import com.hazelcast.collection.ItemEvent;
 import com.hazelcast.collection.ItemListener;
+import com.hazelcast.collection.LocalSetStats;
 import com.hazelcast.collection.impl.common.DataAwareItemEvent;
 import com.hazelcast.core.ItemEventType;
 import com.hazelcast.internal.serialization.Data;
@@ -45,7 +46,6 @@ import com.hazelcast.spi.impl.UnmodifiableLazyList;
 import javax.annotation.Nonnull;
 import java.util.Collection;
 import java.util.Iterator;
-import java.util.List;
 import java.util.UUID;
 
 import static com.hazelcast.internal.util.CollectionUtil.objectToDataCollection;
@@ -66,16 +66,14 @@ public class ClientSetProxy<E> extends PartitionSpecificClientProxy implements I
     public int size() {
         ClientMessage request = SetSizeCodec.encodeRequest(name);
         ClientMessage response = invokeOnPartition(request);
-        SetSizeCodec.ResponseParameters resultParameters = SetSizeCodec.decodeResponse(response);
-        return resultParameters.response;
+        return SetSizeCodec.decodeResponse(response);
     }
 
     @Override
     public boolean isEmpty() {
         ClientMessage request = SetIsEmptyCodec.encodeRequest(name);
         ClientMessage response = invokeOnPartition(request);
-        SetIsEmptyCodec.ResponseParameters resultParameters = SetIsEmptyCodec.decodeResponse(response);
-        return resultParameters.response;
+        return SetIsEmptyCodec.decodeResponse(response);
     }
 
     @Override
@@ -84,8 +82,7 @@ public class ClientSetProxy<E> extends PartitionSpecificClientProxy implements I
         Data value = toData(o);
         ClientMessage request = SetContainsCodec.encodeRequest(name, value);
         ClientMessage response = invokeOnPartition(request);
-        SetContainsCodec.ResponseParameters resultParameters = SetContainsCodec.decodeResponse(response);
-        return resultParameters.response;
+        return SetContainsCodec.decodeResponse(response);
     }
 
     @Override
@@ -110,8 +107,7 @@ public class ClientSetProxy<E> extends PartitionSpecificClientProxy implements I
         Data element = toData(e);
         ClientMessage request = SetAddCodec.encodeRequest(name, element);
         ClientMessage response = invokeOnPartition(request);
-        SetAddCodec.ResponseParameters resultParameters = SetAddCodec.decodeResponse(response);
-        return resultParameters.response;
+        return SetAddCodec.decodeResponse(response);
     }
 
     @Override
@@ -120,8 +116,7 @@ public class ClientSetProxy<E> extends PartitionSpecificClientProxy implements I
         Data value = toData(o);
         ClientMessage request = SetRemoveCodec.encodeRequest(name, value);
         ClientMessage response = invokeOnPartition(request);
-        SetRemoveCodec.ResponseParameters resultParameters = SetRemoveCodec.decodeResponse(response);
-        return resultParameters.response;
+        return SetRemoveCodec.decodeResponse(response);
     }
 
     @Override
@@ -130,8 +125,7 @@ public class ClientSetProxy<E> extends PartitionSpecificClientProxy implements I
         Collection<Data> dataCollection = objectToDataCollection(c, getSerializationService());
         ClientMessage request = SetContainsAllCodec.encodeRequest(name, dataCollection);
         ClientMessage response = invokeOnPartition(request);
-        SetContainsAllCodec.ResponseParameters resultParameters = SetContainsAllCodec.decodeResponse(response);
-        return resultParameters.response;
+        return SetContainsAllCodec.decodeResponse(response);
     }
 
     @Override
@@ -140,8 +134,7 @@ public class ClientSetProxy<E> extends PartitionSpecificClientProxy implements I
         Collection<Data> dataCollection = objectToDataCollection(c, getSerializationService());
         ClientMessage request = SetAddAllCodec.encodeRequest(name, dataCollection);
         ClientMessage response = invokeOnPartition(request);
-        SetAddAllCodec.ResponseParameters resultParameters = SetAddAllCodec.decodeResponse(response);
-        return resultParameters.response;
+        return SetAddAllCodec.decodeResponse(response);
     }
 
     @Override
@@ -150,8 +143,7 @@ public class ClientSetProxy<E> extends PartitionSpecificClientProxy implements I
         Collection<Data> dataCollection = objectToDataCollection(c, getSerializationService());
         ClientMessage request = SetCompareAndRemoveAllCodec.encodeRequest(name, dataCollection);
         ClientMessage response = invokeOnPartition(request);
-        SetCompareAndRemoveAllCodec.ResponseParameters resultParameters = SetCompareAndRemoveAllCodec.decodeResponse(response);
-        return resultParameters.response;
+        return SetCompareAndRemoveAllCodec.decodeResponse(response);
     }
 
     @Override
@@ -160,8 +152,7 @@ public class ClientSetProxy<E> extends PartitionSpecificClientProxy implements I
         Collection<Data> dataCollection = objectToDataCollection(c, getSerializationService());
         ClientMessage request = SetCompareAndRetainAllCodec.encodeRequest(name, dataCollection);
         ClientMessage response = invokeOnPartition(request);
-        SetCompareAndRetainAllCodec.ResponseParameters resultParameters = SetCompareAndRetainAllCodec.decodeResponse(response);
-        return resultParameters.response;
+        return SetCompareAndRetainAllCodec.decodeResponse(response);
     }
 
     @Override
@@ -187,7 +178,7 @@ public class ClientSetProxy<E> extends PartitionSpecificClientProxy implements I
 
             @Override
             public UUID decodeAddResponse(ClientMessage clientMessage) {
-                return SetAddListenerCodec.decodeResponse(clientMessage).response;
+                return SetAddListenerCodec.decodeResponse(clientMessage);
             }
 
             @Override
@@ -197,7 +188,7 @@ public class ClientSetProxy<E> extends PartitionSpecificClientProxy implements I
 
             @Override
             public boolean decodeRemoveResponse(ClientMessage clientMessage) {
-                return SetRemoveListenerCodec.decodeResponse(clientMessage).response;
+                return SetRemoveListenerCodec.decodeResponse(clientMessage);
             }
         };
     }
@@ -210,9 +201,12 @@ public class ClientSetProxy<E> extends PartitionSpecificClientProxy implements I
     private Collection<E> getAll() {
         ClientMessage request = SetGetAllCodec.encodeRequest(name);
         ClientMessage response = invokeOnPartition(request);
-        SetGetAllCodec.ResponseParameters resultParameters = SetGetAllCodec.decodeResponse(response);
-        List<Data> resultCollection = resultParameters.response;
-        return new UnmodifiableLazyList(resultCollection, getSerializationService());
+        return new UnmodifiableLazyList(SetGetAllCodec.decodeResponse(response), getSerializationService());
+    }
+
+    @Override
+    public LocalSetStats getLocalSetStats() {
+        throw new UnsupportedOperationException("Locality is ambiguous for client!");
     }
 
     @Override

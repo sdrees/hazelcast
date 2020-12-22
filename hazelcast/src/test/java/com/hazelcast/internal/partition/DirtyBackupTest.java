@@ -17,11 +17,13 @@
 package com.hazelcast.internal.partition;
 
 import com.hazelcast.cluster.Address;
+import com.hazelcast.config.Config;
 import com.hazelcast.core.HazelcastInstance;
+import com.hazelcast.instance.EndpointQualifier;
 import com.hazelcast.instance.impl.Node;
-import com.hazelcast.internal.nio.tcp.FirewallingNetworkingService;
-import com.hazelcast.internal.nio.tcp.OperationPacketFilter;
-import com.hazelcast.internal.nio.tcp.PacketFilter;
+import com.hazelcast.internal.server.FirewallingServer;
+import com.hazelcast.internal.server.OperationPacketFilter;
+import com.hazelcast.internal.server.PacketFilter;
 import com.hazelcast.internal.serialization.InternalSerializationService;
 import com.hazelcast.spi.impl.SpiDataSerializerHook;
 import com.hazelcast.test.HazelcastParallelParametersRunnerFactory;
@@ -53,6 +55,13 @@ public class DirtyBackupTest extends PartitionCorrectnessTestSupport {
         });
     }
 
+    @Override
+    protected Config getConfig() {
+        // Partition count is overwritten back to PartitionCorrectnessTestSupport.partitionCount
+        // in PartitionCorrectnessTestSupport.getConfig(boolean, boolean).
+        return smallInstanceConfig();
+    }
+
     @Test
     public void testPartitionData_withoutAntiEntropy() {
         startInstancesAndFillPartitions(false);
@@ -82,10 +91,10 @@ public class DirtyBackupTest extends PartitionCorrectnessTestSupport {
 
     private static void setBackupPacketReorderFilter(HazelcastInstance instance) {
         Node node = getNode(instance);
-        FirewallingNetworkingService.FirewallingEndpointManager
-                em = (FirewallingNetworkingService.FirewallingEndpointManager) node.getEndpointManager();
-        em.setPacketFilter(new BackupPacketReorderFilter(node.getSerializationService()));
-        em.setDelayMillis(100, 1000);
+        FirewallingServer.FirewallingServerConnectionManager cm = (FirewallingServer.FirewallingServerConnectionManager)
+                node.getServer().getConnectionManager(EndpointQualifier.MEMBER);
+        cm.setPacketFilter(new BackupPacketReorderFilter(node.getSerializationService()));
+        cm.setDelayMillis(100, 1000);
     }
 
     private static class BackupPacketReorderFilter extends OperationPacketFilter implements PacketFilter {

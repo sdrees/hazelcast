@@ -17,6 +17,7 @@
 package com.hazelcast.internal.nio;
 
 import com.hazelcast.internal.networking.OutboundFrame;
+import com.hazelcast.internal.server.ServerConnection;
 import com.hazelcast.internal.serialization.impl.HeapData;
 
 import static com.hazelcast.internal.nio.PacketIOHelper.HEADER_SIZE;
@@ -43,7 +44,7 @@ public final class Packet extends HeapData implements OutboundFrame {
     // 1. URGENT (bit 4)
     // 2. Packet type (bits 0, 2, 5)
     // 3. Flags specific to a given packet type (bits 1, 6)
-
+    // 4. 4.x flag (bit 7)
 
     // 1. URGENT flag
 
@@ -88,7 +89,6 @@ public final class Packet extends HeapData implements OutboundFrame {
      */
     public static final int FLAG_OP_CONTROL = 1 << 6;
 
-
     // 3.b Jet packet flags
 
     /**
@@ -96,6 +96,10 @@ public final class Packet extends HeapData implements OutboundFrame {
      */
     public static final int FLAG_JET_FLOW_CONTROL = 1 << 1;
 
+    /**
+     * Marks a packet as sent by a 4.x member
+     */
+    public static final int FLAG_4_0 = 1 << 7;
 
     //            END OF HEADER FLAG SECTION
 
@@ -104,9 +108,10 @@ public final class Packet extends HeapData implements OutboundFrame {
     private char flags;
 
     private int partitionId;
-    private transient Connection conn;
+    private transient ServerConnection conn;
 
     public Packet() {
+        raiseFlags(FLAG_4_0);
     }
 
     public Packet(byte[] payload) {
@@ -116,6 +121,7 @@ public final class Packet extends HeapData implements OutboundFrame {
     public Packet(byte[] payload, int partitionId) {
         super(payload);
         this.partitionId = partitionId;
+        raiseFlags(FLAG_4_0);
     }
 
     /**
@@ -123,7 +129,7 @@ public final class Packet extends HeapData implements OutboundFrame {
      *
      * @return the Connection. Could be null.
      */
-    public Connection getConn() {
+    public ServerConnection getConn() {
         return conn;
     }
 
@@ -136,7 +142,7 @@ public final class Packet extends HeapData implements OutboundFrame {
      * @param conn the connection.
      * @return {@code this} (for fluent interface)
      */
-    public Packet setConn(Connection conn) {
+    public Packet setConn(ServerConnection conn) {
         this.conn = conn;
         return this;
     }
@@ -302,17 +308,17 @@ public final class Packet extends HeapData implements OutboundFrame {
             }
         },
         /**
-         * The type of a Bind Message packet.
+         * TcpServer specific control messages.
          * <p>
          * {@code ordinal = 4}
          */
-        BIND,
+        SERVER_CONTROL,
         /**
-         * Unused packet type. Available for future use.
+         * The type of an SQL packet.
          * <p>
          * {@code ordinal = 5}
          */
-        UNDEFINED5,
+        SQL,
         /**
          * Unused packet type. Available for future use.
          * <p>

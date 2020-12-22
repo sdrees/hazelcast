@@ -25,6 +25,8 @@ package com.hazelcast.nio.serialization;
 public interface Serializer {
 
     /**
+     * Uniquely identifies given serializer.
+     *
      * @return typeId of serializer
      */
     int getTypeId();
@@ -32,5 +34,6 @@ public interface Serializer {
     /**
      * Called when instance is shutting down. It can be used to clear used resources.
      */
-    void destroy();
+    default void destroy() {
+    }
 }

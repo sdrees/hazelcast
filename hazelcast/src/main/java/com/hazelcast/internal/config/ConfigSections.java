@@ -61,7 +61,10 @@ public enum ConfigSections {
     PN_COUNTER("pn-counter", true),
     ADVANCED_NETWORK("advanced-network", false),
     CP_SUBSYSTEM("cp-subsystem", false),
-    METRICS("metrics", false);
+    METRICS("metrics", false),
+    AUDITLOG("auditlog", false),
+    INSTANCE_TRACKING("instance-tracking", false),
+    SQL("sql", false);
 
     final boolean multipleOccurrence;
     private final String name;
@@ -78,10 +81,6 @@ public enum ConfigSections {
             }
         }
         return false;
-    }
-
-    public boolean isEqual(String name) {
-        return this.name.equals(name);
     }
 
     public String getName() {

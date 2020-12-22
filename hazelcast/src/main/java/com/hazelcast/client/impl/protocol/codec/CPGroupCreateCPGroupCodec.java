@@ -36,7 +36,7 @@ import static com.hazelcast.client.impl.protocol.codec.builtin.FixedSizeTypesCod
 /**
  * Creates a new CP group with the given name
  */
-@Generated("ccdf9d8030461a49c6cd78f5e77e6da2")
+@Generated("02d6f66aee586a605c3e86d7adeef411")
 public final class CPGroupCreateCPGroupCodec {
     //hex: 0x1E0100
     public static final int REQUEST_MESSAGE_TYPE = 1966336;
@@ -46,15 +46,6 @@ public final class CPGroupCreateCPGroupCodec {
     private static final int RESPONSE_INITIAL_FRAME_SIZE = RESPONSE_BACKUP_ACKS_FIELD_OFFSET + BYTE_SIZE_IN_BYTES;
 
     private CPGroupCreateCPGroupCodec() {
-    }
-
-    @edu.umd.cs.findbugs.annotations.SuppressFBWarnings({"URF_UNREAD_PUBLIC_OR_PROTECTED_FIELD"})
-    public static class RequestParameters {
-
-        /**
-         * The proxy name of this data structure instance
-         */
-        public java.lang.String proxyName;
     }
 
     public static ClientMessage encodeRequest(java.lang.String proxyName) {
@@ -69,22 +60,14 @@ public final class CPGroupCreateCPGroupCodec {
         return clientMessage;
     }
 
-    public static CPGroupCreateCPGroupCodec.RequestParameters decodeRequest(ClientMessage clientMessage) {
+    /**
+     * The proxy name of this data structure instance
+     */
+    public static java.lang.String decodeRequest(ClientMessage clientMessage) {
         ClientMessage.ForwardFrameIterator iterator = clientMessage.frameIterator();
-        RequestParameters request = new RequestParameters();
         //empty initial frame
         iterator.next();
-        request.proxyName = StringCodec.decode(iterator);
-        return request;
-    }
-
-    @edu.umd.cs.findbugs.annotations.SuppressFBWarnings({"URF_UNREAD_PUBLIC_OR_PROTECTED_FIELD"})
-    public static class ResponseParameters {
-
-        /**
-         * ID of the CP group that contains the CP object
-         */
-        public com.hazelcast.cp.internal.RaftGroupId groupId;
+        return StringCodec.decode(iterator);
     }
 
     public static ClientMessage encodeResponse(com.hazelcast.cp.internal.RaftGroupId groupId) {
@@ -97,13 +80,14 @@ public final class CPGroupCreateCPGroupCodec {
         return clientMessage;
     }
 
-    public static CPGroupCreateCPGroupCodec.ResponseParameters decodeResponse(ClientMessage clientMessage) {
+    /**
+     * ID of the CP group that contains the CP object
+     */
+    public static com.hazelcast.cp.internal.RaftGroupId decodeResponse(ClientMessage clientMessage) {
         ClientMessage.ForwardFrameIterator iterator = clientMessage.frameIterator();
-        ResponseParameters response = new ResponseParameters();
         //empty initial frame
         iterator.next();
-        response.groupId = RaftGroupIdCodec.decode(iterator);
-        return response;
+        return RaftGroupIdCodec.decode(iterator);
     }
 
 }

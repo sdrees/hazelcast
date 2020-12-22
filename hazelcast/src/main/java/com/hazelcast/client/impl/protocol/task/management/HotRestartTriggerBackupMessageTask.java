@@ -33,7 +33,7 @@ import static com.hazelcast.internal.util.ExceptionUtil.peel;
 import static com.hazelcast.internal.util.ExceptionUtil.withTryCatch;
 
 public class HotRestartTriggerBackupMessageTask
-        extends AbstractCallableMessageTask<MCTriggerHotRestartBackupCodec.RequestParameters> {
+        extends AbstractCallableMessageTask<Void> {
 
     private final Node node;
 
@@ -62,8 +62,8 @@ public class HotRestartTriggerBackupMessageTask
     }
 
     @Override
-    protected MCTriggerHotRestartBackupCodec.RequestParameters decodeClientMessage(ClientMessage clientMessage) {
-        return MCTriggerHotRestartBackupCodec.decodeRequest(clientMessage);
+    protected Void decodeClientMessage(ClientMessage clientMessage) {
+        return null;
     }
 
     @Override
@@ -94,5 +94,10 @@ public class HotRestartTriggerBackupMessageTask
     @Override
     public Object[] getParameters() {
         return new Object[0];
+    }
+
+    @Override
+    public boolean isManagementTask() {
+        return true;
     }
 }

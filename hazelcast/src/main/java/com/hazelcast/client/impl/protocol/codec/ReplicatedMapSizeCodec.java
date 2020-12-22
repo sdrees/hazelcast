@@ -37,7 +37,7 @@ import static com.hazelcast.client.impl.protocol.codec.builtin.FixedSizeTypesCod
  * Returns the number of key-value mappings in this map. If the map contains more than Integer.MAX_VALUE elements,
  * returns Integer.MAX_VALUE.
  */
-@Generated("30acb174363902fbbd5387060b3a264f")
+@Generated("da4377c2faeba81d2267709e391ba3ce")
 public final class ReplicatedMapSizeCodec {
     //hex: 0x0D0200
     public static final int REQUEST_MESSAGE_TYPE = 852480;
@@ -48,15 +48,6 @@ public final class ReplicatedMapSizeCodec {
     private static final int RESPONSE_INITIAL_FRAME_SIZE = RESPONSE_RESPONSE_FIELD_OFFSET + INT_SIZE_IN_BYTES;
 
     private ReplicatedMapSizeCodec() {
-    }
-
-    @edu.umd.cs.findbugs.annotations.SuppressFBWarnings({"URF_UNREAD_PUBLIC_OR_PROTECTED_FIELD"})
-    public static class RequestParameters {
-
-        /**
-         * Name of the ReplicatedMap
-         */
-        public java.lang.String name;
     }
 
     public static ClientMessage encodeRequest(java.lang.String name) {
@@ -71,22 +62,14 @@ public final class ReplicatedMapSizeCodec {
         return clientMessage;
     }
 
-    public static ReplicatedMapSizeCodec.RequestParameters decodeRequest(ClientMessage clientMessage) {
+    /**
+     * Name of the ReplicatedMap
+     */
+    public static java.lang.String decodeRequest(ClientMessage clientMessage) {
         ClientMessage.ForwardFrameIterator iterator = clientMessage.frameIterator();
-        RequestParameters request = new RequestParameters();
         //empty initial frame
         iterator.next();
-        request.name = StringCodec.decode(iterator);
-        return request;
-    }
-
-    @edu.umd.cs.findbugs.annotations.SuppressFBWarnings({"URF_UNREAD_PUBLIC_OR_PROTECTED_FIELD"})
-    public static class ResponseParameters {
-
-        /**
-         * the number of key-value mappings in this map.
-         */
-        public int response;
+        return StringCodec.decode(iterator);
     }
 
     public static ClientMessage encodeResponse(int response) {
@@ -99,12 +82,13 @@ public final class ReplicatedMapSizeCodec {
         return clientMessage;
     }
 
-    public static ReplicatedMapSizeCodec.ResponseParameters decodeResponse(ClientMessage clientMessage) {
+    /**
+     * the number of key-value mappings in this map.
+     */
+    public static int decodeResponse(ClientMessage clientMessage) {
         ClientMessage.ForwardFrameIterator iterator = clientMessage.frameIterator();
-        ResponseParameters response = new ResponseParameters();
         ClientMessage.Frame initialFrame = iterator.next();
-        response.response = decodeInt(initialFrame.content, RESPONSE_RESPONSE_FIELD_OFFSET);
-        return response;
+        return decodeInt(initialFrame.content, RESPONSE_RESPONSE_FIELD_OFFSET);
     }
 
 }

@@ -2610,7 +2610,7 @@
         <xs:attributeGroup ref="class-or-bean-name">
             <xs:annotation>
                 <xs:documentation>
-                    Fully qualified class name of WAN Replication implementation WanReplicationPublisher.
+                    Fully qualified class name of WAN Replication implementation WanPublisher.
                 </xs:documentation>
             </xs:annotation>
         </xs:attributeGroup>
@@ -2631,7 +2631,7 @@
         <xs:attributeGroup ref="class-or-bean-name">
             <xs:annotation>
                 <xs:documentation>
-                    Defines a custom WAN consumer (WanReplicationConsumer).
+                    Defines a custom WAN consumer (WanConsumer).
                     If you don't define a class name or implementation, the default processing
                     logic for incoming WAN events will be used.
                 </xs:documentation>
@@ -2775,6 +2775,10 @@
                         <xs:element name="user-code-deployment-permission" type="instance-permission" minOccurs="0"
                                     maxOccurs="unbounded"/>
                         <xs:element name="config-permission" type="base-permission" minOccurs="0" maxOccurs="1"/>
+                        <xs:element name="ring-buffer-permission" type="instance-permission" minOccurs="0"
+                                    maxOccurs="unbounded"/>
+                        <xs:element name="reliable-topic-permission" type="instance-permission" minOccurs="0"
+                                    maxOccurs="unbounded"/>
                     </xs:choice>
                     <xs:attribute name="on-join-operation" type="permission-on-join-operation" use="optional" default="RECEIVE"/>
                 </xs:complexType>
@@ -3088,9 +3092,11 @@
                 <xs:restriction base="non-space-string">
                     <xs:enumeration value="random"/>
                     <xs:enumeration value="round-robin"/>
+                    <xs:enumeration value="custom"/>
                 </xs:restriction>
             </xs:simpleType>
         </xs:attribute>
+        <xs:attributeGroup ref="class-or-bean-name"/>
     </xs:complexType>
     <xs:complexType name="near-cache-client">
         <xs:complexContent>
@@ -3276,7 +3282,7 @@
         <xs:attribute name="epochStart" type="xs:long" default="1514764800000" use="optional">
             <xs:annotation>
                 <xs:documentation>
-                    Sets the offset of timestamp component. Time unit is milliseconds, default is 1514764800000 
+                    Sets the offset of timestamp component. Time unit is milliseconds, default is 1514764800000
                     (1.1.2018 0:00 UTC).
                 </xs:documentation>
             </xs:annotation>

@@ -206,11 +206,19 @@ public class HazelcastPropertiesTest {
 
     @Test
     public void getFloat() {
-        HazelcastProperty property = new HazelcastProperty("foo", "10");
+        HazelcastProperty property = new HazelcastProperty("foo", 10.1F);
 
-        float maxFileSize = defaultProperties.getFloat(property);
+        float foo = defaultProperties.getFloat(property);
 
-        assertEquals(10, maxFileSize, 0.0001);
+        assertEquals(10.1F, foo, 0.0001);
+    }
+
+    @Test
+    public void getDouble() {
+        HazelcastProperty property = new HazelcastProperty("foo", 10.1D);
+        double foo = defaultProperties.getDouble(property);
+
+        assertEquals(10.1D, foo, 0.0001);
     }
 
     @Test
@@ -259,7 +267,7 @@ public class HazelcastPropertiesTest {
 
     @Test(expected = IllegalArgumentException.class)
     public void getTimeUnit_noTimeUnitProperty() {
-        defaultProperties.getMillis(ClusterProperty.AUDIT_LOG_ENABLED);
+        defaultProperties.getMillis(ClusterProperty.EVENT_THREAD_COUNT);
     }
 
     @Test

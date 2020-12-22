@@ -41,18 +41,14 @@ public class MapReplicationOperation extends Operation
     private WriteBehindStateHolder writeBehindStateHolder;
     private MapNearCacheStateHolder mapNearCacheStateHolder;
 
-
     private transient NativeOutOfMemoryError oome;
 
     public MapReplicationOperation() {
     }
 
-    public MapReplicationOperation(PartitionContainer container, int partitionId, int replicaIndex) {
-        this(container, container.getAllNamespaces(replicaIndex), partitionId, replicaIndex);
-    }
+    public MapReplicationOperation(PartitionContainer container,
+                                   Collection<ServiceNamespace> namespaces, int partitionId, int replicaIndex) {
 
-    public MapReplicationOperation(PartitionContainer container, Collection<ServiceNamespace> namespaces,
-                                   int partitionId, int replicaIndex) {
         setPartitionId(partitionId).setReplicaIndex(replicaIndex);
 
         this.mapReplicationStateHolder = new MapReplicationStateHolder();
@@ -156,5 +152,10 @@ public class MapReplicationOperation extends Operation
     @Override
     public int getClassId() {
         return MapDataSerializerHook.MAP_REPLICATION;
+    }
+
+    @Override
+    public boolean requiresTenantContext() {
+        return true;
     }
 }

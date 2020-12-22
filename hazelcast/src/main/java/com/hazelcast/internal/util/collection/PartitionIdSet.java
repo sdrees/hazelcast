@@ -33,21 +33,33 @@ import java.util.PrimitiveIterator;
  * <p>
  * Additionally, the {@code PartitionIdSet} supplies specialized methods for {@code add},
  * {@code remove} and {@code contains} of primitive {@code int} arguments, as well as a
- * primitive {@code int} iterator implementation, to allow clients avoid cost of boxing
- * and unboxing.
+ * primitive {@code int} iterator implementation, to allow clients to avoid the cost of
+ * boxing and unboxing.
  * <p>
  * This set's {@link PartitionIdSet#iterator() iterator} is a view of the actual
  * set, so any changes on the set will be reflected in the iterator and vice versa.
  * <p>
- * This class is not thread-safe.
+ * This class is not thread-safe. Even if used as immutable, surprisingly,
+ * the {@link #size()} method mutates the state and is not thread-safe.
  */
 public class PartitionIdSet extends AbstractSet<Integer> {
 
+    private static final int SIZE_UNKNOWN = -1;
+
     private final int partitionCount;
     private final BitSet bitSet;
+    private int size = SIZE_UNKNOWN;
 
     public PartitionIdSet(int partitionCount) {
         this(partitionCount, new BitSet(partitionCount));
+    }
+
+    /**
+     * Creates a PartitionIdSet initially containing a sole partition ID.
+     */
+    public PartitionIdSet(int partitionCount, int solePartitionId) {
+        this(partitionCount);
+        bitSet.set(solePartitionId);
     }
 
     public PartitionIdSet(int partitionCount, Collection<Integer> initialPartitionIds) {
@@ -75,9 +87,22 @@ public class PartitionIdSet extends AbstractSet<Integer> {
         return new PartitionIdSetIterator();
     }
 
+    /**
+     * Return the number of partitions in the set.
+     * <p>
+     * The method mutates the state of this instance.
+     */
     @Override
     public int size() {
-        return bitSet.cardinality();
+        if (size == SIZE_UNKNOWN) {
+            size = bitSet.cardinality();
+        }
+
+        return size;
+    }
+
+    private void resetSize() {
+        size = SIZE_UNKNOWN;
     }
 
     @Override
@@ -98,7 +123,7 @@ public class PartitionIdSet extends AbstractSet<Integer> {
     }
 
     /**
-     * @return  {@code true} when {@code this} set contains all partition IDs contained in {@code other}
+     * @return {@code true} when {@code this} set contains all partition IDs contained in {@code other}
      */
     public boolean containsAll(PartitionIdSet other) {
         BitSet clone = (BitSet) bitSet.clone();
@@ -114,6 +139,7 @@ public class PartitionIdSet extends AbstractSet<Integer> {
     public boolean add(int partitionId) {
         if (!bitSet.get(partitionId)) {
             bitSet.set(partitionId);
+            resetSize();
             return true;
         } else {
             return false;
@@ -122,6 +148,7 @@ public class PartitionIdSet extends AbstractSet<Integer> {
 
     public void addAll(PartitionIdSet other) {
         bitSet.or(other.bitSet);
+        resetSize();
     }
 
     @Override
@@ -135,6 +162,7 @@ public class PartitionIdSet extends AbstractSet<Integer> {
     public boolean remove(int partitionId) {
         if (bitSet.get(partitionId)) {
             bitSet.clear(partitionId);
+            resetSize();
             return true;
         } else {
             return false;
@@ -143,11 +171,13 @@ public class PartitionIdSet extends AbstractSet<Integer> {
 
     public void removeAll(PartitionIdSet other) {
         other.bitSet.stream().forEach(bitSet::clear);
+        resetSize();
     }
 
     @Override
     public void clear() {
         bitSet.clear();
+        resetSize();
     }
 
     public int getPartitionCount() {
@@ -157,8 +187,8 @@ public class PartitionIdSet extends AbstractSet<Integer> {
     /**
      * Returns whether the intersection of this set with given argument is not empty.
      *
-     * @return  {@code true} when the intersection of {@code this} and {@code other} set
-     *          is not empty, otherwise {@code false}.
+     * @return {@code true} when the intersection of {@code this} and {@code other} set
+     * is not empty, otherwise {@code false}.
      */
     public boolean intersects(PartitionIdSet other) {
         return bitSet.intersects(other.bitSet);
@@ -170,6 +200,7 @@ public class PartitionIdSet extends AbstractSet<Integer> {
      */
     public void union(PartitionIdSet other) {
         this.bitSet.or(other.bitSet);
+        resetSize();
     }
 
     /**
@@ -177,27 +208,74 @@ public class PartitionIdSet extends AbstractSet<Integer> {
      */
     public void complement() {
         bitSet.flip(0, partitionCount);
+        resetSize();
     }
 
     /**
-     * @return  {@code false} when all partition IDs in [0, partitionCount) are contained in this
-     *          set, otherwise {@code true}
+     * @return {@code false} when all partition IDs in [0, partitionCount) are contained in this
+     * set, otherwise {@code true}
      */
     public boolean isMissingPartitions() {
         return bitSet.nextClearBit(0) < partitionCount;
     }
 
+    public PartitionIdSet copy() {
+        return new PartitionIdSet(partitionCount, (BitSet) bitSet.clone());
+    }
+
+    @Override
+    public boolean equals(Object o) {
+        if (this == o) {
+            return true;
+        }
+
+        if (o == null || getClass() != o.getClass()) {
+            return false;
+        }
+
+        PartitionIdSet other = (PartitionIdSet) o;
+
+        return partitionCount == other.partitionCount && bitSet.equals(other.bitSet);
+    }
+
+    @Override
+    public int hashCode() {
+        int result = super.hashCode();
+        result = 31 * result + partitionCount;
+        result = 31 * result + bitSet.hashCode();
+        return result;
+    }
+
+    /**
+     * Returns the sole partition ID, if this set has a size of 1. Otherwise returns -1.
+     */
+    public int solePartition() {
+        int candidateResult = bitSet.nextSetBit(0);
+        if (bitSet.nextSetBit(candidateResult + 1) < 0) {
+            return candidateResult;
+        } else {
+            return -1;
+        }
+    }
+
     private final class PartitionIdSetIterator
             implements PrimitiveIterator.OfInt {
 
-        private int index = -1;
+        private int last = -1;
+        private int next = -1;
 
         PartitionIdSetIterator() {
+            moveNext();
+        }
+
+        private void moveNext() {
+            last = next;
+            next = bitSet.nextSetBit(next + 1);
         }
 
         @Override
         public boolean hasNext() {
-            return bitSet.nextSetBit(index + 1) != -1;
+            return next >= 0;
         }
 
         @Override
@@ -207,17 +285,17 @@ public class PartitionIdSet extends AbstractSet<Integer> {
 
         @Override
         public int nextInt() {
-            int nextSetBit = bitSet.nextSetBit(index + 1);
-            if (nextSetBit == -1) {
+            if (!hasNext()) {
                 throw new NoSuchElementException("No more elements");
             }
-            index = nextSetBit;
-            return nextSetBit;
+            int res = next;
+            moveNext();
+            return res;
         }
 
         @Override
         public void remove() {
-            PartitionIdSet.this.remove(index);
+            PartitionIdSet.this.remove(last);
         }
     }
 

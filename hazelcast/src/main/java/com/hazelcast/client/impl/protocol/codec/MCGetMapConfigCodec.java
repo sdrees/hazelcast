@@ -36,7 +36,7 @@ import static com.hazelcast.client.impl.protocol.codec.builtin.FixedSizeTypesCod
 /**
  * Gets the config of a map on the member it's called on.
  */
-@Generated("95f82c6b77658a38b6264ef6e72e9eed")
+@Generated("ff9e3238ae4b1420bbba59356f68307b")
 public final class MCGetMapConfigCodec {
     //hex: 0x200300
     public static final int REQUEST_MESSAGE_TYPE = 2097920;
@@ -57,15 +57,6 @@ public final class MCGetMapConfigCodec {
     private MCGetMapConfigCodec() {
     }
 
-    @edu.umd.cs.findbugs.annotations.SuppressFBWarnings({"URF_UNREAD_PUBLIC_OR_PROTECTED_FIELD"})
-    public static class RequestParameters {
-
-        /**
-         * Name of the map.
-         */
-        public java.lang.String mapName;
-    }
-
     public static ClientMessage encodeRequest(java.lang.String mapName) {
         ClientMessage clientMessage = ClientMessage.createForEncode();
         clientMessage.setRetryable(true);
@@ -78,13 +69,14 @@ public final class MCGetMapConfigCodec {
         return clientMessage;
     }
 
-    public static MCGetMapConfigCodec.RequestParameters decodeRequest(ClientMessage clientMessage) {
+    /**
+     * Name of the map.
+     */
+    public static java.lang.String decodeRequest(ClientMessage clientMessage) {
         ClientMessage.ForwardFrameIterator iterator = clientMessage.frameIterator();
-        RequestParameters request = new RequestParameters();
         //empty initial frame
         iterator.next();
-        request.mapName = StringCodec.decode(iterator);
-        return request;
+        return StringCodec.decode(iterator);
     }
 
     @edu.umd.cs.findbugs.annotations.SuppressFBWarnings({"URF_UNREAD_PUBLIC_OR_PROTECTED_FIELD"})
@@ -157,7 +149,6 @@ public final class MCGetMapConfigCodec {
          */
         public java.lang.String mergePolicy;
     }
-
     public static ClientMessage encodeResponse(int inMemoryFormat, int backupCount, int asyncBackupCount, int timeToLiveSeconds, int maxIdleSeconds, int maxSize, int maxSizePolicy, boolean readBackupData, int evictionPolicy, java.lang.String mergePolicy) {
         ClientMessage clientMessage = ClientMessage.createForEncode();
         ClientMessage.Frame initialFrame = new ClientMessage.Frame(new byte[RESPONSE_INITIAL_FRAME_SIZE], UNFRAGMENTED_MESSAGE);

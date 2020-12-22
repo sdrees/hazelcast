@@ -26,13 +26,11 @@ import com.hazelcast.core.HazelcastInstance;
 import com.hazelcast.core.HazelcastJsonValue;
 import com.hazelcast.internal.json.Json;
 import com.hazelcast.internal.util.Clock;
-import com.hazelcast.internal.util.Preconditions;
-import com.hazelcast.map.impl.proxy.MapProxyImpl;
+import com.hazelcast.map.listener.EntryAddedListener;
 import com.hazelcast.map.listener.EntryExpiredListener;
 import com.hazelcast.query.PagingPredicate;
 import com.hazelcast.query.Predicate;
 import com.hazelcast.query.Predicates;
-import com.hazelcast.spi.impl.InternalCompletableFuture;
 import com.hazelcast.test.AssertTask;
 import com.hazelcast.test.ChangeLoggingRule;
 import com.hazelcast.test.HazelcastParallelClassRunner;
@@ -48,22 +46,29 @@ import org.junit.ClassRule;
 import org.junit.Test;
 import org.junit.experimental.categories.Category;
 import org.junit.runner.RunWith;
+import testsubjects.StaticSerializableBiConsumer;
+import testsubjects.StaticSerializableBiFunction;
 
+import java.io.File;
+import java.io.IOException;
 import java.io.Serializable;
 import java.lang.reflect.ParameterizedType;
 import java.lang.reflect.Type;
+import java.nio.file.Files;
 import java.util.Arrays;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Iterator;
+import java.util.List;
 import java.util.Map;
 import java.util.Random;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.Callable;
-import java.util.concurrent.ConcurrentMap;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionStage;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Future;
@@ -71,7 +76,9 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
-import java.util.function.BiFunction;
+import java.util.function.Function;
+import java.util.stream.Collectors;
+import java.util.stream.IntStream;
 
 import static java.util.Collections.emptyMap;
 import static java.util.concurrent.TimeUnit.MILLISECONDS;
@@ -79,7 +86,6 @@ import static java.util.concurrent.TimeUnit.SECONDS;
 import static org.junit.Assert.assertArrayEquals;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
-import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
 import static org.junit.Assert.fail;
@@ -213,30 +219,6 @@ public class BasicMapTest extends HazelcastTestSupport {
         assertEquals(map.putIfAbsent("key1", "valueX"), "value1");
         assertEquals(map.get("key1"), "value1");
         assertEquals(map.size(), 2);
-    }
-
-    @Test
-    public void testComputeIfPresent() {
-        final IMap<String, AtomicBoolean> map = getInstance().getMap("testComputeIfPresent");
-
-        map.put("presentKey", new AtomicBoolean(false));
-        AtomicBoolean value = emulateComputeIfPresent(map, "presentKey", new BiFunction<String, AtomicBoolean, AtomicBoolean>() {
-            @Override
-            public AtomicBoolean apply(String key, AtomicBoolean value) {
-                return new AtomicBoolean(true);
-            }
-        });
-        assertNotNull(value);
-        assertTrue(value.get());
-
-        value = emulateComputeIfPresent(map, "absentKey", new BiFunction<String, AtomicBoolean, AtomicBoolean>() {
-            @Override
-            public AtomicBoolean apply(String s, AtomicBoolean atomicBoolean) {
-                fail("should not be called");
-                return null;
-            }
-        });
-        assertNull(value);
     }
 
     @Test
@@ -938,6 +920,14 @@ public class BasicMapTest extends HazelcastTestSupport {
     }
 
     @Test
+    public void testAsyncMethodChaining() {
+        IMap<Integer, Integer> map = getInstance().getMap("testGetPutRemoveAsync");
+        CompletionStage<Integer> setThenGet = map.setAsync(1, 1)
+                                              .thenCompose(v -> map.getAsync(1));
+        assertEquals(1L, (long) setThenGet.toCompletableFuture().join());
+    }
+
+    @Test
     public void testPutAllEmpty() {
         IMap<Integer, Integer> map = getInstance().getMap("testPutAllEmpty");
         map.putAll(emptyMap());
@@ -946,7 +936,7 @@ public class BasicMapTest extends HazelcastTestSupport {
     @Test
     public void testPutAllAsyncEmpty() {
         IMap<Integer, Integer> map = getInstance().getMap("testPutAllEmpty");
-        ((MapProxyImpl<Integer, Integer>) map).putAllAsync(emptyMap());
+        map.putAllAsync(emptyMap());
     }
 
     @Test
@@ -1056,12 +1046,66 @@ public class BasicMapTest extends HazelcastTestSupport {
         for (int i = 0; i < size; i++) {
             mm.put(i, i);
         }
-        InternalCompletableFuture<Void> future = ((MapProxyImpl<Integer, Integer>) map).putAllAsync(mm);
+        CompletableFuture<Void> future = map.putAllAsync(mm).toCompletableFuture();
         assertTrueEventually(() -> assertTrue(future.isDone()));
         assertEquals(map.size(), size);
         for (int i = 0; i < size; i++) {
             assertEquals(i, map.get(i).intValue());
         }
+    }
+
+    @Test
+    public void testSetAll() {
+        int max = 10000;
+        final IMap<Integer, Integer> map = instances[0].getMap(randomString());
+
+        final CountDownLatch latch = new CountDownLatch(max);
+        map.addEntryListener((EntryAddedListener<Integer, Integer>) event -> latch.countDown(), true);
+
+        final Map<Integer, Integer> expected = IntStream.range(0, max).boxed()
+            .collect(Collectors.toMap(Function.identity(), Function.identity()));
+        map.setAll(expected);
+
+        assertEquals(max, map.size());
+        expected.keySet().forEach(i -> assertEquals(i, map.get(i)));
+        assertOpenEventually(latch);
+    }
+
+    @Test
+    public void testSetAll_WhenKeyExists() {
+        int max = 100;
+        final IMap<Integer, Integer> map = instances[0].getMap(randomString());
+        IntStream.range(0, max).forEach(i -> map.put(i, 0));
+        assertEquals(max, map.size());
+
+        final CountDownLatch latch = new CountDownLatch(max);
+        map.addEntryListener((EntryAddedListener<Integer, Integer>) event -> latch.countDown(), true);
+
+        final Map<Integer, Integer> expected = IntStream.range(0, max).boxed()
+            .collect(Collectors.toMap(Function.identity(), Function.identity()));
+        map.setAll(expected);
+
+        assertEquals(max, map.size());
+        expected.keySet().forEach(i -> assertEquals(i, map.get(i)));
+        assertOpenEventually(latch);
+    }
+
+    @Test
+    public void testSetAllAsync() {
+        int max = 100;
+        final IMap<Integer, Integer> map = instances[0].getMap(randomString());
+
+        final CountDownLatch latch = new CountDownLatch(max);
+        map.addEntryListener((EntryAddedListener<Integer, Integer>) event -> latch.countDown(), true);
+
+        final Map<Integer, Integer> expected = IntStream.range(0, max).boxed()
+            .collect(Collectors.toMap(Function.identity(), Function.identity()));
+        final Future<Void> future = map.setAllAsync(expected).toCompletableFuture();
+
+        assertEqualsEventually(future::isDone, true);
+        assertEquals(max, map.size());
+        expected.keySet().forEach(i -> assertEquals(i, map.get(i)));
+        assertOpenEventually(latch);
     }
 
     @Test
@@ -1912,25 +1956,68 @@ public class BasicMapTest extends HazelcastTestSupport {
         }
     }
 
-    private static <K, V> V emulateComputeIfPresent(ConcurrentMap<K, V> map, K key,
-                                                    BiFunction<? super K, ? super V, ? extends V> remappingFunction) {
-        // emulates ConcurrentMap.computeIfPresent() introduced in Java 8
+    @Test
+    public void testForEachWithALambdaFunction() {
+        final IMap<String, Integer> sourceMap = getSourceMapFor_ForEach_Test();
+        final IMap<String, Integer> targetMap = getTargetMapFor_ForEach_Test();
 
-        Preconditions.checkNotNull(remappingFunction);
+        sourceMap.forEach((k, v) -> {
+            targetMap.put(k, v);
+        });
 
-        V oldValue;
-        while ((oldValue = map.get(key)) != null) {
-            V newValue = remappingFunction.apply(key, oldValue);
-            if (newValue != null) {
-                if (map.replace(key, oldValue, newValue)) {
-                    return newValue;
-                }
-            } else if (map.remove(key, oldValue)) {
-                return null;
-            }
-        }
+        assertEntriesEqual(sourceMap, targetMap);
+    }
 
-        return null;
+    @Test
+    public void testForEachWithStaticSerializableAction() throws IOException {
+        final IMap<String, Integer> sourceMap = getSourceMapFor_ForEach_Test();
+
+        //Create a bi-consumer which writes both args to a file
+        File tempFile = File.createTempFile("Map", ".txt");
+        tempFile.deleteOnExit();
+        StaticSerializableBiConsumer action = new StaticSerializableBiConsumer(tempFile.getAbsolutePath());
+
+        sourceMap.forEach(action);
+
+        //Verify that all map entries got written to the file
+        List<String> lines = Files.readAllLines(tempFile.toPath());
+        boolean allEntriesProcessed = sourceMap.entrySet().stream().allMatch(e -> lines.contains(e.getKey() + "#" + e.getValue()));
+        assertTrue(allEntriesProcessed);
+    }
+
+    private IMap<String, Integer> getSourceMapFor_ForEach_Test() {
+        final IMap<String, Integer> sourceMap = getInstance().getMap("source_map");
+        sourceMap.put("k1", 1);
+        sourceMap.put("k2", 2);
+        return sourceMap;
+    }
+
+    private IMap<String, Integer> getTargetMapFor_ForEach_Test() {
+        return getInstance().getMap("target_map");
+    }
+
+    private void assertEntriesEqual(IMap<String, Integer> sourceMap, IMap<String, Integer> targetMap) {
+        sourceMap.entrySet().forEach(e -> assertEquals(e.getValue(), targetMap.get(e.getKey())));
+    }
+
+    @Test
+    public void testReplaceAllWithLambdaFunction() {
+        final IMap<String, Integer> testMap = getInstance().getMap("test_map");
+        testMap.put("k1", 1);
+        testMap.put("k2", 2);
+        testMap.replaceAll((k, v) -> v * 10);
+        assertEquals((int) testMap.get("k1"), 10);
+        assertEquals((int) testMap.get("k2"), 20);
+    }
+
+    @Test
+    public void testReplaceAllWithStaticSerializableFunction() {
+        final IMap<String, String> testMap = getInstance().getMap("test_map");
+        testMap.put("k1", "v1");
+        testMap.put("k2", "v2");
+        testMap.replaceAll(new StaticSerializableBiFunction("v_new"));
+        assertEquals(testMap.get("k1"), "v_new");
+        assertEquals(testMap.get("k2"), "v_new");
     }
 
 }

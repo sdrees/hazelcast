@@ -20,9 +20,11 @@ import com.hazelcast.config.IndexConfig;
 import com.hazelcast.core.TypeConverter;
 import com.hazelcast.internal.monitor.impl.PerIndexStats;
 import com.hazelcast.internal.serialization.Data;
+import com.hazelcast.internal.util.collection.PartitionIdSet;
 import com.hazelcast.query.Predicate;
 
 import java.util.HashSet;
+import java.util.Iterator;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
@@ -164,6 +166,7 @@ public class AttributeIndexRegistry {
      * <p>
      * Exposed as a package-private class only for testing purposes.
      */
+    @SuppressWarnings({"rawtypes", "checkstyle:MethodCount"})
     static final class FirstComponentDecorator implements InternalIndex {
 
         // See CompositeValue docs for more details on what is going on in the
@@ -233,6 +236,31 @@ public class AttributeIndexRegistry {
         @Override
         public Set<QueryableEntry> evaluate(Predicate predicate) {
             return delegate.evaluate(predicate);
+        }
+
+        @Override
+        public Iterator<QueryableEntry> getSqlRecordIterator() {
+            throw new UnsupportedOperationException("Should not be called");
+        }
+
+        @Override
+        public Iterator<QueryableEntry> getSqlRecordIterator(Comparable value) {
+            throw new UnsupportedOperationException("Should not be called");
+        }
+
+        @Override
+        public Iterator<QueryableEntry> getSqlRecordIterator(Comparison comparison, Comparable value) {
+            throw new UnsupportedOperationException("Should not be called");
+        }
+
+        @Override
+        public Iterator<QueryableEntry> getSqlRecordIterator(
+            Comparable from,
+            boolean fromInclusive,
+            Comparable to,
+            boolean toInclusive
+        ) {
+            throw new UnsupportedOperationException("Should not be called");
         }
 
         @Override
@@ -329,6 +357,11 @@ public class AttributeIndexRegistry {
         }
 
         @Override
+        public void beginPartitionUpdate() {
+            throw newUnsupportedException();
+        }
+
+        @Override
         public void markPartitionAsIndexed(int partitionId) {
             throw newUnsupportedException();
         }
@@ -341,6 +374,16 @@ public class AttributeIndexRegistry {
         @Override
         public PerIndexStats getPerIndexStats() {
             return delegate.getPerIndexStats();
+        }
+
+        @Override
+        public long getPartitionStamp(PartitionIdSet expectedPartitionIds) {
+            throw newUnsupportedException();
+        }
+
+        @Override
+        public boolean validatePartitionStamp(long stamp) {
+            throw newUnsupportedException();
         }
 
         private RuntimeException newUnsupportedException() {

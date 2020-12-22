@@ -17,6 +17,7 @@
 package com.hazelcast.internal.serialization.impl;
 
 import com.hazelcast.internal.serialization.InternalSerializationService;
+import com.hazelcast.internal.serialization.impl.defaultserializers.ConstantSerializers;
 import com.hazelcast.nio.serialization.Serializer;
 import com.hazelcast.test.HazelcastParallelClassRunner;
 import com.hazelcast.test.annotation.ParallelJVMTest;
@@ -48,7 +49,7 @@ public class StreamSerializerAdapterTest {
     public void setUp() {
         mockSerializationService = mock(InternalSerializationService.class);
         serializer = new ConstantSerializers.IntegerArraySerializer();
-        adapter = new StreamSerializerAdapter(mockSerializationService, serializer);
+        adapter = new StreamSerializerAdapter(serializer);
     }
 
     @After
@@ -72,9 +73,9 @@ public class StreamSerializerAdapterTest {
     }
 
     @Test
-    public void testAdaptorEqualAndHashCode() throws Exception {
-        StreamSerializerAdapter theOther = new StreamSerializerAdapter(mockSerializationService, serializer);
-        StreamSerializerAdapter theEmptyOne = new StreamSerializerAdapter(mockSerializationService, null);
+    public void testAdaptorEqualAndHashCode() {
+        StreamSerializerAdapter theOther = new StreamSerializerAdapter(serializer);
+        StreamSerializerAdapter theEmptyOne = new StreamSerializerAdapter(null);
 
         assertEquals(adapter, adapter);
         assertEquals(adapter, theOther);
@@ -88,7 +89,7 @@ public class StreamSerializerAdapterTest {
     }
 
     @Test
-    public void testString() throws Exception {
+    public void testString() {
         assertNotNull(adapter.toString());
     }
 }

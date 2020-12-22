@@ -17,8 +17,6 @@
 package com.hazelcast.client.console;
 
 import com.hazelcast.client.HazelcastClient;
-import com.hazelcast.client.config.ClientConfig;
-import com.hazelcast.client.config.XmlClientConfigBuilder;
 import com.hazelcast.cluster.Member;
 import com.hazelcast.collection.IList;
 import com.hazelcast.collection.IQueue;
@@ -46,13 +44,14 @@ import com.hazelcast.topic.Message;
 import com.hazelcast.topic.MessageListener;
 import edu.umd.cs.findbugs.annotations.SuppressFBWarnings;
 
-import java.io.BufferedReader;
-import java.io.File;
+import java.io.PrintStream;
 import java.io.FileReader;
-import java.io.IOException;
+import java.io.File;
+import java.io.BufferedReader;
 import java.io.InputStreamReader;
+import java.io.IOException;
 import java.lang.management.ManagementFactory;
-import java.nio.charset.Charset;
+import java.nio.charset.StandardCharsets;
 import java.util.Collection;
 import java.util.HashMap;
 import java.util.Iterator;
@@ -76,7 +75,7 @@ import static java.lang.Thread.currentThread;
 /**
  * A demo application to demonstrate a Hazelcast client. This is probably NOT something you want to use in production.
  */
-@SuppressWarnings({"WeakerAccess", "unused"})
+@SuppressWarnings({"WeakerAccess", "unused", "checkstyle:ClassFanOutComplexity"})
 public class ClientConsoleApp implements EntryListener, ItemListener, MessageListener {
 
     private static final int ONE_KB = 1024;
@@ -103,12 +102,15 @@ public class ClientConsoleApp implements EntryListener, ItemListener, MessageLis
     private boolean silent;
     private boolean echo;
 
-    private volatile HazelcastInstance hazelcast;
     private volatile LineReader lineReader;
     private volatile boolean running;
 
-    public ClientConsoleApp(HazelcastInstance hazelcast) {
+    private final PrintStream outOrig;
+    private final HazelcastInstance hazelcast;
+
+    public ClientConsoleApp(HazelcastInstance hazelcast, PrintStream outOrig) {
         this.hazelcast = hazelcast;
+        this.outOrig = outOrig;
     }
 
     public IQueue<Object> getQueue() {
@@ -146,15 +148,6 @@ public class ClientConsoleApp implements EntryListener, ItemListener, MessageLis
         return list;
     }
 
-    public void setHazelcast(HazelcastInstance hazelcast) {
-        this.hazelcast = hazelcast;
-        map = null;
-        list = null;
-        set = null;
-        queue = null;
-        topic = null;
-    }
-
     public void stop() {
         running = false;
     }
@@ -178,6 +171,7 @@ public class ClientConsoleApp implements EntryListener, ItemListener, MessageLis
             } catch (Throwable e) {
                 e.printStackTrace();
             }
+            running = running && hazelcast.getLifecycleService().isRunning();
         }
     }
 
@@ -186,7 +180,7 @@ public class ClientConsoleApp implements EntryListener, ItemListener, MessageLis
      */
     static class DefaultLineReader implements LineReader {
 
-        BufferedReader in = new BufferedReader(new InputStreamReader(System.in, Charset.forName("UTF-8")));
+        BufferedReader in = new BufferedReader(new InputStreamReader(System.in, StandardCharsets.UTF_8));
 
         public String readLine() throws Exception {
             return in.readLine();
@@ -945,6 +939,10 @@ public class ClientConsoleApp implements EntryListener, ItemListener, MessageLis
             println(getMultiMap().getLocalMultiMapStats());
         } else if (iteratorStr.startsWith("q.")) {
             println(getQueue().getLocalQueueStats());
+        } else if (iteratorStr.startsWith("l.")) {
+            println(getList().getLocalListStats());
+        } else if (iteratorStr.startsWith("s.")) {
+            println(getSet().getLocalSetStats());
         }
     }
 
@@ -1534,30 +1532,23 @@ public class ClientConsoleApp implements EntryListener, ItemListener, MessageLis
 
     public void println(Object obj) {
         if (!silent) {
-            System.out.println(obj);
+            outOrig.println(obj);
         }
     }
 
     public void print(Object obj) {
         if (!silent) {
-            System.out.print(obj);
+            outOrig.print(obj);
         }
     }
 
     /**
-     * Starts the test application. Loads the config from classpath hazelcast.xml,
-     * if it fails to load, will use default config.
+     * Starts the test application. It loads the client configuration using the resolution logic as described in
+     * {@link HazelcastClient#newHazelcastClient()}.
      */
     public static void main(String[] args) {
-        ClientConfig clientConfig;
-
-        try {
-            clientConfig = new XmlClientConfigBuilder().build();
-        } catch (IllegalArgumentException e) {
-            clientConfig = new ClientConfig();
-        }
-        final HazelcastInstance client = HazelcastClient.newHazelcastClient(clientConfig);
-        ClientConsoleApp clientConsoleApp = new ClientConsoleApp(client);
+        HazelcastInstance client = HazelcastClient.newHazelcastClient();
+        ClientConsoleApp clientConsoleApp = new ClientConsoleApp(client, System.out);
         clientConsoleApp.start(args);
     }
 }

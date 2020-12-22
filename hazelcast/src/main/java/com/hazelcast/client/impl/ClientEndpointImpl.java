@@ -24,7 +24,7 @@ import com.hazelcast.internal.metrics.MetricDescriptor;
 import com.hazelcast.internal.metrics.MetricTarget;
 import com.hazelcast.internal.metrics.MetricsCollectionContext;
 import com.hazelcast.internal.metrics.impl.MetricsCompressor;
-import com.hazelcast.internal.nio.Connection;
+import com.hazelcast.internal.server.ServerConnection;
 import com.hazelcast.logging.ILogger;
 import com.hazelcast.security.Credentials;
 import com.hazelcast.spi.impl.NodeEngineImpl;
@@ -53,11 +53,12 @@ import static com.hazelcast.internal.metrics.MetricTarget.MANAGEMENT_CENTER;
 public final class ClientEndpointImpl implements ClientEndpoint {
     private static final String METRICS_TAG_CLIENT = "client";
     private static final String METRICS_TAG_TIMESTAMP = "timestamp";
+    private static final String METRICS_TAG_CLIENTNAME = "clientname";
 
     private final ClientEngine clientEngine;
     private final ILogger logger;
     private final NodeEngineImpl nodeEngine;
-    private final Connection connection;
+    private final ServerConnection connection;
     private final ConcurrentMap<UUID, TransactionContext> transactionContextMap = new ConcurrentHashMap<>();
     private final ConcurrentMap<UUID, Callable> removeListenerActions = new ConcurrentHashMap<>();
     private final SocketAddress socketAddress;
@@ -73,7 +74,7 @@ public final class ClientEndpointImpl implements ClientEndpoint {
     private Set<String> labels;
     private volatile boolean destroyed;
 
-    public ClientEndpointImpl(ClientEngine clientEngine, NodeEngineImpl nodeEngine, Connection connection) {
+    public ClientEndpointImpl(ClientEngine clientEngine, NodeEngineImpl nodeEngine, ServerConnection connection) {
         this.clientEngine = clientEngine;
         this.logger = clientEngine.getLogger(getClass());
         this.nodeEngine = nodeEngine;
@@ -84,7 +85,7 @@ public final class ClientEndpointImpl implements ClientEndpoint {
     }
 
     @Override
-    public Connection getConnection() {
+    public ServerConnection getConnection() {
         return connection;
     }
 
@@ -122,6 +123,11 @@ public final class ClientEndpointImpl implements ClientEndpoint {
     @Override
     public boolean isAuthenticated() {
         return authenticated;
+    }
+
+    @Override
+    public String getClientVersion() {
+        return clientVersion;
     }
 
     @Override
@@ -269,6 +275,7 @@ public final class ClientEndpointImpl implements ClientEndpoint {
                 + ", clientVersion=" + clientVersion
                 + ", creationTime=" + creationTime
                 + ", latest clientAttributes=" + getClientAttributes()
+                + ", labels=" + labels
                 + '}';
     }
 
@@ -276,8 +283,12 @@ public final class ClientEndpointImpl implements ClientEndpoint {
     public void provideDynamicMetrics(MetricDescriptor descriptor, MetricsCollectionContext context) {
         ClientStatistics clientStatistics = statsRef.get();
         if (clientStatistics != null && clientStatistics.metricsBlob() != null) {
-            long timestamp = clientStatistics.timestamp();
             byte[] metricsBlob = clientStatistics.metricsBlob();
+            if (metricsBlob.length == 0) {
+                // zero length means that the client does not support the new format
+                return;
+            }
+            long timestamp = clientStatistics.timestamp();
             MetricConsumer consumer = new MetricConsumer() {
                 @Override
                 public void consumeLong(MetricDescriptor descriptor, long value) {
@@ -295,8 +306,9 @@ public final class ClientEndpointImpl implements ClientEndpoint {
                             // since we want to send the client-side metrics only to MC
                             .withExcludedTargets(MetricTarget.ALL_TARGETS)
                             .withIncludedTarget(MANAGEMENT_CENTER)
-                            // we add "client" and "timestamp" tags for MC
+                            // we add "client", "clientname" and "timestamp" tags for MC
                             .withTag(METRICS_TAG_CLIENT, getUuid().toString())
+                            .withTag(METRICS_TAG_CLIENTNAME, clientName)
                             .withTag(METRICS_TAG_TIMESTAMP, Long.toString(timestamp));
                 }
             };

@@ -130,7 +130,6 @@ import com.hazelcast.map.impl.query.QueryPartitionOperation;
 import com.hazelcast.map.impl.query.QueryResult;
 import com.hazelcast.map.impl.query.QueryResultRow;
 import com.hazelcast.map.impl.query.ResultSegment;
-import com.hazelcast.map.impl.query.Target;
 import com.hazelcast.map.impl.querycache.accumulator.AccumulatorInfo;
 import com.hazelcast.map.impl.querycache.accumulator.ConsumeAccumulatorOperation;
 import com.hazelcast.map.impl.querycache.subscriber.operation.DestroyQueryCacheOperation;
@@ -269,7 +268,6 @@ public final class MapDataSerializerHook implements DataSerializerHook {
     public static final int WRITE_BEHIND_STATE_HOLDER = 104;
     public static final int AGGREGATION_RESULT = 105;
     public static final int QUERY = 106;
-    public static final int TARGET = 107;
     public static final int MAP_INVALIDATION_METADATA = 108;
     public static final int MAP_INVALIDATION_METADATA_RESPONSE = 109;
     public static final int MAP_NEAR_CACHE_STATE_HOLDER = 110;
@@ -310,8 +308,14 @@ public final class MapDataSerializerHook implements DataSerializerHook {
     public static final int PUT_TRANSIENT_WITH_EXPIRY = 145;
     public static final int PUT_IF_ABSENT_WITH_EXPIRY = 146;
     public static final int PUT_TRANSIENT_BACKUP = 147;
+    public static final int COMPUTE_IF_PRESENT_PROCESSOR = 148;
+    public static final int COMPUTE_IF_ABSENT_PROCESSOR = 149;
+    public static final int KEY_VALUE_CONSUMING_PROCESSOR = 150;
+    public static final int COMPUTE_MAP_OPERATION_PROCESSOR = 151;
+    public static final int MERGE_MAP_OPERATION_PROCESSOR = 152;
+    public static final int MAP_ENTRY_REPLACING_PROCESSOR = 153;
 
-    private static final int LEN = PUT_TRANSIENT_BACKUP + 1;
+    private static final int LEN = MAP_ENTRY_REPLACING_PROCESSOR + 1;
 
     @Override
     public int getFactoryId() {
@@ -426,7 +430,6 @@ public final class MapDataSerializerHook implements DataSerializerHook {
         constructors[WRITE_BEHIND_STATE_HOLDER] = arg -> new WriteBehindStateHolder();
         constructors[AGGREGATION_RESULT] = arg -> new AggregationResult();
         constructors[QUERY] = arg -> new Query();
-        constructors[TARGET] = arg -> new Target();
         constructors[MAP_INVALIDATION_METADATA] = arg -> new MapGetInvalidationMetaDataOperation();
         constructors[MAP_INVALIDATION_METADATA_RESPONSE] = arg -> new MapGetInvalidationMetaDataOperation.MetaDataResponse();
         constructors[MAP_NEAR_CACHE_STATE_HOLDER] = arg -> new MapNearCacheStateHolder();
@@ -467,6 +470,12 @@ public final class MapDataSerializerHook implements DataSerializerHook {
         constructors[PUT_TRANSIENT_WITH_EXPIRY] = arg -> new PutTransientWithExpiryOperation();
         constructors[PUT_IF_ABSENT_WITH_EXPIRY] = arg -> new PutIfAbsentWithExpiryOperation();
         constructors[PUT_TRANSIENT_BACKUP] = arg -> new PutTransientBackupOperation();
+        constructors[COMPUTE_IF_PRESENT_PROCESSOR] = arg -> new ComputeIfPresentEntryProcessor<>();
+        constructors[COMPUTE_IF_ABSENT_PROCESSOR] = arg -> new ComputeIfAbsentEntryProcessor<>();
+        constructors[KEY_VALUE_CONSUMING_PROCESSOR] = arg -> new KeyValueConsumingEntryProcessor<>();
+        constructors[COMPUTE_MAP_OPERATION_PROCESSOR] = arg -> new ComputeEntryProcessor<>();
+        constructors[MERGE_MAP_OPERATION_PROCESSOR] = arg -> new MergeEntryProcessor<>();
+        constructors[MAP_ENTRY_REPLACING_PROCESSOR] = arg -> new MapEntryReplacingEntryProcessor<>();
 
         return new ArrayDataSerializableFactory(constructors);
     }

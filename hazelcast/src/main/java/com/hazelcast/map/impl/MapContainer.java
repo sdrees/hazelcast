@@ -22,12 +22,13 @@ import com.hazelcast.config.EventJournalConfig;
 import com.hazelcast.config.IndexConfig;
 import com.hazelcast.config.InvalidConfigurationException;
 import com.hazelcast.config.MapConfig;
-import com.hazelcast.config.WanReplicationConfig;
 import com.hazelcast.config.WanConsumerConfig;
+import com.hazelcast.config.WanReplicationConfig;
 import com.hazelcast.config.WanReplicationRef;
 import com.hazelcast.config.WanSyncConfig;
 import com.hazelcast.internal.nio.ClassLoaderUtil;
 import com.hazelcast.internal.partition.IPartitionService;
+import com.hazelcast.internal.serialization.Data;
 import com.hazelcast.internal.serialization.InternalSerializationService;
 import com.hazelcast.internal.serialization.SerializationService;
 import com.hazelcast.internal.services.ObjectNamespace;
@@ -36,6 +37,7 @@ import com.hazelcast.internal.util.ConstructorFunction;
 import com.hazelcast.internal.util.ExceptionUtil;
 import com.hazelcast.internal.util.MemoryInfoAccessor;
 import com.hazelcast.internal.util.RuntimeMemoryInfoAccessor;
+import com.hazelcast.internal.util.ThreadUtil;
 import com.hazelcast.map.impl.eviction.EvictionChecker;
 import com.hazelcast.map.impl.eviction.Evictor;
 import com.hazelcast.map.impl.eviction.EvictorImpl;
@@ -45,7 +47,7 @@ import com.hazelcast.map.impl.query.QueryEntryFactory;
 import com.hazelcast.map.impl.record.DataRecordFactory;
 import com.hazelcast.map.impl.record.ObjectRecordFactory;
 import com.hazelcast.map.impl.record.RecordFactory;
-import com.hazelcast.internal.serialization.Data;
+import com.hazelcast.map.impl.recordstore.RecordStore;
 import com.hazelcast.partition.PartitioningStrategy;
 import com.hazelcast.query.impl.Index;
 import com.hazelcast.query.impl.Indexes;
@@ -108,6 +110,8 @@ public class MapContainer {
 
     private boolean persistWanReplicatedData;
 
+    private volatile boolean destroyed;
+
     /**
      * Operations which are done in this constructor should obey the rules defined
      * in the method comment {@link PostJoinAwareService#getPostJoinOperation()}
@@ -147,13 +151,38 @@ public class MapContainer {
      * @return a new Indexes object
      */
     public Indexes createIndexes(boolean global) {
-        return Indexes.newBuilder(serializationService, mapServiceContext.getIndexCopyBehavior())
+        int partitionCount = mapServiceContext.getNodeEngine().getPartitionService().getPartitionCount();
+
+        return Indexes.newBuilder(serializationService, mapServiceContext.getIndexCopyBehavior(), mapConfig.getInMemoryFormat())
                 .global(global)
                 .extractors(extractors)
                 .statsEnabled(mapConfig.isStatisticsEnabled())
                 .indexProvider(mapServiceContext.getIndexProvider(mapConfig))
                 .usesCachedQueryableEntries(mapConfig.getCacheDeserializedValues() != CacheDeserializedValues.NEVER)
-                .build();
+                .partitionCount(partitionCount)
+                .resultFilter(queryableEntry -> hasNotExpired(queryableEntry)).build();
+    }
+
+    /**
+     * @return {@code true} if queryableEntry has
+     * not expired, otherwise returns {@code false}
+     */
+    private boolean hasNotExpired(QueryableEntry queryableEntry) {
+        Data keyData = queryableEntry.getKeyData();
+        IPartitionService partitionService = mapServiceContext.getNodeEngine().getPartitionService();
+        int partitionId = partitionService.getPartitionId(keyData);
+
+        if (!getIndexes(partitionId).isGlobal()) {
+            ThreadUtil.assertRunningOnPartitionThread();
+        }
+
+        if (!partitionService.isPartitionOwner(partitionId)) {
+            // throw entry out if it is not owned by this local node.
+            return false;
+        }
+
+        RecordStore recordStore = mapServiceContext.getExistingRecordStore(partitionId, name);
+        return recordStore != null && !recordStore.expireOrAccess(keyData);
     }
 
     public final void initEvictor() {
@@ -175,8 +204,7 @@ public class MapContainer {
     }
 
     public boolean shouldUseGlobalIndex() {
-        // for non-native memory populate a single global index
-        return !mapConfig.getInMemoryFormat().equals(NATIVE);
+        return mapConfig.getInMemoryFormat() != NATIVE || mapServiceContext.globalIndexEnabled();
     }
 
     protected static MemoryInfoAccessor getMemoryInfoAccessor() {
@@ -230,7 +258,7 @@ public class MapContainer {
         WanReplicationService wanReplicationService = nodeEngine.getWanReplicationService();
         wanReplicationDelegate = wanReplicationService.getWanReplicationPublishers(wanReplicationRefName);
         wanMergePolicy = nodeEngine.getSplitBrainMergePolicyProvider()
-                                   .getMergePolicy(wanReplicationRef.getMergePolicyClassName());
+                .getMergePolicy(wanReplicationRef.getMergePolicyClassName());
 
         WanReplicationConfig wanReplicationConfig = config.getWanReplicationConfig(wanReplicationRefName);
         if (wanReplicationConfig != null) {
@@ -269,7 +297,7 @@ public class MapContainer {
     }
 
     /**
-     * @return the global index, if the global index is in use (on-heap) or null.
+     * @return the global index, if the global index is in use or null.
      */
     public Indexes getIndexes() {
         return globalIndexes;
@@ -390,8 +418,20 @@ public class MapContainer {
         return interceptorRegistry;
     }
 
+    /**
+     * Callback invoked before record store and indexes are destroyed. Ensures that if map iterator observes a non-destroyed
+     * state, then associated data structures are still valid.
+     */
+    public void onBeforeDestroy() {
+        destroyed = true;
+    }
+
     // callback called when the MapContainer is de-registered from MapService and destroyed - basically on map-destroy
     public void onDestroy() {
+    }
+
+    public boolean isDestroyed() {
+        return destroyed;
     }
 
     public boolean shouldCloneOnEntryProcessing(int partitionId) {
