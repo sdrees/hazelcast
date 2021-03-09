@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2008-2020, Hazelcast, Inc. All Rights Reserved.
+ * Copyright (c) 2008-2021, Hazelcast, Inc. All Rights Reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -18,6 +18,7 @@ package com.hazelcast.query.impl;
 
 import com.hazelcast.internal.serialization.InternalSerializationService;
 import com.hazelcast.internal.serialization.Data;
+import com.hazelcast.map.impl.LazyMapEntry;
 import com.hazelcast.nio.serialization.Portable;
 import com.hazelcast.query.SampleTestObjects.PortableEmployee;
 import com.hazelcast.query.impl.getters.Extractors;
@@ -207,6 +208,16 @@ public class CachedQueryEntryTest extends QueryEntryTest {
         CachedQueryEntry<Object, Object> entry = createEntry("key");
 
         entry.setValue(new Object());
+    }
+
+    @Test
+    public void testDeserialization() {
+        QueryableEntry entry = createEntry("key", "value");
+        int hashCode = entry.hashCode();
+        Data data = serializationService.toData(entry);
+        LazyMapEntry lazyMapEntry = serializationService.toObject(data);
+        assertEquals("key", lazyMapEntry.getKey());
+        assertEquals("value", lazyMapEntry.getValue());
     }
 
     private CachedQueryEntry<Object, Object> createEntry(Object key) {

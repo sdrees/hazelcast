@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2008-2020, Hazelcast, Inc. All Rights Reserved.
+ * Copyright (c) 2008-2021, Hazelcast, Inc. All Rights Reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -395,7 +395,7 @@ public interface CPSubsystem {
     /**
      * Returns a proxy for an {@link IAtomicReference} instance created on
      * CP Subsystem. Hazelcast's {@link IAtomicReference} is a distributed
-     * version of <tt>java.util.concurrent.atomic.AtomicLong</tt>. If no group
+     * version of <tt>java.util.concurrent.atomic.AtomicReference</tt>. If no group
      * name is given within the "name" parameter, then
      * the {@link IAtomicReference} instance will be created on the DEFAULT CP
      * group. If a group name is given, like

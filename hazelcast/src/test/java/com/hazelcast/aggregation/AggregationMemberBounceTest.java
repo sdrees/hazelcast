@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2008-2020, Hazelcast, Inc. All Rights Reserved.
+ * Copyright (c) 2008-2021, Hazelcast, Inc. All Rights Reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -19,6 +19,7 @@ package com.hazelcast.aggregation;
 import com.hazelcast.config.Config;
 import com.hazelcast.core.HazelcastInstance;
 import com.hazelcast.map.IMap;
+import com.hazelcast.query.Predicates;
 import com.hazelcast.test.HazelcastSerialClassRunner;
 import com.hazelcast.test.HazelcastTestSupport;
 import com.hazelcast.test.annotation.SlowTest;
@@ -69,12 +70,12 @@ public class AggregationMemberBounceTest extends HazelcastTestSupport {
                 @Override
                 public void run() {
                     String postfix = "";
-                    AggregatorsSpecTest.assertMinAggregators(map, postfix);
-                    AggregatorsSpecTest.assertMaxAggregators(map, postfix);
-                    AggregatorsSpecTest.assertSumAggregators(map, postfix);
-                    AggregatorsSpecTest.assertAverageAggregators(map, postfix);
-                    AggregatorsSpecTest.assertCountAggregators(map, postfix);
-                    AggregatorsSpecTest.assertDistinctAggregators(map, postfix);
+                    AggregatorsSpecTest.assertMinAggregators(map, postfix, Predicates.alwaysTrue());
+                    AggregatorsSpecTest.assertMaxAggregators(map, postfix, Predicates.alwaysTrue());
+                    AggregatorsSpecTest.assertSumAggregators(map, postfix, Predicates.alwaysTrue());
+                    AggregatorsSpecTest.assertAverageAggregators(map, postfix, Predicates.alwaysTrue());
+                    AggregatorsSpecTest.assertCountAggregators(map, postfix, Predicates.alwaysTrue());
+                    AggregatorsSpecTest.assertDistinctAggregators(map, postfix, Predicates.alwaysTrue());
                 }
             };
         }

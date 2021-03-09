@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2008-2020, Hazelcast, Inc. All Rights Reserved.
+ * Copyright (c) 2008-2021, Hazelcast, Inc. All Rights Reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -16,6 +16,7 @@
 
 package com.hazelcast.map.impl.query;
 
+import com.hazelcast.config.Config;
 import com.hazelcast.core.HazelcastInstance;
 import com.hazelcast.internal.serialization.Data;
 import com.hazelcast.internal.util.IterationType;
@@ -57,7 +58,9 @@ public class QueryEngine_DispatchTest extends HazelcastTestSupport {
 
     @Before
     public void before() {
-        instance = createHazelcastInstance();
+        Config config = regularInstanceConfig()
+                .setProperty(QueryEngineImpl.DISABLE_MIGRATION_FALLBACK.getName(), "true");
+        instance = createHazelcastInstance(config);
         map = instance.getMap(randomName());
         MapService mapService = getNodeEngineImpl(instance).getService(MapService.SERVICE_NAME);
         queryEngine = new QueryEngineImpl(mapService.getMapServiceContext());
@@ -88,9 +91,10 @@ public class QueryEngine_DispatchTest extends HazelcastTestSupport {
 
     private void dispatchFullQueryOnQueryThread(TargetMode target) {
         Query query = Query.of().mapName(map.getName()).predicate(Predicates.equal("this", value))
+                .partitionIdSet(queryEngine.getAllPartitionIds())
                 .iterationType(IterationType.ENTRY).build();
         List<Future<Result>> futures = queryEngine
-                .dispatchFullQueryOnQueryThread(query, queryEngine.getAllPartitionIds(), target);
+                .dispatchFullQueryOnQueryThread(query, target);
         Collection<Result> results = returnWithDeadline(futures, 1, TimeUnit.MINUTES);
         QueryResult result = (QueryResult) results.iterator().next();
 

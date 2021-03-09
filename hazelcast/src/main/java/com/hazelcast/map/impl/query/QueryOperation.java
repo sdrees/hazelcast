@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2008-2020, Hazelcast, Inc. All Rights Reserved.
+ * Copyright (c) 2008-2021, Hazelcast, Inc. All Rights Reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -44,8 +44,8 @@ import java.util.concurrent.atomic.AtomicReferenceArray;
 import java.util.function.BiConsumer;
 
 import static com.hazelcast.internal.util.ExceptionUtil.rethrow;
-import static com.hazelcast.spi.impl.operationservice.CallStatus.RESPONSE;
 import static com.hazelcast.spi.impl.operationservice.CallStatus.OFFLOAD_ORDINAL;
+import static com.hazelcast.spi.impl.operationservice.CallStatus.RESPONSE;
 import static com.hazelcast.spi.impl.operationservice.ExceptionAction.THROW_EXCEPTION;
 
 public class QueryOperation extends AbstractNamedOperation implements ReadonlyOperation {
@@ -102,13 +102,16 @@ public class QueryOperation extends AbstractNamedOperation implements ReadonlyOp
                 }
 
                 // Offload query run on the partition threads.
-                BitSet localPartitions = localPartitions();
-                if (localPartitions.cardinality() == 0) {
+                BitSet queryPartitions = localPartitions();
+                if (query.getPartitionIdSet() != null) {
+                    queryPartitions.and(query.getPartitionIdSet().bitSetCopy());
+                }
+                if (queryPartitions.cardinality() == 0) {
                     // important to deal with situation of not having any partitions
                     result = queryRunner.populateEmptyResult(query, Collections.emptyList());
                     return RESPONSE;
                 } else {
-                    return new OffloadedImpl(queryRunner, localPartitions);
+                    return new OffloadedImpl(queryRunner, queryPartitions);
                 }
             default:
                 throw new IllegalArgumentException("Unsupported in memory format");
@@ -185,9 +188,9 @@ public class QueryOperation extends AbstractNamedOperation implements ReadonlyOp
         private final BitSet localPartitions;
         private final QueryRunner queryRunner;
 
-        private OffloadedImpl(QueryRunner queryRunner, BitSet localParitions) {
+        private OffloadedImpl(QueryRunner queryRunner, BitSet localPartitions) {
             super(QueryOperation.this);
-            this.localPartitions = localParitions;
+            this.localPartitions = localPartitions;
             this.queryRunner = queryRunner;
         }
 
@@ -263,7 +266,7 @@ public class QueryOperation extends AbstractNamedOperation implements ReadonlyOp
                 Result result
                         = queryRunner.runPartitionIndexOrPartitionScanQueryOnGivenOwnedPartition(query, partitionId);
                 future.addResult(partitionId, result);
-            } catch (Exception ex) {
+            } catch (Throwable ex) {
                 future.completeExceptionally(ex);
             }
         }
@@ -285,7 +288,7 @@ public class QueryOperation extends AbstractNamedOperation implements ReadonlyOp
                     Result combinedResult = queryRunner.populateEmptyResult(query, Collections.emptyList());
                     populateResult(response, combinedResult);
                     QueryOperation.this.sendResponse(combinedResult);
-                } catch (Exception e) {
+                } catch (Throwable e) {
                     QueryOperation.this.sendResponse(e);
                     throw rethrow(e);
                 }

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2008-2020, Hazelcast, Inc. All Rights Reserved.
+ * Copyright (c) 2008-2021, Hazelcast, Inc. All Rights Reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -65,7 +65,6 @@ import static com.hazelcast.config.InstanceTrackingConfig.InstanceTrackingProper
 import static com.hazelcast.config.InstanceTrackingConfig.InstanceTrackingProperties.PRODUCT;
 import static com.hazelcast.config.InstanceTrackingConfig.InstanceTrackingProperties.START_TIMESTAMP;
 import static com.hazelcast.config.InstanceTrackingConfig.InstanceTrackingProperties.VERSION;
-import static com.hazelcast.config.NearCacheConfigAccessor.initDefaultMaxSizeForOnHeapMaps;
 import static com.hazelcast.internal.config.ConfigValidator.checkNearCacheConfig;
 import static com.hazelcast.internal.util.ExceptionUtil.rethrow;
 import static com.hazelcast.internal.util.InstanceTrackingUtil.writeInstanceTrackingFile;
@@ -208,7 +207,6 @@ public class DefaultClientExtension implements ClientExtension {
             NearCacheConfig nearCacheConfig = clientConfig.getNearCacheConfig(id);
             if (nearCacheConfig != null) {
                 checkNearCacheConfig(id, nearCacheConfig, clientConfig.getNativeMemoryConfig(), true);
-                initDefaultMaxSizeForOnHeapMaps(nearCacheConfig);
                 return new NearCachedClientMapProxy(MapService.SERVICE_NAME, id, context);
             } else {
                 return new ClientMapProxy(MapService.SERVICE_NAME, id, context);

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2008-2020, Hazelcast, Inc. All Rights Reserved.
+ * Copyright (c) 2008-2021, Hazelcast, Inc. All Rights Reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -122,6 +122,13 @@ public abstract class SwCounter implements Counter {
         }
 
         @Override
+        public long getAndSet(long newValue) {
+            final long oldLocalValue = value;
+            MEM.putOrderedLong(this, OFFSET, newValue);
+            return oldLocalValue;
+        }
+
+        @Override
         public String toString() {
             return "Counter{value=" + value + '}';
         }
@@ -162,6 +169,13 @@ public abstract class SwCounter implements Counter {
         @Override
         public void set(long newValue) {
             COUNTER.lazySet(this, newValue);
+        }
+
+        @Override
+        public long getAndSet(long newValue) {
+            final long oldValue = value;
+            COUNTER.lazySet(this, newValue);
+            return oldValue;
         }
 
         @Override

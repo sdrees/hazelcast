@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2008-2020, Hazelcast, Inc. All Rights Reserved.
+ * Copyright (c) 2008-2021, Hazelcast, Inc. All Rights Reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -37,8 +37,8 @@ import static junit.framework.TestCase.assertFalse;
 import static junit.framework.TestCase.fail;
 
 /**
- * Ensure that nested function call derive argument types as expected. This might not be the case if the
- * {@code HazelcastOperandTypeCheckerAware} doesn't work  properly, and the operand type information is not
+ * Ensure that a nested function call derives the argument types as expected. This might not be the case if the
+ * {@code HazelcastOperandTypeCheckerAware} doesn't work properly and the operand type information is not
  * resolved recursively.
  * <p>
  * Also ensures that function names are case-insensitive.
@@ -64,7 +64,8 @@ public class NestingAndCasingExpressionTest extends ExpressionTestSupport {
                 continue;
             }
 
-            if (!SqlOperator.class.isAssignableFrom(field.getType())) {
+            if (!SqlOperator.class.isAssignableFrom(field.getType())
+                || field.getName().equals("DESC")) {
                 continue;
             }
 
@@ -158,6 +159,11 @@ public class NestingAndCasingExpressionTest extends ExpressionTestSupport {
     @Test
     public void test_DIVIDE() {
         check(sql("(1/?) || (1/?)"), 1, 1);
+    }
+
+    @Test
+    public void test_REMAINDER() {
+        check(sql("(1%?) || (1%?)"), 1, 1);
     }
 
     @Test
@@ -284,6 +290,7 @@ public class NestingAndCasingExpressionTest extends ExpressionTestSupport {
     public void test_CEIL() {
         check(sql("CEIL(?) || CEIL(?)"), 1, 1);
     }
+
     @Test
     public void test_ROUND() {
         check(sql("ROUND(?) || ROUND(?)"), 1, 1);
@@ -302,6 +309,11 @@ public class NestingAndCasingExpressionTest extends ExpressionTestSupport {
     @Test
     public void test_LIKE() {
         check(sql("(? LIKE ?) || (? LIKE ?)"), "a", "a", "b", "b");
+    }
+
+    @Test
+    public void test_NOT_LIKE() {
+        check(sql("(? NOT LIKE ?) || (? NOT LIKE ?)"), "a", "a", "b", "b");
     }
 
     @Test

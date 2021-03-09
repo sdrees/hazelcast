@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2008-2020, Hazelcast, Inc. All Rights Reserved.
+ * Copyright (c) 2008-2021, Hazelcast, Inc. All Rights Reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -118,6 +118,7 @@ public final class ClientEndpointImpl implements ClientEndpoint {
         this.setClientVersion(clientVersion);
         this.clientName = clientName;
         this.labels = labels;
+        clientEngine.onEndpointAuthenticated(this);
     }
 
     @Override
@@ -235,6 +236,7 @@ public final class ClientEndpointImpl implements ClientEndpoint {
                 lc.logout();
             }
         } finally {
+            clientEngine.onEndpointDestroyed(this);
             authenticated = false;
         }
     }
@@ -314,5 +316,10 @@ public final class ClientEndpointImpl implements ClientEndpoint {
             };
             MetricsCompressor.extractMetrics(metricsBlob, consumer);
         }
+    }
+
+    @Override
+    public long getCreationTime() {
+        return creationTime;
     }
 }

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2008-2020, Hazelcast, Inc. All Rights Reserved.
+ * Copyright (c) 2008-2021, Hazelcast, Inc. All Rights Reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -17,12 +17,12 @@
 package com.hazelcast.sql.impl.calcite.validate;
 
 import com.hazelcast.sql.impl.ParameterConverter;
-import com.hazelcast.sql.impl.calcite.validate.types.HazelcastTypeCoercion;
-import com.hazelcast.sql.impl.calcite.validate.types.HazelcastTypeUtils;
 import com.hazelcast.sql.impl.calcite.schema.HazelcastTable;
 import com.hazelcast.sql.impl.calcite.validate.literal.LiteralUtils;
 import com.hazelcast.sql.impl.calcite.validate.param.StrictParameterConverter;
+import com.hazelcast.sql.impl.calcite.validate.types.HazelcastTypeCoercion;
 import com.hazelcast.sql.impl.calcite.validate.types.HazelcastTypeFactory;
+import com.hazelcast.sql.impl.calcite.validate.types.HazelcastTypeUtils;
 import org.apache.calcite.rel.type.RelDataType;
 import org.apache.calcite.sql.SqlCall;
 import org.apache.calcite.sql.SqlDynamicParam;
@@ -30,8 +30,9 @@ import org.apache.calcite.sql.SqlIdentifier;
 import org.apache.calcite.sql.SqlKind;
 import org.apache.calcite.sql.SqlLiteral;
 import org.apache.calcite.sql.SqlNode;
+import org.apache.calcite.sql.SqlNumericLiteral;
 import org.apache.calcite.sql.SqlOperatorTable;
-import org.apache.calcite.sql.fun.SqlStdOperatorTable;
+import org.apache.calcite.sql.SqlSelect;
 import org.apache.calcite.sql.parser.SqlParserPos;
 import org.apache.calcite.sql.util.ChainedSqlOperatorTable;
 import org.apache.calcite.sql.validate.SelectScope;
@@ -49,12 +50,17 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
+import static com.hazelcast.sql.impl.calcite.parse.UnsupportedOperationVisitor.error;
+
 /**
  * Hazelcast-specific SQL validator.
  */
 public class HazelcastSqlValidator extends SqlValidatorImplBridge {
 
     private static final Config CONFIG = Config.DEFAULT.withIdentifierExpansion(true);
+
+    /** Visitor to rewrite Calcite operators to Hazelcast operators. */
+    private final HazelcastSqlOperatorTable.RewriteVisitor rewriteVisitor;
 
     /** Parameter converter that will be passed to parameter metadata. */
     private final Map<Integer, ParameterConverter> parameterConverterMap = new HashMap<>();
@@ -79,6 +85,8 @@ public class HazelcastSqlValidator extends SqlValidatorImplBridge {
         super(operatorTable(extensionOperatorTable), catalogReader, typeFactory, CONFIG.withSqlConformance(conformance));
 
         setTypeCoercion(new HazelcastTypeCoercion(this));
+
+        rewriteVisitor = new HazelcastSqlOperatorTable.RewriteVisitor(this);
     }
 
     private static SqlOperatorTable operatorTable(SqlOperatorTable extensionOperatorTable) {
@@ -89,7 +97,6 @@ public class HazelcastSqlValidator extends SqlValidatorImplBridge {
         }
 
         operatorTables.add(HazelcastSqlOperatorTable.instance());
-        operatorTables.add(SqlStdOperatorTable.instance());
 
         return new ChainedSqlOperatorTable(operatorTables);
     }
@@ -144,6 +151,42 @@ public class HazelcastSqlValidator extends SqlValidatorImplBridge {
     }
 
     @Override
+    public void validateQuery(SqlNode node, SqlValidatorScope scope, RelDataType targetRowType) {
+        super.validateQuery(node, scope, targetRowType);
+
+        if (node instanceof SqlSelect) {
+            // Derive the types for offset-fetch expressions, Calcite doesn't do
+            // that automatically.
+
+            SqlSelect select = (SqlSelect) node;
+
+            SqlNode offset = select.getOffset();
+            if (offset != null) {
+                deriveType(scope, offset);
+                validateNonNegativeValue(offset);
+            }
+
+            SqlNode fetch = select.getFetch();
+            if (fetch != null) {
+                deriveType(scope, fetch);
+                validateNonNegativeValue(fetch);
+            }
+        }
+    }
+
+    private void validateNonNegativeValue(SqlNode sqlNode) {
+        if (!(sqlNode instanceof SqlNumericLiteral)) {
+            throw error(sqlNode, "FETCH/OFFSET must be a numeric literal");
+        }
+        Object value = ((SqlNumericLiteral) sqlNode).getValue();
+        long value0 = ((Number) value).longValue();
+
+        if (value0 < 0L) {
+            throw error(sqlNode, "FETCH/OFFSET value cannot be negative: " + value0);
+        }
+    }
+
+    @Override
     protected SqlNode performUnconditionalRewrites(SqlNode node, boolean underFrom) {
         SqlNode rewritten = super.performUnconditionalRewrites(node, underFrom);
 
@@ -153,7 +196,7 @@ public class HazelcastSqlValidator extends SqlValidatorImplBridge {
             // the first '+' refers to the standard Calcite SqlStdOperatorTable.PLUS
             // operator and the second '+' refers to HazelcastSqlOperatorTable.PLUS
             // operator.
-            rewritten.accept(HazelcastSqlOperatorTable.REWRITE_VISITOR);
+            rewritten.accept(rewriteVisitor);
         }
 
         return rewritten;
@@ -236,5 +279,14 @@ public class HazelcastSqlValidator extends SqlValidatorImplBridge {
         }
 
         return Util.last(names);
+    }
+
+    /**
+     * Returns whether the validated node returns an infinite number of rows.
+     *
+     * @throws IllegalStateException if called before the node is validated.
+     */
+    public boolean isInfiniteRows() {
+        return false;
     }
 }

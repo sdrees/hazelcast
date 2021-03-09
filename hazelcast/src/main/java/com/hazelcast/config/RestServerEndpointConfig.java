@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2008-2020, Hazelcast, Inc. All Rights Reserved.
+ * Copyright (c) 2008-2021, Hazelcast, Inc. All Rights Reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -23,6 +23,7 @@ import java.util.Arrays;
 import java.util.Collection;
 import java.util.EnumSet;
 import java.util.HashSet;
+import java.util.Objects;
 import java.util.Set;
 
 import static java.util.Collections.synchronizedSet;
@@ -245,5 +246,25 @@ public class RestServerEndpointConfig
     @Override
     public String toString() {
         return "RestServerEndpointConfig{enabledGroups=" + enabledGroups + "}";
+    }
+
+    @Override
+    public boolean equals(Object o) {
+        if (this == o) {
+            return true;
+        }
+        if (o == null || getClass() != o.getClass()) {
+            return false;
+        }
+        if (!super.equals(o)) {
+            return false;
+        }
+        RestServerEndpointConfig that = (RestServerEndpointConfig) o;
+        return Objects.equals(enabledGroups, that.enabledGroups);
+    }
+
+    @Override
+    public int hashCode() {
+        return Objects.hash(super.hashCode(), enabledGroups);
     }
 }

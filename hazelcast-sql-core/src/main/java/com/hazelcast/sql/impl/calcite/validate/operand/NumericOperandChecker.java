@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2008-2020, Hazelcast, Inc. All Rights Reserved.
+ * Copyright (c) 2008-2021, Hazelcast, Inc. All Rights Reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -32,7 +32,7 @@ public final class NumericOperandChecker implements OperandChecker {
     @Override
     public boolean check(HazelcastCallBinding binding, boolean throwOnFailure, int index) {
         // Resolve a numeric checker for the operand
-        SqlNode operand = binding.operand(index);
+        SqlNode operand = binding.getCall().operand(index);
 
         RelDataType operandType = binding.getValidator().deriveType(binding.getScope(), operand);
 

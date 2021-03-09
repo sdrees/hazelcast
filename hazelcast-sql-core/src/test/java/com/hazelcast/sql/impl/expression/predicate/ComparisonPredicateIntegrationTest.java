@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2008-2020, Hazelcast, Inc. All Rights Reserved.
+ * Copyright (c) 2008-2021, Hazelcast, Inc. All Rights Reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -33,8 +33,16 @@ import org.junit.experimental.categories.Category;
 import org.junit.runner.RunWith;
 import org.junit.runners.Parameterized;
 
+import java.io.Serializable;
 import java.math.BigDecimal;
 import java.math.BigInteger;
+import java.time.LocalDate;
+import java.time.LocalDateTime;
+import java.time.LocalTime;
+import java.time.OffsetDateTime;
+import java.time.ZoneId;
+import java.time.ZoneOffset;
+import java.time.ZonedDateTime;
 import java.util.Arrays;
 import java.util.Collection;
 
@@ -48,6 +56,7 @@ public class ComparisonPredicateIntegrationTest extends ExpressionTestSupport {
     private static final int RES_LT = -1;
     private static final int RES_GT = 1;
     private static final Integer RES_NULL = null;
+    private static final ZoneId DEFAULT_TIME_ZONE = ZoneId.systemDefault();
 
     @Parameterized.Parameter
     public Mode mode;
@@ -219,11 +228,284 @@ public class ComparisonPredicateIntegrationTest extends ExpressionTestSupport {
     @Test
     public void testUnsupported() {
         // Column/column
-        checkUnsupportedColumnColumn(ExpressionTypes.LOCAL_DATE, ExpressionTypes.allExcept());
-        checkUnsupportedColumnColumn(ExpressionTypes.LOCAL_TIME, ExpressionTypes.allExcept());
-        checkUnsupportedColumnColumn(ExpressionTypes.LOCAL_DATE_TIME, ExpressionTypes.allExcept());
-        checkUnsupportedColumnColumn(ExpressionTypes.OFFSET_DATE_TIME, ExpressionTypes.allExcept());
-        checkUnsupportedColumnColumn(ExpressionTypes.OBJECT, ExpressionTypes.allExcept());
+        checkUnsupportedColumnColumn(
+                ExpressionTypes.LOCAL_DATE, ExpressionTypes.allExcept(
+                        ExpressionTypes.LOCAL_DATE,
+                        ExpressionTypes.LOCAL_DATE_TIME,
+                        ExpressionTypes.OFFSET_DATE_TIME));
+        checkUnsupportedColumnColumn(
+                ExpressionTypes.LOCAL_TIME, ExpressionTypes.allExcept(
+                        ExpressionTypes.LOCAL_TIME,
+                        ExpressionTypes.LOCAL_DATE_TIME,
+                        ExpressionTypes.OFFSET_DATE_TIME));
+        checkUnsupportedColumnColumn(
+                ExpressionTypes.LOCAL_DATE_TIME, ExpressionTypes.allExcept(
+                        ExpressionTypes.LOCAL_DATE,
+                        ExpressionTypes.LOCAL_TIME,
+                        ExpressionTypes.LOCAL_DATE_TIME,
+                        ExpressionTypes.OFFSET_DATE_TIME));
+        checkUnsupportedColumnColumn(
+                ExpressionTypes.OFFSET_DATE_TIME, ExpressionTypes.allExcept(
+                        ExpressionTypes.LOCAL_DATE,
+                        ExpressionTypes.LOCAL_TIME,
+                        ExpressionTypes.LOCAL_DATE_TIME,
+                        ExpressionTypes.OFFSET_DATE_TIME));
+        checkUnsupportedColumnColumn(ExpressionTypes.OBJECT, ExpressionTypes.allExcept(ExpressionTypes.OBJECT));
+    }
+
+    @Test
+    public void testComparable_to_Comparable() {
+        putBiValue(new ComparableImpl(1), new ComparableImpl(1), ExpressionTypes.OBJECT, ExpressionTypes.OBJECT);
+        check("field1", "field2", new ComparableImpl(1).compareTo(new ComparableImpl(1)));
+
+        putBiValue(new ComparableImpl(1), new ComparableImpl(2), ExpressionTypes.OBJECT, ExpressionTypes.OBJECT);
+        check("field1", "field2", new ComparableImpl(1).compareTo(new ComparableImpl(2)));
+
+        putBiValue(new ComparableImpl(2), new ComparableImpl(1), ExpressionTypes.OBJECT, ExpressionTypes.OBJECT);
+        check("field1", "field2", new ComparableImpl(2).compareTo(new ComparableImpl(1)));
+    }
+
+    @Test
+    public void testComparable_and_NonComparable() {
+        putBiValue(new ComparableImpl(1), new NonComparable(), ExpressionTypes.OBJECT, ExpressionTypes.OBJECT);
+        checkFailure(
+                "field1", "field2", SqlErrorCode.GENERIC,
+                "Cannot compare two OBJECT values, because "
+                        + "left operand has " + ComparableImpl.class + " type and "
+                        + "right operand has " + NonComparable.class + " type");
+
+        putBiValue(new NonComparable(), new ComparableImpl(1), ExpressionTypes.OBJECT, ExpressionTypes.OBJECT);
+        checkFailure(
+                "field1", "field2", SqlErrorCode.GENERIC,
+                "Cannot compare two OBJECT values, because "
+                        + "left operand has " + NonComparable.class + " type and "
+                        + "right operand has " + ComparableImpl.class + " type");
+    }
+
+    @Test
+    public void testDifferentClassThatImplementsComparableInterface() {
+        putBiValue(new ComparableImpl(1), new ComparableImpl2(1), ExpressionTypes.OBJECT, ExpressionTypes.OBJECT);
+
+        checkFailure(
+                "field1", "field2", SqlErrorCode.GENERIC,
+                "Cannot compare two OBJECT values, because "
+                        + "left operand has " + ComparableImpl.class + " type and "
+                        + "right operand has " + ComparableImpl2.class + " type");
+    }
+
+    @Test
+    public void testNonComparableObjects() {
+        putBiValue(new NonComparable(), new NonComparable(), ExpressionTypes.OBJECT, ExpressionTypes.OBJECT);
+
+        checkFailure(
+                "field1", "field2", SqlErrorCode.GENERIC,
+                "Cannot compare OBJECT value because " + NonComparable.class + " doesn't implement Comparable interface");
+    }
+
+    @Test
+    public void testCompare_LocalDate_with_LocalDate() {
+        putBiValue(
+            LocalDate.of(2020, 12, 30),
+            LocalDate.of(2020, 12, 30),
+            ExpressionTypes.LOCAL_DATE, ExpressionTypes.LOCAL_DATE
+        );
+
+        check("field1", "field2", LocalDate.of(2020, 12, 30).compareTo(LocalDate.of(2020, 12, 30)));
+    }
+
+    @Test
+    public void testCompare_LocalDate_with_String() {
+        put(ExpressionValue.create(ExpressionValue.createClass(ExpressionTypes.LOCAL_DATE), LocalDate.of(2020, 12, 30)));
+
+        check("field1", "'2020-12-30'", LocalDate.of(2020, 12, 30).compareTo(LocalDate.of(2020, 12, 30)));
+        check("'2020-12-30'", "field1", LocalDate.of(2020, 12, 30).compareTo(LocalDate.of(2020, 12, 30)));
+    }
+
+    @Test
+    public void testCompare_LocalTime_with_LocalTime() {
+        putBiValue(
+            LocalTime.of(14, 2, 0),
+            LocalTime.of(14, 2, 0),
+            ExpressionTypes.LOCAL_TIME, ExpressionTypes.LOCAL_TIME
+        );
+
+        check("field1", "field2", LocalTime.of(14, 2, 0).compareTo(LocalTime.of(14, 2, 0)));
+    }
+
+    @Test
+    public void testCompare_LocalTime_with_String() {
+        put(ExpressionValue.create(ExpressionValue.createClass(ExpressionTypes.LOCAL_TIME), LocalTime.of(14, 2, 0)));
+
+        check("field1", "'14:02:00'", LocalTime.of(14, 2, 0).compareTo(LocalTime.of(14, 2, 0)));
+        check("'14:02:00'", "field1", LocalTime.of(14, 2, 0).compareTo(LocalTime.of(14, 2, 0)));
+    }
+
+    @Test
+    public void testCompare_LocalDateTime_with_LocalDateTime() {
+        putBiValue(
+            LocalDateTime.of(2020, 12, 30, 14, 2, 0),
+            LocalDateTime.of(2020, 12, 30, 14, 2, 0),
+            ExpressionTypes.LOCAL_DATE_TIME, ExpressionTypes.LOCAL_DATE_TIME
+        );
+
+        check("field1", "field2", LocalDateTime.of(2020, 12, 30, 14, 2, 0).compareTo(LocalDateTime.of(2020, 12, 30, 14, 2, 0)));
+    }
+
+    @Test
+    public void testCompare_LocalDateTime_with_String() {
+        put(ExpressionValue.create(ExpressionValue.createClass(ExpressionTypes.LOCAL_DATE_TIME), LocalDateTime.of(2020, 12, 30, 14, 2, 0)));
+
+        check("field1", "'2020-12-30T14:02'", LocalDateTime.of(2020, 12, 30, 14, 2, 0).compareTo(LocalDateTime.of(2020, 12, 30, 14, 2, 0)));
+        check("'2020-12-30T14:02'", "field1", LocalDateTime.of(2020, 12, 30, 14, 2, 0).compareTo(LocalDateTime.of(2020, 12, 30, 14, 2, 0)));
+    }
+
+
+    @Test
+    public void testCompare_LocalDateTime_with_LocalDate() {
+        putBiValue(
+            LocalDateTime.of(2020, 12, 30, 14, 2, 0),
+            LocalDate.of(2020, 12, 30),
+            ExpressionTypes.LOCAL_DATE_TIME, ExpressionTypes.LOCAL_DATE
+        );
+
+        check("field1", "field2", LocalDateTime.of(2020, 12, 30, 14, 2, 0).compareTo(LocalDate.of(2020, 12, 30).atStartOfDay()));
+
+        putBiValue(
+            LocalDate.of(2020, 12, 30),
+            LocalDateTime.of(2020, 12, 30, 14, 2, 0),
+            ExpressionTypes.LOCAL_DATE, ExpressionTypes.LOCAL_DATE_TIME
+        );
+
+        check("field1", "field2", LocalDate.of(2020, 12, 30).atStartOfDay().compareTo(LocalDateTime.of(2020, 12, 30, 14, 2, 0)));
+    }
+
+    @Test
+    public void testCompare_LocalDateTime_with_LocalTime() {
+        putBiValue(
+                LocalDateTime.of(2020, 12, 30, 14, 2, 0),
+                LocalTime.of(14, 2, 0),
+                ExpressionTypes.LOCAL_DATE_TIME, ExpressionTypes.LOCAL_TIME
+        );
+
+        check("cast (field1 as TIME)", "field2", LocalDateTime.of(2020, 12, 30, 14, 2, 0).toLocalTime().compareTo(LocalTime.of(14, 2, 0)));
+        check("field1", "field2", LocalDateTime.of(2020, 12, 30, 14, 2, 0).compareTo(LocalDateTime.of(LocalDate.now(), LocalTime.of(14, 2, 0))));
+
+        putBiValue(
+                LocalTime.of(14, 2, 0),
+                LocalDateTime.of(2020, 12, 30, 14, 2, 0),
+                ExpressionTypes.LOCAL_TIME, ExpressionTypes.LOCAL_DATE_TIME
+        );
+
+        check("field1", "cast (field2 as TIME)", LocalTime.of(14, 2, 0).compareTo(LocalDateTime.of(2020, 12, 30, 14, 2, 0).toLocalTime()));
+        check("field1", "field2", LocalDateTime.of(LocalDate.now(), LocalTime.of(14, 2, 0)).compareTo(LocalDateTime.of(2020, 12, 30, 14, 2, 0)));
+    }
+
+    @Test
+    public void testCompare_LocalDateTimeWithTZ_with_LocalDateTimeWithTZ() {
+        putBiValue(
+            OffsetDateTime.of(LocalDateTime.of(2020, 12, 30, 14, 2, 0), ZoneOffset.UTC),
+            OffsetDateTime.of(LocalDateTime.of(2020, 12, 30, 14, 2, 0), ZoneOffset.UTC),
+            ExpressionTypes.OFFSET_DATE_TIME, ExpressionTypes.OFFSET_DATE_TIME
+        );
+
+        check("field1", "field2",
+                OffsetDateTime.of(LocalDateTime.of(2020, 12, 30, 14, 2, 0), ZoneOffset.UTC)
+                        .compareTo(OffsetDateTime.of(LocalDateTime.of(2020, 12, 30, 14, 2, 0), ZoneOffset.UTC)));
+    }
+
+    @Test
+    public void testCompare_LocalDateTimeWithTZ_with_String() {
+        put(ExpressionValue.create(ExpressionValue.createClass(
+                ExpressionTypes.OFFSET_DATE_TIME), OffsetDateTime.of(LocalDateTime.of(2020, 12, 30, 14, 2, 0), ZoneOffset.UTC)));
+
+        check("field1", "'2020-12-30T14:02Z'",
+                OffsetDateTime.of(LocalDateTime.of(2020, 12, 30, 14, 2, 0), ZoneOffset.UTC)
+                        .compareTo(OffsetDateTime.of(LocalDateTime.of(2020, 12, 30, 14, 2, 0), ZoneOffset.UTC)));
+        check("'2020-12-30T14:02Z'", "field1",
+                OffsetDateTime.of(LocalDateTime.of(2020, 12, 30, 14, 2, 0), ZoneOffset.UTC)
+                        .compareTo(OffsetDateTime.of(LocalDateTime.of(2020, 12, 30, 14, 2, 0), ZoneOffset.UTC)));
+    }
+
+    @Test
+    public void testCompare_LocalDateTimeWithTZ_with_LocalDateTime() {
+        putBiValue(
+                OffsetDateTime.of(LocalDateTime.of(2020, 12, 30, 14, 2, 0), ZoneOffset.UTC),
+                LocalDateTime.of(2020, 12, 30, 14, 2, 0), ExpressionTypes.OFFSET_DATE_TIME, ExpressionTypes.LOCAL_DATE_TIME
+        );
+
+        check("field1", "field2",
+                OffsetDateTime.of(LocalDateTime.of(2020, 12, 30, 14, 2, 0), ZoneOffset.UTC)
+                        .compareTo(ZonedDateTime.of(LocalDateTime.of(2020, 12, 30, 14, 2, 0), DEFAULT_TIME_ZONE).toOffsetDateTime()));
+
+        putBiValue(
+                LocalDateTime.of(2020, 12, 30, 14, 2, 0),
+                OffsetDateTime.of(LocalDateTime.of(2020, 12, 30, 14, 2, 0), ZoneOffset.UTC),
+                ExpressionTypes.LOCAL_DATE_TIME, ExpressionTypes.OFFSET_DATE_TIME
+        );
+
+        check("field1", "field2",
+                ZonedDateTime.of(LocalDateTime.of(2020, 12, 30, 14, 2, 0), DEFAULT_TIME_ZONE).toOffsetDateTime()
+                        .compareTo(OffsetDateTime.of(LocalDateTime.of(2020, 12, 30, 14, 2, 0), ZoneOffset.UTC)));
+    }
+
+    @Test
+    public void testCompare_LocalDateTimeWithTZ_with_LocalDate() {
+        putBiValue(
+                OffsetDateTime.of(LocalDateTime.of(2020, 12, 30, 14, 2, 0), ZoneOffset.UTC),
+                LocalDate.of(2020, 12, 30), ExpressionTypes.OFFSET_DATE_TIME, ExpressionTypes.LOCAL_DATE
+        );
+
+        check("field1", "field2",
+                OffsetDateTime.of(LocalDateTime.of(2020, 12, 30, 14, 2, 0), ZoneOffset.UTC)
+                        .compareTo(ZonedDateTime.of(LocalDate.of(2020, 12, 30).atStartOfDay(), DEFAULT_TIME_ZONE).toOffsetDateTime()));
+
+        putBiValue(
+                LocalDate.of(2020, 12, 30),
+                OffsetDateTime.of(LocalDateTime.of(2020, 12, 30, 14, 2, 0), ZoneOffset.UTC),
+                ExpressionTypes.LOCAL_DATE, ExpressionTypes.OFFSET_DATE_TIME
+        );
+
+        check("field1", "field2",
+                ZonedDateTime.of(LocalDate.of(2020, 12, 30).atStartOfDay(), DEFAULT_TIME_ZONE).toOffsetDateTime()
+                        .compareTo(OffsetDateTime.of(LocalDateTime.of(2020, 12, 30, 14, 2, 0), ZoneOffset.UTC)));
+    }
+
+    @Test
+    public void testCompare_LocalDateTimeWithTZ_with_LocalTime() {
+        putBiValue(
+                OffsetDateTime.of(LocalDateTime.of(2020, 12, 30, 14, 2, 0), ZoneOffset.UTC),
+                LocalTime.of(14, 2, 0), ExpressionTypes.OFFSET_DATE_TIME, ExpressionTypes.LOCAL_TIME
+        );
+
+        check("cast (field1 as TIME)", "field2",
+                OffsetDateTime.of(LocalDateTime.of(2020, 12, 30, 14, 2, 0), ZoneOffset.UTC).toLocalTime()
+                        .compareTo(LocalTime.of(14, 2, 0)));
+        check("field1", "field2",
+                OffsetDateTime.of(LocalDateTime.of(2020, 12, 30, 14, 2, 0), ZoneOffset.UTC)
+                        .compareTo(OffsetDateTime.of(LocalDateTime.of(LocalDate.now(), LocalTime.of(14, 2, 0)), ZoneOffset.UTC)));
+
+        putBiValue(
+                LocalTime.of(14, 2, 0),
+                OffsetDateTime.of(LocalDateTime.of(2020, 12, 30, 14, 2, 0), ZoneOffset.UTC),
+                ExpressionTypes.LOCAL_TIME, ExpressionTypes.OFFSET_DATE_TIME
+        );
+
+        check("field1", "cast (field2 as TIME)",
+                LocalTime.of(14, 2, 0).compareTo(
+                        OffsetDateTime.of(LocalDateTime.of(2020, 12, 30, 14, 2, 0), ZoneOffset.UTC).toLocalTime()));
+        check("field1", "field2",
+                OffsetDateTime.of(LocalDateTime.of(LocalDate.now(), LocalTime.of(14, 2, 0)), ZoneOffset.UTC)
+                        .compareTo(OffsetDateTime.of(LocalDateTime.of(2020, 12, 30, 14, 2, 0), ZoneOffset.UTC)));
+    }
+
+    private void putBiValue(Object field1, Object field2, ExpressionType<?> type1, ExpressionType<?> type2) {
+        ExpressionBiValue value = ExpressionBiValue.createBiValue(
+                ExpressionBiValue.createBiClass(type1, type2),
+                field1,
+                field2
+        );
+
+        put(value);
     }
 
     protected Object[] getNumericValues() {
@@ -477,5 +759,34 @@ public class ComparisonPredicateIntegrationTest extends ExpressionTestSupport {
             this.value = value;
             this.type = type;
         }
+    }
+
+    static class ComparableImpl implements Comparable<ComparableImpl>, Serializable {
+        int innerField;
+
+        ComparableImpl(int innerField) {
+            this.innerField = innerField;
+        }
+
+        @Override
+        public int compareTo(ComparableImpl that) {
+            return Integer.compare(this.innerField, that.innerField);
+        }
+    }
+
+    static class ComparableImpl2 implements Comparable<ComparableImpl2>, Serializable {
+        int innerField;
+
+        ComparableImpl2(int innerField) {
+            this.innerField = innerField;
+        }
+
+        @Override
+        public int compareTo(ComparableImpl2 that) {
+            return Integer.compare(this.innerField, that.innerField);
+        }
+    }
+
+    static class NonComparable implements Serializable {
     }
 }

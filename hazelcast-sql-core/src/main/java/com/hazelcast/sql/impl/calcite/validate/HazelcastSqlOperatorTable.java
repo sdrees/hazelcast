@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2008-2020, Hazelcast, Inc. All Rights Reserved.
+ * Copyright (c) 2008-2021, Hazelcast, Inc. All Rights Reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -24,6 +24,7 @@ import com.hazelcast.sql.impl.calcite.validate.operators.math.HazelcastRoundTrun
 import com.hazelcast.sql.impl.calcite.validate.operators.math.HazelcastSignFunction;
 import com.hazelcast.sql.impl.calcite.validate.operators.misc.HazelcastArithmeticOperator;
 import com.hazelcast.sql.impl.calcite.validate.operators.misc.HazelcastCastFunction;
+import com.hazelcast.sql.impl.calcite.validate.operators.misc.HazelcastDescOperator;
 import com.hazelcast.sql.impl.calcite.validate.operators.misc.HazelcastUnaryOperator;
 import com.hazelcast.sql.impl.calcite.validate.operators.predicate.HazelcastAndOrPredicate;
 import com.hazelcast.sql.impl.calcite.validate.operators.predicate.HazelcastComparisonPredicate;
@@ -65,8 +66,6 @@ import static com.hazelcast.sql.impl.calcite.validate.HazelcastResources.RESOURC
  */
 @SuppressWarnings({"unused", "checkstyle:ClassDataAbstractionCoupling"})
 public final class HazelcastSqlOperatorTable extends ReflectiveSqlOperatorTable {
-    /** Visitor to rewrite Calcite operators to Hazelcast operators. */
-    public static final HazelcastSqlOperatorTable.RewriteVisitor REWRITE_VISITOR = new HazelcastSqlOperatorTable.RewriteVisitor();
 
     //@formatter:off
 
@@ -97,6 +96,7 @@ public final class HazelcastSqlOperatorTable extends ReflectiveSqlOperatorTable 
     public static final SqlOperator MINUS = HazelcastArithmeticOperator.MINUS;
     public static final SqlOperator MULTIPLY = HazelcastArithmeticOperator.MULTIPLY;
     public static final SqlOperator DIVIDE = HazelcastArithmeticOperator.DIVIDE;
+    public static final SqlOperator REMAINDER = HazelcastArithmeticOperator.REMAINDER;
 
     public static final SqlPrefixOperator UNARY_PLUS = HazelcastUnaryOperator.PLUS;
     public static final SqlPrefixOperator UNARY_MINUS = HazelcastUnaryOperator.MINUS;
@@ -146,7 +146,8 @@ public final class HazelcastSqlOperatorTable extends ReflectiveSqlOperatorTable 
 
     public static final SqlBinaryOperator CONCAT = HazelcastConcatOperator.INSTANCE;
 
-    public static final SqlSpecialOperator LIKE = HazelcastLikeOperator.INSTANCE;
+    public static final SqlSpecialOperator LIKE = HazelcastLikeOperator.LIKE;
+    public static final SqlSpecialOperator NOT_LIKE = HazelcastLikeOperator.NOT_LIKE;
 
     public static final SqlFunction SUBSTRING = HazelcastSubstringFunction.INSTANCE;
 
@@ -165,6 +166,8 @@ public final class HazelcastSqlOperatorTable extends ReflectiveSqlOperatorTable 
 
     public static final SqlFunction LOWER = HazelcastStringFunction.LOWER;
     public static final SqlFunction UPPER = HazelcastStringFunction.UPPER;
+
+    public static final SqlPostfixOperator DESC = HazelcastDescOperator.DESC;
 
     //#endregion
 
@@ -187,9 +190,11 @@ public final class HazelcastSqlOperatorTable extends ReflectiveSqlOperatorTable 
     /**
      * Visitor that rewrites Calcite operators with operators from this table.
      */
-    public static final class RewriteVisitor extends SqlBasicVisitor<Void> {
-        private RewriteVisitor() {
-            // No-op.
+    static final class RewriteVisitor extends SqlBasicVisitor<Void> {
+        private final HazelcastSqlValidator validator;
+
+        RewriteVisitor(HazelcastSqlValidator validator) {
+            this.validator = validator;
         }
 
         @Override
@@ -211,7 +216,7 @@ public final class HazelcastSqlOperatorTable extends ReflectiveSqlOperatorTable 
 
                 List<SqlOperator> resolvedOperators = new ArrayList<>(1);
 
-                HazelcastSqlOperatorTable.instance().lookupOperatorOverloads(
+                validator.getOperatorTable().lookupOperatorOverloads(
                     operator.getNameAsId(),
                     null,
                     operator.getSyntax(),

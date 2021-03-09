@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2008-2020, Hazelcast, Inc. All Rights Reserved.
+ * Copyright (c) 2008-2021, Hazelcast, Inc. All Rights Reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -188,10 +188,9 @@ public abstract class AuthenticationBaseMessageTask<P> extends AbstractMessageTa
 
     private ClientMessage prepareAuthenticatedClientMessage() {
         ServerConnection connection = endpoint.getConnection();
-
+        setConnectionType();
         endpoint.authenticated(clientUuid, credentials, clientVersion, clientMessage.getCorrelationId(),
                 clientName, labels);
-        setConnectionType();
         validateNodeStart();
         final UUID clusterId = clientEngine.getClusterService().getClusterId();
         // additional check: cluster id may be null when member has not started yet;

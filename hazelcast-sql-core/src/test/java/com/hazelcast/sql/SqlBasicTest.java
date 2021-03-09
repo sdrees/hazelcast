@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2008-2020, Hazelcast, Inc. All Rights Reserved.
+ * Copyright (c) 2008-2021, Hazelcast, Inc. All Rights Reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -71,6 +71,7 @@ import java.util.Set;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertNotEquals;
 import static org.junit.Assert.assertNotNull;
+import static org.junit.Assert.assertTrue;
 
 /**
  * Test that covers basic column read operations through SQL.
@@ -336,6 +337,7 @@ public class SqlBasicTest extends SqlTestSupport {
             SqlColumnMetadata columnMetadata = rowMetadata.getColumn(fieldIndex);
             assertEquals(adjustedField, columnMetadata.getName());
             assertEquals(fieldType, columnMetadata.getType());
+            assertTrue(columnMetadata.isNullable());
         }
 
         assertThrows(IndexOutOfBoundsException.class, () -> rowMetadata.getColumn(-1));
@@ -501,7 +503,7 @@ public class SqlBasicTest extends SqlTestSupport {
         }
     }
 
-    private static SerializationConfig serializationConfig() {
+    public static SerializationConfig serializationConfig() {
         SerializationConfig serializationConfig = new SerializationConfig();
 
         serializationConfig.addPortableFactory(PORTABLE_FACTORY_ID, classId -> {
@@ -529,7 +531,7 @@ public class SqlBasicTest extends SqlTestSupport {
         return serializationConfig;
     }
 
-    private static Config memberConfig() {
+    static Config memberConfig() {
         Config config = new Config().setSerializationConfig(serializationConfig());
 
         config
@@ -539,7 +541,7 @@ public class SqlBasicTest extends SqlTestSupport {
         return config;
     }
 
-    private static ClientConfig clientConfig() {
+    static ClientConfig clientConfig() {
         return new ClientConfig().setSerializationConfig(serializationConfig());
     }
 
@@ -551,11 +553,11 @@ public class SqlBasicTest extends SqlTestSupport {
         return fieldName;
     }
 
-    private static String portableFieldName(String fieldName) {
+    static String portableFieldName(String fieldName) {
         return fieldName + "_p";
     }
 
-    private abstract static class AbstractPojoKey implements Serializable {
+    abstract static class AbstractPojoKey implements Serializable {
 
         protected long key;
 
@@ -572,7 +574,7 @@ public class SqlBasicTest extends SqlTestSupport {
         }
     }
 
-    private abstract static class AbstractPojo implements Serializable {
+    abstract static class AbstractPojo implements Serializable {
 
         protected boolean booleanVal;
 
@@ -729,13 +731,18 @@ public class SqlBasicTest extends SqlTestSupport {
         }
     }
 
-    private static class SerializablePojo extends AbstractPojo implements Serializable {
+    static class SerializablePojo extends AbstractPojo implements Serializable {
+
+        public SerializablePojo() {
+            // no-op
+        }
+
         public SerializablePojo(long val) {
             super(val);
         }
     }
 
-    private static class DataSerializablePojoKey extends AbstractPojoKey implements DataSerializable {
+    static class DataSerializablePojoKey extends AbstractPojoKey implements DataSerializable {
         public DataSerializablePojoKey() {
             // No-op.
         }
@@ -755,7 +762,7 @@ public class SqlBasicTest extends SqlTestSupport {
         }
     }
 
-    private static class DataSerializablePojo extends AbstractPojo implements DataSerializable {
+    static class DataSerializablePojo extends AbstractPojo implements DataSerializable {
         public DataSerializablePojo() {
             // No-op.
         }
@@ -779,7 +786,7 @@ public class SqlBasicTest extends SqlTestSupport {
             out.writeObject(decimalVal);
 
             out.writeChar(charVal);
-            out.writeUTF(varcharVal);
+            out.writeString(varcharVal);
 
             out.writeObject(dateVal);
             out.writeObject(timeVal);
@@ -810,7 +817,7 @@ public class SqlBasicTest extends SqlTestSupport {
             decimalVal = in.readObject();
 
             charVal = in.readChar();
-            varcharVal = in.readUTF();
+            varcharVal = in.readString();
 
             dateVal = in.readObject();
             timeVal = in.readObject();
@@ -827,7 +834,7 @@ public class SqlBasicTest extends SqlTestSupport {
         }
     }
 
-    private static class IdentifiedDataSerializablePojoKey extends DataSerializablePojoKey implements IdentifiedDataSerializable {
+    static class IdentifiedDataSerializablePojoKey extends DataSerializablePojoKey implements IdentifiedDataSerializable {
         public IdentifiedDataSerializablePojoKey() {
             // No-op.
         }
@@ -847,7 +854,7 @@ public class SqlBasicTest extends SqlTestSupport {
         }
     }
 
-    private static class IdentifiedDataSerializablePojo extends DataSerializablePojo implements IdentifiedDataSerializable {
+    static class IdentifiedDataSerializablePojo extends DataSerializablePojo implements IdentifiedDataSerializable {
         public IdentifiedDataSerializablePojo() {
             // No-op.
         }
@@ -867,7 +874,7 @@ public class SqlBasicTest extends SqlTestSupport {
         }
     }
 
-    private static class PortablePojoKey extends AbstractPojoKey implements Portable {
+    static class PortablePojoKey extends AbstractPojoKey implements Portable {
         public PortablePojoKey() {
             // No-op.
         }
@@ -897,7 +904,7 @@ public class SqlBasicTest extends SqlTestSupport {
         }
     }
 
-    private static class PortablePojo extends AbstractPojo implements Portable {
+    static class PortablePojo extends AbstractPojo implements Portable {
 
         private PortablePojoNested portableVal;
 
@@ -937,11 +944,11 @@ public class SqlBasicTest extends SqlTestSupport {
             writer.writeDouble(portableFieldName("doubleVal"), doubleVal);
 
             writer.writeChar(portableFieldName("charVal"), charVal);
-            writer.writeUTF(portableFieldName("varcharVal"), varcharVal);
+            writer.writeString(portableFieldName("varcharVal"), varcharVal);
 
             writer.writePortable(portableFieldName("portableVal"), portableVal);
 
-            writer.writeUTF(portableFieldName("nullVal"), null);
+            writer.writeString(portableFieldName("nullVal"), null);
         }
 
         @Override
@@ -956,14 +963,14 @@ public class SqlBasicTest extends SqlTestSupport {
             doubleVal = reader.readDouble(portableFieldName("doubleVal"));
 
             charVal = reader.readChar(portableFieldName("charVal"));
-            varcharVal = reader.readUTF(portableFieldName("varcharVal"));
+            varcharVal = reader.readString(portableFieldName("varcharVal"));
 
             portableVal = reader.readPortable(portableFieldName("portableVal"));
-            nullVal = reader.readUTF(portableFieldName("nullVal"));
+            nullVal = reader.readString(portableFieldName("nullVal"));
         }
     }
 
-    private static class PortablePojoNested implements Portable {
+    static class PortablePojoNested implements Portable {
         private int val;
 
         public PortablePojoNested() {
@@ -1015,7 +1022,7 @@ public class SqlBasicTest extends SqlTestSupport {
         }
     }
 
-    protected enum SerializationMode {
+    public enum SerializationMode {
         SERIALIZABLE,
         DATA_SERIALIZABLE,
         IDENTIFIED_DATA_SERIALIZABLE,

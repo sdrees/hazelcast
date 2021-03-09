@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2008-2020, Hazelcast, Inc. All Rights Reserved.
+ * Copyright (c) 2008-2021, Hazelcast, Inc. All Rights Reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -20,6 +20,7 @@ import com.hazelcast.config.AttributeConfig;
 import com.hazelcast.core.HazelcastJsonValue;
 import com.hazelcast.internal.serialization.InternalSerializationService;
 import com.hazelcast.internal.serialization.Data;
+import com.hazelcast.internal.serialization.impl.portable.PortableGenericRecord;
 import com.hazelcast.nio.serialization.HazelcastSerializationException;
 import com.hazelcast.nio.serialization.Portable;
 import com.hazelcast.query.QueryException;
@@ -152,6 +153,12 @@ public final class Extractors {
                 }
             } else if (targetObject instanceof HazelcastJsonValue) {
                 return JsonGetter.INSTANCE;
+            } else if (targetObject instanceof PortableGenericRecord) {
+                if (genericPortableGetter == null) {
+                    // will be initialised a couple of times in the worst case
+                    genericPortableGetter = new PortableGetter(ss);
+                }
+                return genericPortableGetter;
             } else {
                 return ReflectionHelper.createGetter(targetObject, attributeName, failOnMissingReflectiveAttribute);
             }

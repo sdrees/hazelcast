@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2008-2020, Hazelcast, Inc. All Rights Reserved.
+ * Copyright (c) 2008-2021, Hazelcast, Inc. All Rights Reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -23,11 +23,11 @@ import com.hazelcast.client.impl.protocol.codec.TransactionCommitCodec;
 import com.hazelcast.client.impl.protocol.codec.TransactionCreateCodec;
 import com.hazelcast.client.impl.protocol.codec.TransactionRollbackCodec;
 import com.hazelcast.logging.ILogger;
-import com.hazelcast.transaction.TransactionException;
 import com.hazelcast.transaction.TransactionNotActiveException;
 import com.hazelcast.transaction.TransactionOptions;
 import com.hazelcast.internal.util.Clock;
 import com.hazelcast.internal.util.ThreadUtil;
+import com.hazelcast.transaction.TransactionTimedOutException;
 
 import java.util.UUID;
 
@@ -141,7 +141,7 @@ final class TransactionProxy {
 
     private void checkTimeout() {
         if (startTime + options.getTimeoutMillis() < Clock.currentTimeMillis()) {
-            throw new TransactionException("Transaction is timed-out!");
+            throw new TransactionTimedOutException("Transaction is timed-out!");
         }
     }
 

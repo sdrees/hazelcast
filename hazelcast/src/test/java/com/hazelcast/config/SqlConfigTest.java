@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2008-2020, Hazelcast, Inc. All Rights Reserved.
+ * Copyright (c) 2008-2021, Hazelcast, Inc. All Rights Reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -17,8 +17,11 @@
 package com.hazelcast.config;
 
 import com.hazelcast.test.HazelcastParallelClassRunner;
+import com.hazelcast.test.HazelcastTestSupport;
 import com.hazelcast.test.annotation.ParallelJVMTest;
 import com.hazelcast.test.annotation.QuickTest;
+import nl.jqno.equalsverifier.EqualsVerifier;
+import nl.jqno.equalsverifier.Warning;
 import org.junit.Test;
 import org.junit.experimental.categories.Category;
 import org.junit.runner.RunWith;
@@ -27,28 +30,26 @@ import static org.junit.Assert.assertEquals;
 
 @RunWith(HazelcastParallelClassRunner.class)
 @Category({QuickTest.class, ParallelJVMTest.class})
-public class SqlConfigTest {
+public class SqlConfigTest extends HazelcastTestSupport {
     @Test
     public void testEmpty() {
         SqlConfig config = new SqlConfig();
 
         assertEquals(SqlConfig.DEFAULT_EXECUTOR_POOL_SIZE, config.getExecutorPoolSize());
-        assertEquals(SqlConfig.DEFAULT_OPERATION_POOL_SIZE, config.getOperationPoolSize());
         assertEquals(SqlConfig.DEFAULT_STATEMENT_TIMEOUT_MILLIS, config.getStatementTimeoutMillis());
     }
 
     @Test
     public void testNonEmpty() {
         SqlConfig config = new SqlConfig()
-            .setExecutorPoolSize(10)
-            .setOperationPoolSize(20)
-            .setStatementTimeoutMillis(30L);
+                .setExecutorPoolSize(10)
+                .setStatementTimeoutMillis(30L);
 
         assertEquals(10, config.getExecutorPoolSize());
-        assertEquals(20, config.getOperationPoolSize());
         assertEquals(30L, config.getStatementTimeoutMillis());
     }
 
+    @Test
     public void testExecutorPoolSizeDefault() {
         new SqlConfig().setExecutorPoolSize(-1);
     }
@@ -63,20 +64,6 @@ public class SqlConfigTest {
         new SqlConfig().setExecutorPoolSize(-2);
     }
 
-    public void testOperationPoolSizeDefault() {
-        new SqlConfig().setExecutorPoolSize(-1);
-    }
-
-    @Test(expected = IllegalArgumentException.class)
-    public void testOperationPoolSizeZero() {
-        new SqlConfig().setOperationPoolSize(0);
-    }
-
-    @Test(expected = IllegalArgumentException.class)
-    public void testOperationPoolSizeNegative() {
-        new SqlConfig().setOperationPoolSize(-2);
-    }
-
     @Test
     public void testQueryTimeoutZero() {
         new SqlConfig().setStatementTimeoutMillis(0);
@@ -85,5 +72,15 @@ public class SqlConfigTest {
     @Test(expected = IllegalArgumentException.class)
     public void testQueryTimeoutNegative() {
         new SqlConfig().setStatementTimeoutMillis(-1L);
+    }
+
+    @Test
+    public void testEqualsAndHashCode() {
+        assumeDifferentHashCodes();
+        EqualsVerifier.forClass(SqlConfig.class)
+                .usingGetClass()
+                .allFieldsShouldBeUsed()
+                .suppress(Warning.NONFINAL_FIELDS)
+                .verify();
     }
 }

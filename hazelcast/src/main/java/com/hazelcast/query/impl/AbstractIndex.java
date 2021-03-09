@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2008-2020, Hazelcast, Inc. All Rights Reserved.
+ * Copyright (c) 2008-2021, Hazelcast, Inc. All Rights Reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -160,16 +160,21 @@ public abstract class AbstractIndex implements InternalIndex {
     @Override
     public Set<QueryableEntry> evaluate(Predicate predicate) {
         assert converter != null;
-        return indexStore.evaluate(predicate, converter);
+        long timestamp = stats.makeTimestamp();
+
+        Set<QueryableEntry> result = indexStore.evaluate(predicate, converter);
+        stats.onIndexHit(timestamp, result.size());
+
+        return result;
     }
 
     @Override
-    public Iterator<QueryableEntry> getSqlRecordIterator() {
+    public Iterator<QueryableEntry> getSqlRecordIterator(boolean descending) {
         if (converter == null) {
             return emptyIterator();
         }
 
-        return indexStore.getSqlRecordIterator();
+        return indexStore.getSqlRecordIterator(descending);
     }
 
     @Override
@@ -182,12 +187,12 @@ public abstract class AbstractIndex implements InternalIndex {
     }
 
     @Override
-    public Iterator<QueryableEntry> getSqlRecordIterator(Comparison comparison, Comparable value) {
+    public Iterator<QueryableEntry> getSqlRecordIterator(Comparison comparison, Comparable value, boolean descending) {
         if (converter == null) {
             return emptyIterator();
         }
 
-        return indexStore.getSqlRecordIterator(comparison, convert(value));
+        return indexStore.getSqlRecordIterator(comparison, convert(value), descending);
     }
 
     @Override
@@ -195,13 +200,14 @@ public abstract class AbstractIndex implements InternalIndex {
         Comparable from,
         boolean fromInclusive,
         Comparable to,
-        boolean toInclusive
+        boolean toInclusive,
+        boolean descending
     ) {
         if (converter == null) {
             return emptyIterator();
         }
 
-        return indexStore.getSqlRecordIterator(convert(from), fromInclusive, convert(to), toInclusive);
+        return indexStore.getSqlRecordIterator(convert(from), fromInclusive, convert(to), toInclusive, descending);
     }
 
     @Override

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2008-2020, Hazelcast, Inc. All Rights Reserved.
+ * Copyright (c) 2008-2021, Hazelcast, Inc. All Rights Reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -17,6 +17,7 @@
 package com.hazelcast.config;
 
 import java.util.Collection;
+import java.util.Objects;
 
 import static com.hazelcast.internal.util.Preconditions.isNotNull;
 
@@ -262,5 +263,29 @@ public class JoinConfig {
                 + ", discoveryConfig=" + discoveryConfig
                 + ", autoDetectionConfig=" + autoDetectionConfig
                 + '}';
+    }
+
+    @Override
+    public boolean equals(Object o) {
+        if (this == o) {
+            return true;
+        }
+        if (o == null || getClass() != o.getClass()) {
+            return false;
+        }
+        JoinConfig that = (JoinConfig) o;
+        return Objects.equals(multicastConfig, that.multicastConfig)
+                && Objects.equals(tcpIpConfig, that.tcpIpConfig) && Objects.equals(awsConfig, that.awsConfig)
+                && Objects.equals(gcpConfig, that.gcpConfig) && Objects.equals(azureConfig, that.azureConfig)
+                && Objects.equals(kubernetesConfig, that.kubernetesConfig)
+                && Objects.equals(eurekaConfig, that.eurekaConfig)
+                && Objects.equals(discoveryConfig, that.discoveryConfig)
+                && Objects.equals(autoDetectionConfig, that.autoDetectionConfig);
+    }
+
+    @Override
+    public int hashCode() {
+        return Objects.hash(multicastConfig, tcpIpConfig, awsConfig, gcpConfig, azureConfig, kubernetesConfig, eurekaConfig,
+                discoveryConfig, autoDetectionConfig);
     }
 }

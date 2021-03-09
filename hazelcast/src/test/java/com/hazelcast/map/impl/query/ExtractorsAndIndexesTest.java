@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2008-2020, Hazelcast, Inc. All Rights Reserved.
+ * Copyright (c) 2008-2021, Hazelcast, Inc. All Rights Reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -68,6 +68,7 @@ public class ExtractorsAndIndexesTest extends HazelcastTestSupport {
         config.getNativeMemoryConfig().setEnabled(true);
 
         config.setProperty(ClusterProperty.PARTITION_COUNT.getName(), "1");
+        config.setProperty(QueryEngineImpl.DISABLE_MIGRATION_FALLBACK.getName(), "true");
         HazelcastInstance instance = createHazelcastInstance(config);
 
         IMap<Integer, Person> map = instance.getMap(mapName);

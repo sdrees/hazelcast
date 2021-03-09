@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2008-2020, Hazelcast, Inc. All Rights Reserved.
+ * Copyright (c) 2008-2021, Hazelcast, Inc. All Rights Reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -33,6 +33,7 @@ import com.hazelcast.spi.properties.ClusterProperty;
 import javax.annotation.Nonnull;
 import javax.annotation.Nullable;
 import java.util.Collection;
+import java.util.Iterator;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
@@ -73,28 +74,6 @@ import java.util.function.Function;
  * {@code entrySet}, return an <b>immutable</b> collection clone of the values.
  * The collection is <b>NOT</b> backed by the map, so changes to the map are
  * <b>NOT</b> reflected in the collection.</li>
- * <li>Since Hazelcast is compiled with Java 1.6, we can't override default
- * methods introduced in later Java versions, nor can we add documentation
- * to them. Methods, including but not limited to {@code computeIfPresent},
- * may behave incorrectly if the value passed to the update function is
- * modified in-place and returned as a result of the invocation.
- * You should create a new value instance and return it as a result.
- * <p>
- * For example, following code fragment will behave incorrectly and will
- * enter an infinite loop:
- * <pre>
- * map.computeIfPresent("key", (key, value) -&gt; {
- *     value.setSomeAttribute("newAttributeValue");
- *     return value;
- * });
- * </pre>
- * It should be replaced with:
- * <pre>
- * map.computeIfPresent("key", (key, value) -&gt; {
- *     return new ObjectWithSomeAttribute("newAttributeValue");
- * });
- * </pre>
- * </li>
  * <li>Be careful while using default interface method implementations from
  * {@link ConcurrentMap} and {@link Map}. Under the hood they are typically
  * implemented as a sequence of more primitive map operations, therefore the
@@ -246,7 +225,7 @@ import java.util.function.Function;
  * @param <V> value type
  * @see java.util.concurrent.ConcurrentMap
  */
-public interface IMap<K, V> extends ConcurrentMap<K, V>, BaseMap<K, V> {
+public interface IMap<K, V> extends ConcurrentMap<K, V>, BaseMap<K, V>, Iterable<Map.Entry<K, V>> {
 
     /**
      * {@inheritDoc}
@@ -786,15 +765,18 @@ public interface IMap<K, V> extends ConcurrentMap<K, V>, BaseMap<K, V> {
      * Asynchronously puts the given key and value into this map with a given
      * TTL (time to live) value and max idle time value.
      * <p>
-     * The entry will expire and get evicted after the TTL. If the TTL is 0,
-     * then the entry lives forever. If the TTL is negative, then the TTL
-     * from the map configuration will be used (default: forever).
+     * The entry will expire and get evicted after the TTL. It limits the
+     * lifetime of the entries relative to the time of the last write access
+     * performed on them. If the TTL is 0, then the entry lives forever.
+     * If the TTL is negative, then the TTL from the map configuration will
+     * be used (default: forever).
      * <p>
-     * The entry will expire and get evicted after the Max Idle time. If the
-     * MaxIdle is 0, then the entry lives forever. If the MaxIdle is negative,
-     * then the MaxIdle from the map configuration will be used (default: forever).
-     * The time precision is limited by 1 second. The MaxIdle that less than 1
-     * second can lead to unexpected behaviour.
+     * The entry will expire and get evicted after the Max Idle time. It limits
+     * the lifetime of the entries relative to the time of the last read or write
+     * access performed on them. If the MaxIdle is 0, then the entry lives forever.
+     * If the MaxIdle is negative, then the MaxIdle from the map configuration will
+     * be used (default: forever). The time precision is limited by 1 second.
+     * The MaxIdle that is less than 1 second can lead to unexpected behaviour.
      * <pre>
      *   CompletionStage future = map.putAsync(key, value, ttl, timeunit);
      *   // do some other stuff, when ready get the result
@@ -1042,15 +1024,18 @@ public interface IMap<K, V> extends ConcurrentMap<K, V>, BaseMap<K, V> {
      * value and max idle time value without returning the old value
      * (which is more efficient than {@code put()}).
      * <p>
-     * The entry will expire and get evicted after the TTL. If the TTL is 0, then
-     * the entry lives forever. If the TTL is negative, then the TTL from the
-     * map configuration will be used (default: forever).
+     * The entry will expire and get evicted after the TTL. It limits the
+     * lifetime of the entries relative to the time of the last write access
+     * performed on them. If the TTL is 0, then the entry lives forever.
+     * If the TTL is negative, then the TTL from the map configuration will
+     * be used (default: forever).
      * <p>
-     * The entry will expire and get evicted after the Max Idle time. If the
-     * MaxIdle is 0, then the entry lives forever. If the MaxIdle is negative,
-     * then the MaxIdle from the map configuration will be used (default: forever).
-     * The time precision is limited by 1 second. The MaxIdle that less than 1
-     * second can lead to unexpected behaviour.
+     * The entry will expire and get evicted after the Max Idle time. It limits
+     * the lifetime of the entries relative to the time of the last read or write
+     * access performed on them. If the MaxIdle is 0, then the entry lives forever.
+     * If the MaxIdle is negative, then the MaxIdle from the map configuration will
+     * be used (default: forever). The time precision is limited by 1 second.
+     * The MaxIdle that less than 1 second can lead to unexpected behaviour.
      * <pre>
      *   CompletionStage&lt;Void&gt; future = map.setAsync(key, value, ttl, timeunit);
      *   // do some other stuff, when you want to make sure set operation is complete:
@@ -1284,15 +1269,18 @@ public interface IMap<K, V> extends ConcurrentMap<K, V>, BaseMap<K, V> {
      * Puts an entry into this map with a given TTL (time to live) value and
      * max idle time value.
      * <p>
-     * The entry will expire and get evicted after the TTL. If the TTL is 0,
-     * then the entry lives forever. If the TTL is negative, then the TTL
-     * from the map configuration will be used (default: forever).
+     * The entry will expire and get evicted after the TTL. It limits the
+     * lifetime of the entries relative to the time of the last write access
+     * performed on them. If the TTL is 0, then the entry lives forever.
+     * If the TTL is negative, then the TTL from the map configuration will
+     * be used (default: forever).
      * <p>
-     * The entry will expire and get evicted after the Max Idle time. If the
-     * MaxIdle is 0, then the entry lives forever. If the MaxIdle is negative,
-     * then the MaxIdle from the map configuration will be used (default: forever).
-     * The time precision is limited by 1 second. A MaxIdle which is less than
-     * 1 second can lead to unexpected behaviour.
+     * The entry will expire and get evicted after the Max Idle time. It limits
+     * the lifetime of the entries relative to the time of the last read or write
+     * access performed on them. If the MaxIdle is 0, then the entry lives forever.
+     * If the MaxIdle is negative, then the MaxIdle from the map configuration will
+     * be used (default: forever). The time precision is limited by 1 second.
+     * The MaxIdle that less than 1 second can lead to unexpected behaviour.
      * <p>
      * <b>Warning 1:</b>
      * <p>
@@ -1378,15 +1366,18 @@ public interface IMap<K, V> extends ConcurrentMap<K, V>, BaseMap<K, V> {
      * Same as {@link #put(Object, Object, long, TimeUnit)} except that the map
      * store, if defined, will not be called to load/store/persist the entry.
      * <p>
-     * The entry will expire and get evicted after the TTL. If the TTL is 0,
-     * then the entry lives forever. If the TTL is negative, then the TTL
-     * from the map configuration will be used (default: forever).
+     * The entry will expire and get evicted after the TTL. It limits the
+     * lifetime of the entries relative to the time of the last write access
+     * performed on them. If the TTL is 0, then the entry lives forever.
+     * If the TTL is negative, then the TTL from the map configuration will
+     * be used (default: forever).
      * <p>
-     * The entry will expire and get evicted after the Max Idle time. If the
-     * MaxIdle is 0, then the entry lives forever. If the MaxIdle is negative,
-     * then the MaxIdle from the map configuration will be used (default: forever).
-     * The time precision is limited by 1 second. The MaxIdle that less than 1
-     * second can lead to unexpected behaviour.
+     * The entry will expire and get evicted after the Max Idle time. It limits
+     * the lifetime of the entries relative to the time of the last read or write
+     * access performed on them. If the MaxIdle is 0, then the entry lives forever.
+     * If the MaxIdle is negative, then the MaxIdle from the map configuration will
+     * be used (default: forever). The time precision is limited by 1 second.
+     * The MaxIdle that less than 1 second can lead to unexpected behaviour.
      * <p>
      * <b>Warning 1:</b>
      * <p>
@@ -1508,15 +1499,18 @@ public interface IMap<K, V> extends ConcurrentMap<K, V>, BaseMap<K, V> {
      * max idle time value.
      * if the specified key is not already associated with a value.
      * <p>
-     * The entry will expire and get evicted after the TTL. If the TTL is 0,
-     * then the entry lives forever. If the TTL is negative, then the TTL
-     * from the map configuration will be used (default: forever).
+     * The entry will expire and get evicted after the TTL. It limits the
+     * lifetime of the entries relative to the time of the last write access
+     * performed on them. If the TTL is 0, then the entry lives forever.
+     * If the TTL is negative, then the TTL from the map configuration will
+     * be used (default: forever).
      * <p>
-     * The entry will expire and get evicted after the Max Idle time. If the
-     * MaxIdle is 0, then the entry lives forever. If the MaxIdle is negative,
-     * then the MaxIdle from the map configuration will be used (default: forever).
-     * The time precision is limited by 1 second. The MaxIdle that less than
-     * 1 second can lead to unexpected behaviour.
+     * The entry will expire and get evicted after the Max Idle time. It limits
+     * the lifetime of the entries relative to the time of the last read or write
+     * access performed on them. If the MaxIdle is 0, then the entry lives forever.
+     * If the MaxIdle is negative, then the MaxIdle from the map configuration will
+     * be used (default: forever). The time precision is limited by 1 second.
+     * The MaxIdle that less than 1 second can lead to unexpected behaviour.
      * <p>
      * <b>Warning 1:</b>
      * <p>
@@ -1720,15 +1714,18 @@ public interface IMap<K, V> extends ConcurrentMap<K, V>, BaseMap<K, V> {
      * max idle time value without returning the old value (which is more
      * efficient than {@code put()}).
      * <p>
-     * The entry will expire and get evicted after the TTL. If the TTL is 0,
-     * then the entry lives forever. If the TTL is negative, then the TTL
-     * from the map configuration will be used (default: forever).
+     * The entry will expire and get evicted after the TTL. It limits the
+     * lifetime of the entries relative to the time of the last write access
+     * performed on them. If the TTL is 0, then the entry lives forever.
+     * If the TTL is negative, then the TTL from the map configuration will
+     * be used (default: forever).
      * <p>
-     * The entry will expire and get evicted after the Max Idle time. If the
-     * MaxIdle is 0, then the entry lives forever. If the MaxIdle is negative,
-     * then the MaxIdle from the map configuration will be used
-     * (default: forever). The time precision is limited by 1 second. The MaxIdle
-     * that less than 1 second can lead to unexpected behaviour.
+     * The entry will expire and get evicted after the Max Idle time. It limits
+     * the lifetime of the entries relative to the time of the last read or write
+     * access performed on them. If the MaxIdle is 0, then the entry lives forever.
+     * If the MaxIdle is negative, then the MaxIdle from the map configuration will
+     * be used (default: forever). The time precision is limited by 1 second.
+     * The MaxIdle that less than 1 second can lead to unexpected behaviour.
      * <p>
      * <b>Warning 1:</b>
      * <p>
@@ -3166,5 +3163,35 @@ public interface IMap<K, V> extends ConcurrentMap<K, V>, BaseMap<K, V> {
     default void replaceAll(@Nonnull BiFunction<? super K, ? super V, ? extends V> function) {
         ConcurrentMap.super.replaceAll(function);
     }
+
+    /**
+     * Returns an iterator over the entries of the map. It sequentially
+     * iterates partitions. It starts to iterate on partition 0 and it
+     * finishes the iteration with the last partition (n = 271 by default).
+     * The keys are fetched in batches for the constant heap utilization.
+     *
+     * @return an iterator for the map entries
+     * @since 4.2
+     */
+    @Nonnull
+    @Override
+    Iterator<Entry<K, V>> iterator();
+
+
+    /**
+     * Returns an iterator over the entries of the map. It sequentially
+     * iterates partitions. It starts to iterate on partition 0 and it
+     * finishes the iteration with the last partition (n = 271 by default).
+     * The keys are fetched in batches for the constant heap utilization.
+     *
+     * @param fetchSize size for fetching keys in bulk. This size can
+     *                  be thought of as page size for iteration. But
+     *                  notice that at every fetch only keys are retrieved,
+     *                  not values. Values are retrieved on each iterate.
+     * @return an iterator for the map entries
+     * @since 4.2
+     */
+    @Nonnull
+    Iterator<Entry<K, V>> iterator(int fetchSize);
 
 }

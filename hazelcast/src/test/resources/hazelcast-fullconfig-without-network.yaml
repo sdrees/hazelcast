@@ -1,4 +1,4 @@
-# Copyright (c) 2008-2020, Hazelcast, Inc. All Rights Reserved.
+# Copyright (c) 2008-2021, Hazelcast, Inc. All Rights Reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -219,9 +219,16 @@ hazelcast:
       # OFF: No metadata is created.
       metadata-policy: CREATE_ON_UPDATE
 
-      # Whether statistical information (hits, creation time, last access time etc.) should be gathered and stored.
-      # You can disable if you do not plan to use eviction on your entries.
-      statistics-enabled: false
+      # Whether map level statistical information (total
+      # hits, memory-cost etc.) should be gathered and stored.
+      statistics-enabled: true
+
+      # Whether statistical information (hits, creation
+      # time, last access time etc.) should be gathered
+      # and stored. You have to enable this if you plan to
+      # implement a custom eviction policy, out-of-the-box
+      # eviction policies work regardless of this setting.
+      per-entry-stats-enabled: false
 
       cache-deserialized-values: ALWAYS
 
@@ -553,6 +560,7 @@ hazelcast:
     enable-compression: true
     enable-shared-object: true
     allow-unsafe: true
+    allow-override-default-serializers: false
     data-serializable-factories:
       - factory-id: 1
         class-name: com.hazelcast.examples.DataSerializableFactory
@@ -742,12 +750,10 @@ hazelcast:
             - all
       set:
         - name: "*"
-          principal: "*"
           actions:
             - all
       cardinality-estimator:
         - name: "*"
-          principal: "*"
           actions:
             - all
       scheduled-executor:
@@ -757,19 +763,16 @@ hazelcast:
             - all
       atomic-long:
         - name: "*"
-          principal: "*"
           actions:
             - all
       atomic-reference:
         - name: "*"
-          principal: "*"
           actions:
             - all
       transaction:
         principal: deployer
       pn-counter:
         - name: "*"
-          principal: "*"
           actions:
             - all
       semaphore:
@@ -784,7 +787,6 @@ hazelcast:
             - all
       durable-executor-service:
         - name: "*"
-          principal: "*"
           actions:
             - all
       map:
@@ -799,27 +801,22 @@ hazelcast:
             - read
       flake-id-generator:
         - name: "*"
-          principal: "*"
           actions:
             - all
       topic:
         - name: "*"
-          principal: "*"
           actions:
             - all
       multimap:
         - name: "*"
-          principal: "*"
           actions:
             - all
       cache:
         - name: "*"
-          principal: "*"
           actions:
             - all
       lock:
         - name: "*"
-          principal: "*"
           actions:
             - all
       queue:
@@ -828,12 +825,10 @@ hazelcast:
             - all
       list:
         - name: "*"
-          principal: "*"
           actions:
             - all
       executor-service:
         - name: "*"
-          principal: "*"
           actions:
             - all
       ring-buffer:
@@ -843,14 +838,14 @@ hazelcast:
             - all
       replicatedmap:
         - name: "*"
-          principal: "*"
           actions:
             - all
       reliable-topic:
         - name: "*"
-          principal: "*"
           actions:
             - all
+      management:
+        - principal: "mcadmin"
     client-block-unmapped-actions: true
 
   member-attributes:
@@ -958,5 +953,4 @@ hazelcast:
 
   sql:
     executor-pool-size: 16
-    operation-pool-size: 8
     statement-timeout-millis: 0

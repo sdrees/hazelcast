@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2008-2020, Hazelcast, Inc. All Rights Reserved.
+ * Copyright (c) 2008-2021, Hazelcast, Inc. All Rights Reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -19,6 +19,8 @@ package com.hazelcast.query.impl.getters;
 import com.hazelcast.internal.serialization.Data;
 import com.hazelcast.internal.serialization.InternalSerializationService;
 import com.hazelcast.internal.serialization.impl.GenericRecordQueryReader;
+import com.hazelcast.internal.serialization.impl.InternalGenericRecord;
+import com.hazelcast.internal.serialization.impl.portable.PortableGenericRecord;
 
 final class PortableGetter extends Getter {
     private final InternalSerializationService serializationService;
@@ -30,8 +32,13 @@ final class PortableGetter extends Getter {
 
     @Override
     Object getValue(Object target, String fieldPath) throws Exception {
-        Data data = (Data) target;
-        GenericRecordQueryReader reader = new GenericRecordQueryReader(serializationService.readAsInternalGenericRecord(data));
+        InternalGenericRecord record;
+        if (target instanceof PortableGenericRecord) {
+            record = (InternalGenericRecord) target;
+        } else {
+            record = serializationService.readAsInternalGenericRecord((Data) target);
+        }
+        GenericRecordQueryReader reader = new GenericRecordQueryReader(record);
         return reader.read(fieldPath);
     }
 

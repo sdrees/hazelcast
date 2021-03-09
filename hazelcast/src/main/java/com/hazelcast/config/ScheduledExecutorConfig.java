@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2008-2020, Hazelcast, Inc. All Rights Reserved.
+ * Copyright (c) 2008-2021, Hazelcast, Inc. All Rights Reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -107,7 +107,7 @@ public class ScheduledExecutorConfig implements IdentifiedDataSerializable, Name
     public ScheduledExecutorConfig(ScheduledExecutorConfig config) {
         this(config.getName(), config.getDurability(), config.getCapacity(),
                 config.getPoolSize(), config.getSplitBrainProtectionName(),
-                config.getMergePolicyConfig(), config.getCapacityPolicy(),
+                new MergePolicyConfig(config.getMergePolicyConfig()), config.getCapacityPolicy(),
                 config.isStatisticsEnabled());
     }
 
@@ -306,11 +306,11 @@ public class ScheduledExecutorConfig implements IdentifiedDataSerializable, Name
 
     @Override
     public void writeData(ObjectDataOutput out) throws IOException {
-        out.writeUTF(name);
+        out.writeString(name);
         out.writeInt(durability);
         out.writeInt(capacity);
         out.writeInt(poolSize);
-        out.writeUTF(splitBrainProtectionName);
+        out.writeString(splitBrainProtectionName);
         out.writeObject(mergePolicyConfig);
         out.writeByte(capacityPolicy.getId());
         out.writeBoolean(statisticsEnabled);
@@ -318,11 +318,11 @@ public class ScheduledExecutorConfig implements IdentifiedDataSerializable, Name
 
     @Override
     public void readData(ObjectDataInput in) throws IOException {
-        name = in.readUTF();
+        name = in.readString();
         durability = in.readInt();
         capacity = in.readInt();
         poolSize = in.readInt();
-        splitBrainProtectionName = in.readUTF();
+        splitBrainProtectionName = in.readString();
         mergePolicyConfig = in.readObject();
         capacityPolicy = getById(in.readByte());
         statisticsEnabled = in.readBoolean();

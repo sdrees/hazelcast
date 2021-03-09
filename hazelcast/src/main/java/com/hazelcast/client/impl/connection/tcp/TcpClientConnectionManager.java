@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2008-2020, Hazelcast, Inc. All Rights Reserved.
+ * Copyright (c) 2008-2021, Hazelcast, Inc. All Rights Reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -22,7 +22,6 @@ import com.hazelcast.client.HazelcastClientNotActiveException;
 import com.hazelcast.client.HazelcastClientOfflineException;
 import com.hazelcast.client.LoadBalancer;
 import com.hazelcast.client.config.ClientConfig;
-import com.hazelcast.client.config.ClientConnectionStrategyConfig;
 import com.hazelcast.client.config.ClientConnectionStrategyConfig.ReconnectMode;
 import com.hazelcast.client.config.ClientNetworkConfig;
 import com.hazelcast.client.config.ConnectionRetryConfig;
@@ -99,6 +98,8 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Function;
 
 import static com.hazelcast.client.config.ClientConnectionStrategyConfig.ReconnectMode.OFF;
+import static com.hazelcast.client.config.ConnectionRetryConfig.DEFAULT_CLUSTER_CONNECT_TIMEOUT_MILLIS;
+import static com.hazelcast.client.config.ConnectionRetryConfig.FAILOVER_CLIENT_DEFAULT_CLUSTER_CONNECT_TIMEOUT_MILLIS;
 import static com.hazelcast.client.impl.management.ManagementCenterService.MC_CLIENT_MODE_PROP;
 import static com.hazelcast.client.impl.protocol.AuthenticationStatus.NOT_ALLOWED_IN_CLUSTER;
 import static com.hazelcast.client.properties.ClientProperty.IO_BALANCER_INTERVAL_SECONDS;
@@ -148,7 +149,6 @@ public class TcpClientConnectionManager implements ClientConnectionManager {
     private final ReconnectMode reconnectMode;
     private final LoadBalancer loadBalancer;
     private final boolean isSmartRoutingEnabled;
-    private final Runnable connectToAllClusterMembersTask = new ConnectToAllClusterMembersTask();
     private volatile Credentials currentCredentials;
 
     // following fields are updated inside synchronized(clientStateMutex)
@@ -282,13 +282,28 @@ public class TcpClientConnectionManager implements ClientConnectionManager {
     }
 
     private WaitStrategy initializeWaitStrategy(ClientConfig clientConfig) {
-        ClientConnectionStrategyConfig connectionStrategyConfig = clientConfig.getConnectionStrategyConfig();
-        ConnectionRetryConfig expoRetryConfig = connectionStrategyConfig.getConnectionRetryConfig();
-        return new WaitStrategy(expoRetryConfig.getInitialBackoffMillis(),
-                expoRetryConfig.getMaxBackoffMillis(),
-                expoRetryConfig.getMultiplier(),
-                expoRetryConfig.getClusterConnectTimeoutMillis(),
-                expoRetryConfig.getJitter(), logger);
+        ConnectionRetryConfig retryConfig = clientConfig
+                .getConnectionStrategyConfig()
+                .getConnectionRetryConfig();
+
+        long clusterConnectTimeout = retryConfig.getClusterConnectTimeoutMillis();
+
+        if (clusterConnectTimeout == DEFAULT_CLUSTER_CONNECT_TIMEOUT_MILLIS) {
+            // If no value is provided, or set to -1 explicitly,
+            // use a predefined timeout value for the failover client
+            // and infinite for the normal client.
+            if (failoverConfigProvided) {
+                clusterConnectTimeout = FAILOVER_CLIENT_DEFAULT_CLUSTER_CONNECT_TIMEOUT_MILLIS;
+            } else {
+                clusterConnectTimeout = Long.MAX_VALUE;
+            }
+        }
+
+        return new WaitStrategy(retryConfig.getInitialBackoffMillis(),
+                retryConfig.getMaxBackoffMillis(),
+                retryConfig.getMultiplier(),
+                clusterConnectTimeout,
+                retryConfig.getJitter(), logger);
     }
 
     public synchronized void start() {
@@ -316,7 +331,7 @@ public class TcpClientConnectionManager implements ClientConnectionManager {
             }
         }
 
-        executor.scheduleWithFixedDelay(connectToAllClusterMembersTask, 1, 1, TimeUnit.SECONDS);
+        executor.scheduleWithFixedDelay(new ConnectToAllClusterMembersTask(), 1, 1, TimeUnit.SECONDS);
     }
 
     protected void startNetworking() {
@@ -480,7 +495,9 @@ public class TcpClientConnectionManager implements ClientConnectionManager {
                 triedAddresses.addAll(triedAddressesPerAttempt);
                 // If the address provider loads no addresses, then the above loop is not entered
                 // and the lifecycle check is missing, hence we need to repeat the same check at this point.
-                checkClientActive();
+                if (triedAddressesPerAttempt.isEmpty()) {
+                    checkClientActive();
+                }
             } while (waitStrategy.sleep());
         } catch (ClientNotAllowedInClusterException | InvalidConfigurationException e) {
             logger.warning("Stopped trying on the cluster: " + context.getClusterName()
@@ -591,15 +608,23 @@ public class TcpClientConnectionManager implements ClientConnectionManager {
         return onAuthenticated(connection, response);
     }
 
-    private void fireConnectionAddedEvent(TcpClientConnection connection) {
-        for (ConnectionListener connectionListener : connectionListeners) {
-            connectionListener.connectionAdded(connection);
+    private void fireConnectionEvent(TcpClientConnection connection, boolean isAdded) {
+        if (!isAlive()) {
+            return;
         }
-    }
-
-    private void fireConnectionRemovedEvent(TcpClientConnection connection) {
-        for (ConnectionListener listener : connectionListeners) {
-            listener.connectionRemoved(connection);
+        try {
+            executor.execute(() -> {
+                for (ConnectionListener listener : connectionListeners) {
+                    if (isAdded) {
+                        listener.connectionAdded(connection);
+                    } else {
+                        listener.connectionRemoved(connection);
+                    }
+                }
+            });
+        } catch (RejectedExecutionException e) {
+            //RejectedExecutionException thrown when the client is shutting down
+            EmptyStatement.ignore(e);
         }
     }
 
@@ -710,9 +735,9 @@ public class TcpClientConnectionManager implements ClientConnectionManager {
     }
 
     void onConnectionClose(TcpClientConnection connection) {
+        client.getInvocationService().onConnectionClose(connection);
         Address endpoint = connection.getRemoteAddress();
         UUID memberUuid = connection.getRemoteUuid();
-
         if (endpoint == null) {
             if (logger.isFinestEnabled()) {
                 logger.finest("Destroying " + connection + ", but it has end-point set to null "
@@ -732,7 +757,7 @@ public class TcpClientConnectionManager implements ClientConnectionManager {
                     triggerClusterReconnection();
                 }
 
-                fireConnectionRemovedEvent(connection);
+                fireConnectionEvent(connection, false);
             } else if (logger.isFinestEnabled()) {
                 logger.finest("Destroying a connection, but there is no mapping " + endpoint + ":" + memberUuid
                         + " -> " + connection + " in the connection map.");
@@ -910,7 +935,7 @@ public class TcpClientConnectionManager implements ClientConnectionManager {
                     + ", server version: " + response.serverHazelcastVersion
                     + ", local address: " + connection.getLocalSocketAddress());
 
-            fireConnectionAddedEvent(connection);
+            fireConnectionEvent(connection, true);
         }
 
         // It could happen that this connection is already closed and
@@ -926,9 +951,9 @@ public class TcpClientConnectionManager implements ClientConnectionManager {
 
     private void checkClientStateOnClusterIdChange(TcpClientConnection connection) {
         if (activeConnections.isEmpty()) {
-            //We only have single connection established
+            // We only have single connection established
             if (failoverConfigProvided) {
-                //If failover is provided, and this single connection is established after failover logic kicks in
+                // If failover is provided, and this single connection is established after failover logic kicks in
                 // (checked via `switchingToNextCluster`), then it is OK to continue. Otherwise, we force the failover logic
                 // to be used by throwing `ClientNotAllowedInClusterException`
                 if (switchingToNextCluster) {
@@ -940,8 +965,17 @@ public class TcpClientConnectionManager implements ClientConnectionManager {
                 }
             }
         } else {
-            //If there are other connections that means we have a connection to wrong cluster.
-            //We should not stay connected.
+            // If there are other connections that means we have a connection to wrong cluster.
+            // We should not stay connected to this new connection.
+            // Note that in some racy scenarios we might close a connection that we can continue operating on.
+            // In those cases, we rely on the fact that we will reopen the connections and continue. Here is one scenario:
+            // 1. There were 2 members.
+            // 2. The client is connected to the first one.
+            // 3. While the client is trying to open the second connection, both members are restarted.
+            // 4. In this case we will close the connection to the second member, thinking that it is not part of the
+            // cluster we think we are in. We will reconnect to this member, and the connection is closed unnecessarily.
+            // 5. The connection to the first cluster will be gone after that and we will initiate a reconnect to the cluster.
+
             String reason = "Connection does not belong to this cluster";
             connection.close(reason, null);
             throw new IllegalStateException(reason);
@@ -1053,20 +1087,21 @@ public class TcpClientConnectionManager implements ClientConnectionManager {
         }
     }
 
+    /**
+     * Schedules a task to open a connection if there is no connection for the member in the member list
+     */
     private class ConnectToAllClusterMembersTask implements Runnable {
 
         private final Set<UUID> connectingAddresses = Collections.newSetFromMap(new ConcurrentHashMap<>());
 
         @Override
         public void run() {
-
             if (!client.getLifecycleService().isRunning()) {
                 return;
             }
 
             for (Member member : client.getClientClusterService().getMemberList()) {
                 UUID uuid = member.getUuid();
-
                 if (activeConnections.get(uuid) != null) {
                     continue;
                 }

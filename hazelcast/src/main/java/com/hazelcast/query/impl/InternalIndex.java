@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2008-2020, Hazelcast, Inc. All Rights Reserved.
+ * Copyright (c) 2008-2021, Hazelcast, Inc. All Rights Reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -43,15 +43,16 @@ public interface InternalIndex extends Index {
     boolean hasPartitionIndexed(int partitionId);
 
     /**
-     * Returns {@code true} if all {@code queryPartitions} are indexed,
-     * {@code false} otherwise.
+     * Returns {@code true} if the number of indexed partitions is equal to {@code
+     * ownedPartitionCount}, {@code false} otherwise.
      * <p>
      * The method is used to check whether a global index is still being constructed concurrently
      * so that some partitions are not indexed and query may suffer from entry misses.
      * If the index construction is still in progress, a query optimizer ignores the index.
      * <p>
      * The aforementioned race condition is not relevant to local off-heap indexes,
-     * since index construction is performed in partition-threads.
+     * since index construction is performed in partition threads.
+     *
      * @param ownedPartitionCount a count of owned partitions a query runs on.
      * Negative value indicates that the value is not defined.
      */

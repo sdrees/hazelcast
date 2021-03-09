@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2008-2020, Hazelcast, Inc. All Rights Reserved.
+ * Copyright (c) 2008-2021, Hazelcast, Inc. All Rights Reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -22,7 +22,7 @@ import org.apache.calcite.sql.SqlNode;
 import org.apache.calcite.sql.SqlOperatorTable;
 
 /**
- * A class to allow for override of the {@link #deriveTypeImpl(SqlValidatorScope, SqlNode)} class, which is a package-private
+ * A class that allows to override the {@link #deriveTypeImpl(SqlValidatorScope, SqlNode)} method, which is package-private
  * in the parent class.
  */
 public class SqlValidatorImplBridge extends SqlValidatorImpl {
