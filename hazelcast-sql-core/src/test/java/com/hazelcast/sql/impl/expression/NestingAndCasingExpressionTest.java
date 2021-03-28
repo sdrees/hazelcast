@@ -65,7 +65,7 @@ public class NestingAndCasingExpressionTest extends ExpressionTestSupport {
             }
 
             if (!SqlOperator.class.isAssignableFrom(field.getType())
-                || field.getName().equals("DESC")) {
+                    || field.getName().equals("DESC")) {
                 continue;
             }
 
@@ -257,6 +257,11 @@ public class NestingAndCasingExpressionTest extends ExpressionTestSupport {
     }
 
     @Test
+    public void test_ATAN2() {
+        check(sql("ATAN2(?, ?) || ATAN2(?, ?)"), 1, 1, 1, 1);
+    }
+
+    @Test
     public void test_EXP() {
         check(sql("EXP(?) || EXP(?)"), 1, 1);
     }
@@ -374,6 +379,12 @@ public class NestingAndCasingExpressionTest extends ExpressionTestSupport {
     @Test
     public void test_UPPER() {
         check(sql("UPPER(?) || UPPER(?)"), "1", "2");
+    }
+
+    @Test
+    public void test_REPLACE() {
+        check(sql("REPLACE(?, ?, ?) || REPLACE(?, ?, ?) "),
+                "xyz", "x", "X", "xyz", "y", "Y");
     }
 
     private void check(String sql, Object... params) {

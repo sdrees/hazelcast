@@ -17,6 +17,7 @@
 package com.hazelcast.sql.impl.calcite.validate;
 
 import com.hazelcast.sql.impl.calcite.validate.operators.math.HazelcastAbsFunction;
+import com.hazelcast.sql.impl.calcite.validate.operators.math.HazelcastDoubleBiFunction;
 import com.hazelcast.sql.impl.calcite.validate.operators.math.HazelcastDoubleFunction;
 import com.hazelcast.sql.impl.calcite.validate.operators.math.HazelcastFloorCeilFunction;
 import com.hazelcast.sql.impl.calcite.validate.operators.math.HazelcastRandFunction;
@@ -32,6 +33,7 @@ import com.hazelcast.sql.impl.calcite.validate.operators.predicate.HazelcastIsTr
 import com.hazelcast.sql.impl.calcite.validate.operators.predicate.HazelcastNotPredicate;
 import com.hazelcast.sql.impl.calcite.validate.operators.string.HazelcastConcatOperator;
 import com.hazelcast.sql.impl.calcite.validate.operators.string.HazelcastLikeOperator;
+import com.hazelcast.sql.impl.calcite.validate.operators.string.HazelcastReplaceFunction;
 import com.hazelcast.sql.impl.calcite.validate.operators.string.HazelcastStringFunction;
 import com.hazelcast.sql.impl.calcite.validate.operators.string.HazelcastSubstringFunction;
 import com.hazelcast.sql.impl.calcite.validate.operators.string.HazelcastTrimFunction;
@@ -128,6 +130,7 @@ public final class HazelcastSqlOperatorTable extends ReflectiveSqlOperatorTable 
     public static final SqlFunction ACOS = new HazelcastDoubleFunction("ACOS");
     public static final SqlFunction ASIN = new HazelcastDoubleFunction("ASIN");
     public static final SqlFunction ATAN = new HazelcastDoubleFunction("ATAN");
+    public static final SqlFunction ATAN2 = new HazelcastDoubleBiFunction("ATAN2");
     public static final SqlFunction EXP = new HazelcastDoubleFunction("EXP");
     public static final SqlFunction LN = new HazelcastDoubleFunction("LN");
     public static final SqlFunction LOG10 = new HazelcastDoubleFunction("LOG10");
@@ -166,6 +169,8 @@ public final class HazelcastSqlOperatorTable extends ReflectiveSqlOperatorTable 
 
     public static final SqlFunction LOWER = HazelcastStringFunction.LOWER;
     public static final SqlFunction UPPER = HazelcastStringFunction.UPPER;
+
+    public static final SqlFunction REPLACE = HazelcastReplaceFunction.INSTANCE;
 
     public static final SqlPostfixOperator DESC = HazelcastDescOperator.DESC;
 

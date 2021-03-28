@@ -27,6 +27,7 @@ import com.hazelcast.sql.impl.expression.Expression;
 import com.hazelcast.sql.impl.expression.SymbolExpression;
 import com.hazelcast.sql.impl.expression.math.AbsFunction;
 import com.hazelcast.sql.impl.expression.math.DivideFunction;
+import com.hazelcast.sql.impl.expression.math.DoubleBiFunction;
 import com.hazelcast.sql.impl.expression.math.DoubleFunction;
 import com.hazelcast.sql.impl.expression.math.FloorCeilFunction;
 import com.hazelcast.sql.impl.expression.math.MinusFunction;
@@ -54,10 +55,13 @@ import com.hazelcast.sql.impl.expression.string.ConcatFunction;
 import com.hazelcast.sql.impl.expression.string.InitcapFunction;
 import com.hazelcast.sql.impl.expression.string.LikeFunction;
 import com.hazelcast.sql.impl.expression.string.LowerFunction;
+import com.hazelcast.sql.impl.expression.string.ReplaceFunction;
 import com.hazelcast.sql.impl.expression.string.SubstringFunction;
 import com.hazelcast.sql.impl.expression.string.TrimFunction;
 import com.hazelcast.sql.impl.expression.string.UpperFunction;
 import com.hazelcast.sql.impl.type.QueryDataType;
+import com.hazelcast.sql.impl.type.SqlDaySecondInterval;
+import com.hazelcast.sql.impl.type.SqlYearMonthInterval;
 import org.apache.calcite.rex.RexCall;
 import org.apache.calcite.rex.RexLiteral;
 import org.apache.calcite.sql.SqlFunction;
@@ -92,7 +96,7 @@ public final class RexToExpression {
      * @param literal the literal to convert.
      * @return the resulting constant expression.
      */
-    @SuppressWarnings("checkstyle:CyclomaticComplexity")
+    @SuppressWarnings({"checkstyle:CyclomaticComplexity", "checkstyle:ReturnCount"})
     public static Expression<?> convertLiteral(RexLiteral literal) {
         SqlTypeName type = literal.getType().getSqlTypeName();
 
@@ -129,6 +133,12 @@ public final class RexToExpression {
 
             case TIME:
                 return convertTimeLiteral(literal);
+
+            case INTERVAL_YEAR_MONTH:
+                return convertIntervalYearMonth(literal);
+
+            case INTERVAL_DAY_SECOND:
+                return convertIntervalDaySecond(literal);
 
             default:
                 throw QueryException.error("Unsupported literal: " + literal);
@@ -296,6 +306,9 @@ public final class RexToExpression {
                     return DoubleFunction.create(operands[0], DoubleFunction.ASIN);
                 } else if (function == HazelcastSqlOperatorTable.ATAN) {
                     return DoubleFunction.create(operands[0], DoubleFunction.ATAN);
+                } else if (function == HazelcastSqlOperatorTable.ATAN2) {
+                    assert operands.length == 2;
+                    return DoubleBiFunction.create(operands[0], operands[1], DoubleBiFunction.ATAN2);
                 } else if (function == HazelcastSqlOperatorTable.EXP) {
                     return DoubleFunction.create(operands[0], DoubleFunction.EXP);
                 } else if (function == HazelcastSqlOperatorTable.LN) {
@@ -354,6 +367,8 @@ public final class RexToExpression {
                     return TrimFunction.create(operands[0], null, false, true);
                 } else if (function == HazelcastSqlOperatorTable.BTRIM) {
                     return TrimFunction.create(operands[0], null, true, true);
+                } else if (function == HazelcastSqlOperatorTable.REPLACE) {
+                    return ReplaceFunction.create(operands[0], operands[1], operands[2]);
                 }
 
                 break;
@@ -453,5 +468,17 @@ public final class RexToExpression {
         } catch (Exception e) {
             throw QueryException.dataException("Cannot convert literal to " + SqlColumnType.TIME + ": " + timeString);
         }
+    }
+
+    public static Expression<?> convertIntervalYearMonth(RexLiteral literal) {
+        SqlYearMonthInterval value = new SqlYearMonthInterval(literal.getValueAs(Integer.class));
+
+        return ConstantExpression.create(value, QueryDataType.INTERVAL_YEAR_MONTH);
+    }
+
+    public static Expression<?> convertIntervalDaySecond(RexLiteral literal) {
+        SqlDaySecondInterval value = new SqlDaySecondInterval(literal.getValueAs(Long.class));
+
+        return ConstantExpression.create(value, QueryDataType.INTERVAL_DAY_SECOND);
     }
 }

@@ -33,6 +33,7 @@ import com.hazelcast.sql.impl.expression.ParameterExpression;
 import com.hazelcast.sql.impl.expression.math.AbsFunction;
 import com.hazelcast.sql.impl.expression.math.DivideFunction;
 import com.hazelcast.sql.impl.expression.math.DoubleFunction;
+import com.hazelcast.sql.impl.expression.math.DoubleBiFunction;
 import com.hazelcast.sql.impl.expression.math.FloorCeilFunction;
 import com.hazelcast.sql.impl.expression.math.MinusFunction;
 import com.hazelcast.sql.impl.expression.math.MultiplyFunction;
@@ -58,6 +59,7 @@ import com.hazelcast.sql.impl.expression.string.ConcatFunction;
 import com.hazelcast.sql.impl.expression.string.InitcapFunction;
 import com.hazelcast.sql.impl.expression.string.LikeFunction;
 import com.hazelcast.sql.impl.expression.string.LowerFunction;
+import com.hazelcast.sql.impl.expression.string.ReplaceFunction;
 import com.hazelcast.sql.impl.expression.string.SubstringFunction;
 import com.hazelcast.sql.impl.expression.string.TrimFunction;
 import com.hazelcast.sql.impl.expression.string.UpperFunction;
@@ -86,6 +88,8 @@ import com.hazelcast.sql.impl.row.HeapRow;
 import com.hazelcast.sql.impl.row.JoinRow;
 import com.hazelcast.sql.impl.row.ListRowBatch;
 import com.hazelcast.sql.impl.type.QueryDataType;
+import com.hazelcast.sql.impl.type.SqlDaySecondInterval;
+import com.hazelcast.sql.impl.type.SqlYearMonthInterval;
 
 import static com.hazelcast.internal.serialization.impl.FactoryIdHelper.SQL_DS_FACTORY;
 import static com.hazelcast.internal.serialization.impl.FactoryIdHelper.SQL_DS_FACTORY_ID;
@@ -180,7 +184,13 @@ public class SqlDataSerializerHook implements DataSerializerHook {
 
     public static final int LAZY_TARGET = 65;
 
-    public static final int LEN = LAZY_TARGET + 1;
+    public static final int EXPRESSION_DOUBLE_DOUBLE = 66;
+
+    public static final int INTERVAL_YEAR_MONTH = 67;
+    public static final int INTERVAL_DAY_SECOND = 68;
+
+    public static final int EXPRESSION_REPLACE = 69;
+    public static final int LEN = EXPRESSION_REPLACE + 1;
 
     @Override
     public int getFactoryId() {
@@ -267,6 +277,7 @@ public class SqlDataSerializerHook implements DataSerializerHook {
         constructors[EXPRESSION_LIKE] = arg -> new LikeFunction();
         constructors[EXPRESSION_SUBSTRING] = arg -> new SubstringFunction();
         constructors[EXPRESSION_TRIM] = arg -> new TrimFunction();
+        constructors[EXPRESSION_REPLACE] = arg -> new ReplaceFunction();
 
         constructors[NODE_RECEIVE_MERGE_SORT] = arg -> new ReceiveSortMergePlanNode();
         constructors[NODE_FETCH] = arg -> new FetchPlanNode();
@@ -274,6 +285,10 @@ public class SqlDataSerializerHook implements DataSerializerHook {
         constructors[EXPRESSION_REMAINDER] = arg -> new RemainderFunction<>();
 
         constructors[LAZY_TARGET] = arg -> new LazyTarget();
+        constructors[EXPRESSION_DOUBLE_DOUBLE] = arg -> new DoubleBiFunction();
+
+        constructors[INTERVAL_YEAR_MONTH] = arg -> new SqlYearMonthInterval();
+        constructors[INTERVAL_DAY_SECOND] = arg -> new SqlDaySecondInterval();
 
         return new ArrayDataSerializableFactory(constructors);
     }

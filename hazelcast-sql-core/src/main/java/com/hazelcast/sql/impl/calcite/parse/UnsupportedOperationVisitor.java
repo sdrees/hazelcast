@@ -18,6 +18,7 @@ package com.hazelcast.sql.impl.calcite.parse;
 
 import com.hazelcast.sql.impl.calcite.schema.HazelcastTable;
 import com.hazelcast.sql.impl.calcite.validate.HazelcastSqlOperatorTable;
+import com.hazelcast.sql.impl.calcite.validate.types.HazelcastTypeUtils;
 import com.hazelcast.sql.impl.schema.Table;
 import com.hazelcast.sql.impl.schema.map.AbstractMapTable;
 import org.apache.calcite.runtime.CalciteContextException;
@@ -120,6 +121,7 @@ public final class UnsupportedOperationVisitor implements SqlVisitor<Void> {
         SUPPORTED_OPERATORS.add(HazelcastSqlOperatorTable.ACOS);
         SUPPORTED_OPERATORS.add(HazelcastSqlOperatorTable.ASIN);
         SUPPORTED_OPERATORS.add(HazelcastSqlOperatorTable.ATAN);
+        SUPPORTED_OPERATORS.add(HazelcastSqlOperatorTable.ATAN2);
         SUPPORTED_OPERATORS.add(HazelcastSqlOperatorTable.EXP);
         SUPPORTED_OPERATORS.add(HazelcastSqlOperatorTable.LN);
         SUPPORTED_OPERATORS.add(HazelcastSqlOperatorTable.LOG10);
@@ -145,6 +147,7 @@ public final class UnsupportedOperationVisitor implements SqlVisitor<Void> {
         SUPPORTED_OPERATORS.add(HazelcastSqlOperatorTable.LTRIM);
         SUPPORTED_OPERATORS.add(HazelcastSqlOperatorTable.RTRIM);
         SUPPORTED_OPERATORS.add(HazelcastSqlOperatorTable.BTRIM);
+        SUPPORTED_OPERATORS.add(HazelcastSqlOperatorTable.REPLACE);
 
         // Sorting
         SUPPORTED_OPERATORS.add(HazelcastSqlOperatorTable.DESC);
@@ -248,6 +251,10 @@ public final class UnsupportedOperationVisitor implements SqlVisitor<Void> {
     @Override
     public Void visit(SqlLiteral literal) {
         SqlTypeName typeName = literal.getTypeName();
+
+        if (HazelcastTypeUtils.isIntervalType(typeName)) {
+            return null;
+        }
 
         switch (typeName) {
             case BOOLEAN:
