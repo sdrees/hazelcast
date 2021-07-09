@@ -1,38 +1,43 @@
 /*
- * Copyright (c) 2008-2021, Hazelcast, Inc. All Rights Reserved.
+ * Copyright 2021 Hazelcast Inc.
  *
- * Licensed under the Apache License, Version 2.0 (the "License");
+ * Licensed under the Hazelcast Community License (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
  *
- * http://www.apache.org/licenses/LICENSE-2.0
+ * http://hazelcast.com/hazelcast-community-license
  *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * WITHOUT WARRANTIES OF ANY KIND, either express or implied.
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
 
 package com.hazelcast.jet.sql.impl;
 
+import com.hazelcast.core.HazelcastInstance;
 import com.hazelcast.instance.impl.HazelcastInstanceImpl;
 import com.hazelcast.jet.Job;
 import com.hazelcast.jet.JobStateSnapshot;
 import com.hazelcast.jet.config.JobConfig;
 import com.hazelcast.jet.impl.AbstractJetInstance;
-import com.hazelcast.jet.impl.JetService;
+import com.hazelcast.jet.impl.JetServiceBackend;
 import com.hazelcast.jet.sql.impl.JetPlan.AlterJobPlan;
 import com.hazelcast.jet.sql.impl.JetPlan.CreateJobPlan;
 import com.hazelcast.jet.sql.impl.JetPlan.CreateMappingPlan;
 import com.hazelcast.jet.sql.impl.JetPlan.CreateSnapshotPlan;
+import com.hazelcast.jet.sql.impl.JetPlan.DmlPlan;
 import com.hazelcast.jet.sql.impl.JetPlan.DropJobPlan;
 import com.hazelcast.jet.sql.impl.JetPlan.DropMappingPlan;
 import com.hazelcast.jet.sql.impl.JetPlan.DropSnapshotPlan;
-import com.hazelcast.jet.sql.impl.JetPlan.SelectOrSinkPlan;
+import com.hazelcast.jet.sql.impl.JetPlan.IMapDeletePlan;
+import com.hazelcast.jet.sql.impl.JetPlan.SelectPlan;
 import com.hazelcast.jet.sql.impl.JetPlan.ShowStatementPlan;
 import com.hazelcast.jet.sql.impl.parse.SqlShowStatement.ShowStatementTarget;
 import com.hazelcast.jet.sql.impl.schema.MappingCatalog;
+import com.hazelcast.map.impl.EntryRemovingProcessor;
+import com.hazelcast.spi.impl.NodeEngine;
 import com.hazelcast.sql.SqlColumnMetadata;
 import com.hazelcast.sql.SqlColumnType;
 import com.hazelcast.sql.SqlResult;
@@ -43,30 +48,37 @@ import com.hazelcast.sql.impl.QueryId;
 import com.hazelcast.sql.impl.QueryParameterMetadata;
 import com.hazelcast.sql.impl.SqlErrorCode;
 import com.hazelcast.sql.impl.SqlResultImpl;
+import com.hazelcast.sql.impl.expression.Expression;
+import com.hazelcast.sql.impl.row.EmptyRow;
 import com.hazelcast.sql.impl.row.HeapRow;
 
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.concurrent.CancellationException;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 import java.util.stream.Stream;
 
+import static com.hazelcast.jet.impl.util.Util.getNodeEngine;
 import static com.hazelcast.jet.sql.impl.SimpleExpressionEvalContext.SQL_ARGUMENTS_KEY_NAME;
 import static java.util.Collections.singletonList;
 
-class JetPlanExecutor {
+public class JetPlanExecutor {
 
     private final MappingCatalog catalog;
-    private final AbstractJetInstance jetInstance;
+    private final HazelcastInstance hazelcastInstance;
     private final Map<Long, JetQueryResultProducer> resultConsumerRegistry;
 
-    JetPlanExecutor(
+    public JetPlanExecutor(
             MappingCatalog catalog,
-            AbstractJetInstance jetInstance,
+            HazelcastInstance hazelcastInstance,
             Map<Long, JetQueryResultProducer> resultConsumerRegistry
     ) {
         this.catalog = catalog;
-        this.jetInstance = jetInstance;
+        this.hazelcastInstance = hazelcastInstance;
         this.resultConsumerRegistry = resultConsumerRegistry;
     }
 
@@ -83,17 +95,16 @@ class JetPlanExecutor {
     SqlResult execute(CreateJobPlan plan, List<Object> arguments) {
         List<Object> args = prepareArguments(plan.getParameterMetadata(), arguments);
         JobConfig jobConfig = plan.getJobConfig().setArgument(SQL_ARGUMENTS_KEY_NAME, args);
-
         if (plan.isIfNotExists()) {
-            jetInstance.newJobIfAbsent(plan.getExecutionPlan().getDag(), jobConfig);
+            hazelcastInstance.getJet().newJobIfAbsent(plan.getExecutionPlan().getDag(), jobConfig);
         } else {
-            jetInstance.newJob(plan.getExecutionPlan().getDag(), jobConfig);
+            hazelcastInstance.getJet().newJob(plan.getExecutionPlan().getDag(), jobConfig);
         }
         return SqlResultImpl.createUpdateCountResult(0);
     }
 
     SqlResult execute(AlterJobPlan plan) {
-        Job job = jetInstance.getJob(plan.getJobName());
+        Job job = hazelcastInstance.getJet().getJob(plan.getJobName());
         if (job == null) {
             throw QueryException.error("The job '" + plan.getJobName() + "' doesn't exist");
         }
@@ -116,7 +127,7 @@ class JetPlanExecutor {
     }
 
     SqlResult execute(DropJobPlan plan) {
-        Job job = jetInstance.getJob(plan.getJobName());
+        Job job = hazelcastInstance.getJet().getJob(plan.getJobName());
         boolean jobTerminated = job != null && job.getStatus().isTerminal();
         if (job == null || jobTerminated) {
             if (plan.isIfExists()) {
@@ -141,7 +152,7 @@ class JetPlanExecutor {
     }
 
     SqlResult execute(CreateSnapshotPlan plan) {
-        Job job = jetInstance.getJob(plan.getJobName());
+        Job job = hazelcastInstance.getJet().getJob(plan.getJobName());
         if (job == null) {
             throw QueryException.error("The job '" + plan.getJobName() + "' doesn't exist");
         }
@@ -150,7 +161,7 @@ class JetPlanExecutor {
     }
 
     SqlResult execute(DropSnapshotPlan plan) {
-        JobStateSnapshot snapshot = jetInstance.getJobStateSnapshot(plan.getSnapshotName());
+        JobStateSnapshot snapshot = hazelcastInstance.getJet().getJobStateSnapshot(plan.getSnapshotName());
         if (snapshot == null) {
             if (plan.isIfExists()) {
                 return SqlResultImpl.createUpdateCountResult(0);
@@ -169,56 +180,85 @@ class JetPlanExecutor {
             rows = catalog.getMappingNames().stream();
         } else {
             assert plan.getShowTarget() == ShowStatementTarget.JOBS;
-            JetService jetService = ((HazelcastInstanceImpl) jetInstance.getHazelcastInstance()).node.nodeEngine
-                    .getService(JetService.SERVICE_NAME);
-            rows = jetService.getJobRepository().getJobRecords().stream()
+            NodeEngine nodeEngine = getNodeEngine(hazelcastInstance);
+            JetServiceBackend jetServiceBackend = nodeEngine.getService(JetServiceBackend.SERVICE_NAME);
+            rows = jetServiceBackend.getJobRepository().getJobRecords().stream()
                     .map(record -> record.getConfig().getName())
                     .filter(Objects::nonNull);
         }
 
         return new JetSqlResultImpl(
-                QueryId.create(jetInstance.getHazelcastInstance().getLocalEndpoint().getUuid()),
+                QueryId.create(hazelcastInstance.getLocalEndpoint().getUuid()),
                 new JetStaticQueryResultProducer(rows.sorted().map(name -> new HeapRow(new Object[]{name})).iterator()),
                 metadata,
                 false);
     }
 
-    SqlResult execute(SelectOrSinkPlan plan, QueryId queryId, List<Object> arguments) {
+    SqlResult execute(SelectPlan plan, QueryId queryId, List<Object> arguments, long timeout) {
         List<Object> args = prepareArguments(plan.getParameterMetadata(), arguments);
-        JobConfig jobConfig = new JobConfig().setArgument(SQL_ARGUMENTS_KEY_NAME, args);
+        JobConfig jobConfig = new JobConfig()
+                .setArgument(SQL_ARGUMENTS_KEY_NAME, args)
+                .setTimeoutMillis(timeout);
 
-        if (plan.isInsert()) {
-            if (plan.isStreaming()) {
-                throw QueryException.error("Cannot execute a streaming DML statement without a CREATE JOB command");
-            }
-
-            Job job = jetInstance.newJob(plan.getDag(), jobConfig);
-            job.join();
-
-            return SqlResultImpl.createUpdateCountResult(0);
-        } else {
-            JetQueryResultProducer queryResultProducer = new JetQueryResultProducer();
-            Long jobId = jetInstance.newJobId();
-            Object oldValue = resultConsumerRegistry.put(jobId, queryResultProducer);
-            assert oldValue == null : oldValue;
-            try {
-                Job job = jetInstance.newJob(jobId, plan.getDag(), jobConfig);
-                job.getFuture().whenComplete((r, t) -> {
-                    if (t != null) {
-                        int errorCode = t instanceof QueryException
-                                ? ((QueryException) t).getCode()
-                                : SqlErrorCode.GENERIC;
-                        queryResultProducer.onError(
-                                QueryException.error(errorCode, "The Jet SQL job failed: " + t.getMessage(), t));
-                    }
-                });
-            } catch (Throwable e) {
-                resultConsumerRegistry.remove(jobId);
-                throw e;
-            }
-
-            return new JetSqlResultImpl(queryId, queryResultProducer, plan.getRowMetadata(), plan.isStreaming());
+        JetQueryResultProducer queryResultProducer = new JetQueryResultProducer();
+        AbstractJetInstance<?> jet = (AbstractJetInstance<?>) hazelcastInstance.getJet();
+        Long jobId = jet.newJobId();
+        Object oldValue = resultConsumerRegistry.put(jobId, queryResultProducer);
+        assert oldValue == null : oldValue;
+        try {
+            Job job = jet.newLightJob(jobId, plan.getDag(), jobConfig);
+            job.getFuture().whenComplete((r, t) -> {
+                if (t != null) {
+                    int errorCode = findQueryExceptionCode(t);
+                    queryResultProducer.onError(
+                            QueryException.error(errorCode, "The Jet SQL job failed: " + t.getMessage(), t));
+                }
+            });
+        } catch (Throwable e) {
+            resultConsumerRegistry.remove(jobId);
+            throw e;
         }
+
+        return new JetSqlResultImpl(queryId, queryResultProducer, plan.getRowMetadata(), plan.isStreaming());
+    }
+
+    SqlResult execute(DmlPlan plan, QueryId queryId, List<Object> arguments, long timeout) {
+        List<Object> args = prepareArguments(plan.getParameterMetadata(), arguments);
+        JobConfig jobConfig = new JobConfig()
+                .setArgument(SQL_ARGUMENTS_KEY_NAME, args)
+                .setTimeoutMillis(timeout);
+
+        Job job = hazelcastInstance.getJet().newLightJob(plan.getDag(), jobConfig);
+        job.join();
+
+        return SqlResultImpl.createUpdateCountResult(0);
+    }
+
+    SqlResult execute(IMapDeletePlan plan, List<Object> arguments, long timeout) {
+        List<Object> args = prepareArguments(plan.parameterMetadata(), arguments);
+        String mapName = plan.mapName();
+        Expression<?> keyCondition = plan.keyCondition();
+
+        Object key = keyCondition.eval(
+                EmptyRow.INSTANCE,
+                new SimpleExpressionEvalContext(args, ((HazelcastInstanceImpl) hazelcastInstance).getSerializationService())
+        );
+        CompletableFuture<Void> future = hazelcastInstance.getMap(mapName)
+                .submitToKey(key, EntryRemovingProcessor.ENTRY_REMOVING_PROCESSOR)
+                .toCompletableFuture();
+        try {
+            if (timeout > 0) {
+                future.get(timeout, TimeUnit.MILLISECONDS);
+            } else {
+                future.get();
+            }
+        } catch (TimeoutException e) {
+            future.cancel(true);
+            throw QueryException.error("Timeout occurred while deleting an entry");
+        } catch (InterruptedException | ExecutionException e) {
+            throw QueryException.error(e.getMessage(), e);
+        }
+        return SqlResultImpl.createUpdateCountResult(0);
     }
 
     private List<Object> prepareArguments(QueryParameterMetadata parameterMetadata, List<Object> arguments) {
@@ -245,5 +285,15 @@ class JetPlanExecutor {
         }
 
         return arguments;
+    }
+
+    private static int findQueryExceptionCode(Throwable t) {
+        while (t != null) {
+            if (t instanceof QueryException) {
+                return ((QueryException) t).getCode();
+            }
+            t = t.getCause();
+        }
+        return SqlErrorCode.GENERIC;
     }
 }

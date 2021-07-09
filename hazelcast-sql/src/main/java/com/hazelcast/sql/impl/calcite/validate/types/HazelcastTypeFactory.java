@@ -1,15 +1,15 @@
 /*
- * Copyright (c) 2008-2021, Hazelcast, Inc. All Rights Reserved.
+ * Copyright 2021 Hazelcast Inc.
  *
- * Licensed under the Apache License, Version 2.0 (the "License");
+ * Licensed under the Hazelcast Community License (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
  *
- * http://www.apache.org/licenses/LICENSE-2.0
+ * http://hazelcast.com/hazelcast-community-license
  *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * WITHOUT WARRANTIES OF ANY KIND, either express or implied.
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
@@ -41,19 +41,20 @@ public final class HazelcastTypeFactory extends SqlTypeFactoryImpl {
 
     public static final HazelcastTypeFactory INSTANCE = new HazelcastTypeFactory();
 
-    private static final RelDataType TYPE_TIME = new HazelcastType(SqlTypeName.TIME, false);
-    private static final RelDataType TYPE_TIME_NULLABLE = new HazelcastType(SqlTypeName.TIME, true);
+    private static final RelDataType TYPE_TIME = new HazelcastType(SqlTypeName.TIME, false, 6);
+    private static final RelDataType TYPE_TIME_NULLABLE = new HazelcastType(SqlTypeName.TIME, true, 6);
 
-    private static final RelDataType TYPE_TIMESTAMP = new HazelcastType(SqlTypeName.TIMESTAMP, false);
-    private static final RelDataType TYPE_TIMESTAMP_NULLABLE = new HazelcastType(SqlTypeName.TIMESTAMP, true);
+    private static final RelDataType TYPE_TIMESTAMP = new HazelcastType(SqlTypeName.TIMESTAMP, false, 6);
+    private static final RelDataType TYPE_TIMESTAMP_NULLABLE = new HazelcastType(SqlTypeName.TIMESTAMP, true, 6);
 
     private static final RelDataType TYPE_TIMESTAMP_WITH_TIME_ZONE = new HazelcastType(
-            SqlTypeName.TIMESTAMP_WITH_LOCAL_TIME_ZONE, false
+            SqlTypeName.TIMESTAMP_WITH_LOCAL_TIME_ZONE, false, 6
     );
 
     private static final RelDataType TYPE_TIMESTAMP_WITH_TIME_ZONE_NULLABLE = new HazelcastType(
             SqlTypeName.TIMESTAMP_WITH_LOCAL_TIME_ZONE,
-            true
+            true,
+            6
     );
 
     private static final RelDataType TYPE_OBJECT = new HazelcastType(SqlTypeName.ANY, false);
@@ -145,6 +146,7 @@ public final class HazelcastTypeFactory extends SqlTypeFactoryImpl {
         return null;
     }
 
+    @SuppressWarnings("checkstyle:CyclomaticComplexity")
     @Override
     public RelDataType createTypeWithNullability(RelDataType type, boolean nullable) {
         if (HazelcastTypeUtils.isNumericIntegerType(type.getSqlTypeName())) {
@@ -231,5 +233,12 @@ public final class HazelcastTypeFactory extends SqlTypeFactoryImpl {
         assert maxBitWidthType.getSqlTypeName() == typeName;
 
         return HazelcastIntegerType.create((HazelcastIntegerType) maxBitWidthType, targetType.isNullable());
+    }
+
+    @Override
+    public RelDataType createJoinType(RelDataType... types) {
+        // Calcite's implementation of createJoinType() returns RelCrossType.
+        // RelCrossType.getSqlTypeName() returns null. We assume in several places that it's non null...
+        return createUnknownType();
     }
 }

@@ -17,14 +17,14 @@
 package com.hazelcast.jet.core;
 
 import com.hazelcast.cluster.Address;
-import com.hazelcast.jet.JetInstance;
+import com.hazelcast.core.HazelcastInstance;
 import com.hazelcast.jet.Job;
 import com.hazelcast.jet.config.JobConfig;
 import com.hazelcast.jet.core.TestProcessors.DummyStatefulP;
 import com.hazelcast.jet.core.TestProcessors.MockP;
 import com.hazelcast.jet.impl.execution.init.JetInitDataSerializerHook;
 import com.hazelcast.jet.impl.operation.SnapshotPhase1Operation;
-import com.hazelcast.test.HazelcastSerialClassRunner;
+import com.hazelcast.test.HazelcastSerialParametersRunnerFactory;
 import com.hazelcast.test.PacketFiltersUtil;
 import com.hazelcast.test.annotation.ParallelJVMTest;
 import com.hazelcast.test.annotation.QuickTest;
@@ -35,6 +35,10 @@ import org.junit.Test;
 import org.junit.experimental.categories.Category;
 import org.junit.rules.ExpectedException;
 import org.junit.runner.RunWith;
+import org.junit.runners.Parameterized;
+import org.junit.runners.Parameterized.Parameter;
+import org.junit.runners.Parameterized.Parameters;
+import org.junit.runners.Parameterized.UseParametersRunnerFactory;
 
 import javax.annotation.Nonnull;
 import java.net.UnknownHostException;
@@ -48,13 +52,14 @@ import java.util.function.Function;
 
 import static com.hazelcast.jet.config.ProcessingGuarantee.EXACTLY_ONCE;
 import static com.hazelcast.jet.impl.util.ExceptionUtil.peel;
-import static com.hazelcast.test.PacketFiltersUtil.rejectOperationsBetween;
-import static com.hazelcast.test.PacketFiltersUtil.resetPacketFiltersFrom;
 import static java.util.Collections.singletonList;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertTrue;
+import static org.junit.Assume.assumeFalse;
 
-@RunWith(HazelcastSerialClassRunner.class)
+@RunWith(Parameterized.class)
+@UseParametersRunnerFactory(HazelcastSerialParametersRunnerFactory.class)
 @Category({QuickTest.class, ParallelJVMTest.class})
 public class CancellationTest extends JetTestSupport {
 
@@ -62,6 +67,14 @@ public class CancellationTest extends JetTestSupport {
 
     @Rule
     public ExpectedException expectedException = ExpectedException.none();
+
+    @Parameter
+    public boolean useLightJob;
+
+    @Parameters(name = "useLightJob={0}")
+    public static Object[] parameters() {
+        return new Object[]{true, false};
+    }
 
     @Before
     public void setup() {
@@ -80,12 +93,12 @@ public class CancellationTest extends JetTestSupport {
     @Test
     public void when_jobCancelledOnSingleNode_then_terminatedEventually() {
         // Given
-        JetInstance instance = createJetMember();
+        HazelcastInstance instance = createHazelcastInstance();
 
         DAG dag = new DAG();
         dag.newVertex("slow", StuckSource::new);
 
-        Job job = instance.newJob(dag);
+        Job job = newJob(instance, dag);
         assertExecutionStarted();
 
         // When
@@ -97,16 +110,20 @@ public class CancellationTest extends JetTestSupport {
         job.join();
     }
 
+    private Job newJob(HazelcastInstance instance, DAG dag) {
+        return useLightJob ? instance.getJet().newLightJob(dag) : instance.getJet().newJob(dag);
+    }
+
     @Test
     public void when_jobCancelledOnMultipleNodes_then_terminatedEventually() {
         // Given
-        createJetMember();
-        JetInstance instance = createJetMember();
+        createHazelcastInstance();
+        HazelcastInstance instance = createHazelcastInstance();
 
         DAG dag = new DAG();
         dag.newVertex("slow", StuckSource::new);
 
-        Job job = instance.newJob(dag);
+        Job job = newJob(instance, dag);
         assertExecutionStarted();
 
         // When
@@ -121,32 +138,32 @@ public class CancellationTest extends JetTestSupport {
     @Test
     public void when_jobCancelled_then_jobStatusIsSetEventually() {
         // Given
-        JetInstance instance = createJetMember();
+        HazelcastInstance instance = createHazelcastInstance();
 
         DAG dag = new DAG();
         dag.newVertex("slow", StuckSource::new);
 
-        Job job = instance.newJob(dag);
+        Job job = newJob(instance, dag);
         assertExecutionStarted();
 
         // When
         job.cancel();
 
         // Then
-        assertJobStatusEventually(job, JobStatus.FAILED, ASSERTION_TIMEOUT_SECONDS);
+        assertThatThrownBy(() -> job.join());
     }
 
     @Test
     public void when_jobCancelledFromClient_then_terminatedEventually() {
         // Given
-        createJetMember();
-        createJetMember();
-        JetInstance client = createJetClient();
+        createHazelcastInstance();
+        createHazelcastInstance();
+        HazelcastInstance client = createHazelcastClient();
 
         DAG dag = new DAG();
         dag.newVertex("slow", StuckSource::new);
 
-        Job job = client.newJob(dag);
+        Job job = newJob(client, dag);
         assertExecutionStarted();
 
         // When
@@ -161,33 +178,36 @@ public class CancellationTest extends JetTestSupport {
     @Test
     public void when_jobCancelledFromClient_then_jobStatusIsSetEventually() {
         // Given
-        createJetMember();
-        createJetMember();
-        JetInstance client = createJetClient();
+        createHazelcastInstance();
+        createHazelcastInstance();
+        HazelcastInstance client = createHazelcastClient();
 
         DAG dag = new DAG();
         dag.newVertex("slow", StuckSource::new);
 
-        Job job = client.newJob(dag);
+        Job job = newJob(client, dag);
         assertExecutionStarted();
 
         // When
         job.cancel();
 
         // Then
-        assertJobStatusEventually(job, JobStatus.FAILED, ASSERTION_TIMEOUT_SECONDS);
+        assertThatThrownBy(() -> job.join());
     }
 
     @Test
     public void when_jobCancelled_then_trackedJobsGetNotified() {
+        // not applicable to light jobs - they are not tracked after cancellation
+        assumeFalse(useLightJob);
+
         // Given
-        JetInstance instance1 = createJetMember();
-        JetInstance instance2 = createJetMember();
+        HazelcastInstance instance1 = createHazelcastInstance();
+        HazelcastInstance instance2 = createHazelcastInstance();
 
         DAG dag = new DAG();
         dag.newVertex("slow", StuckSource::new);
 
-        Job job = instance1.newJob(dag);
+        Job job = newJob(instance1, dag);
         assertExecutionStarted();
 
         // When
@@ -196,40 +216,15 @@ public class CancellationTest extends JetTestSupport {
         // Then
         assertExecutionTerminated();
         expectedException.expect(CancellationException.class);
-        Job tracked = instance2.getJobs().iterator().next();
+        Job tracked = instance2.getJet().getJobs().iterator().next();
         tracked.join();
-    }
-
-    @Test
-    public void when_jobCancelled_then_jobStatusIsSetDuringCancellation() {
-        // Given
-        JetInstance instance1 = createJetMember();
-        JetInstance instance2 = createJetMember();
-        rejectOperationsBetween(instance1.getHazelcastInstance(), instance2.getHazelcastInstance(),
-                JetInitDataSerializerHook.FACTORY_ID, singletonList(JetInitDataSerializerHook.COMPLETE_EXECUTION_OP));
-
-        DAG dag = new DAG();
-        dag.newVertex("slow", StuckSource::new);
-
-        Job job = instance1.newJob(dag);
-        assertExecutionStarted();
-
-        // When
-        job.cancel();
-
-        // Then
-        assertJobStatusEventually(job, JobStatus.COMPLETING, ASSERTION_TIMEOUT_SECONDS);
-
-        resetPacketFiltersFrom(instance1.getHazelcastInstance());
-
-        assertJobStatusEventually(job, JobStatus.FAILED, ASSERTION_TIMEOUT_SECONDS);
     }
 
     @Test
     public void when_jobFailsOnOnInitiatorNode_then_cancelledOnOtherNodes() throws Throwable {
         // Given
-        JetInstance instance = createJetMember();
-        createJetMember();
+        HazelcastInstance instance = createHazelcastInstance();
+        createHazelcastInstance();
 
         RuntimeException fault = new RuntimeException("fault");
         DAG dag = new DAG();
@@ -237,7 +232,7 @@ public class CancellationTest extends JetTestSupport {
         SingleNodeFaultSupplier supplier = new SingleNodeFaultSupplier(getAddress(instance), fault);
         dag.newVertex("faulty", supplier).localParallelism(4);
 
-        Job job = instance.newJob(dag);
+        Job job = newJob(instance, dag);
         assertExecutionStarted();
 
         // Then
@@ -256,15 +251,15 @@ public class CancellationTest extends JetTestSupport {
     @Test
     public void when_jobFailsOnOnNonInitiatorNode_then_cancelledOnInitiatorNode() throws Throwable {
         // Given
-        JetInstance instance = createJetMember();
-        JetInstance other = createJetMember();
+        HazelcastInstance instance = createHazelcastInstance();
+        HazelcastInstance other = createHazelcastInstance();
 
         RuntimeException fault = new RuntimeException("fault");
         DAG dag = new DAG();
         dag.newVertex("faulty", new SingleNodeFaultSupplier(getAddress(other), fault))
            .localParallelism(4);
 
-        Job job = instance.newJob(dag);
+        Job job = newJob(instance, dag);
         assertExecutionStarted();
 
         // Then
@@ -291,25 +286,25 @@ public class CancellationTest extends JetTestSupport {
     }
 
     private void when_shutdown_then_jobFuturesCanceled(boolean graceful) {
-        JetInstance jet = createJetMember();
+        HazelcastInstance hz = createHazelcastInstance();
         DAG dag = new DAG();
         dag.newVertex("blocking", BlockingProcessor::new).localParallelism(1);
-        jet.newJob(dag);
+        newJob(hz, dag);
         assertTrueEventually(() -> assertTrue(BlockingProcessor.hasStarted), ASSERTION_TIMEOUT_SECONDS);
         if (graceful) {
-            jet.shutdown();
+            hz.shutdown();
         } else {
-            jet.getHazelcastInstance().shutdown();
+            hz.getLifecycleService().terminate();
         }
         assertBlockingProcessorEventuallyNotRunning();
     }
 
     @Test
     public void when_jobCanceled_then_jobFutureCanceled() {
-        JetInstance jet = createJetMember();
+        HazelcastInstance hz = createHazelcastInstance();
         DAG dag = new DAG();
         dag.newVertex("blocking", BlockingProcessor::new).localParallelism(1);
-        Job job = jet.newJob(dag);
+        Job job = newJob(hz, dag);
         assertTrueEventually(() -> assertTrue(BlockingProcessor.hasStarted), ASSERTION_TIMEOUT_SECONDS);
         job.cancel();
         assertBlockingProcessorEventuallyNotRunning();
@@ -317,12 +312,14 @@ public class CancellationTest extends JetTestSupport {
 
     @Test
     public void when_cancellingCompletedJob_then_succeeds() {
-        JetInstance jet = createJetMember();
+        HazelcastInstance hz = createHazelcastInstance();
         DAG dag = new DAG();
         dag.newVertex("blocking", MockP::new).localParallelism(1);
-        Job job = jet.newJob(dag);
+        Job job = newJob(hz, dag);
         job.join();
-        assertEquals(JobStatus.COMPLETED, job.getStatus());
+        if (!job.isLightJob()) {
+            assertEquals(JobStatus.COMPLETED, job.getStatus());
+        }
 
         // When-Then: should not fail
         job.cancel();
@@ -330,15 +327,15 @@ public class CancellationTest extends JetTestSupport {
 
     @Test
     public void when_multipleClientsCancel_then_allSucceed() throws Exception {
-        JetInstance jet = createJetMember();
+        HazelcastInstance hz = createHazelcastInstance();
         DAG dag = new DAG();
         dag.newVertex("blocking", BlockingProcessor::new).localParallelism(1);
-        Job job = jet.newJob(dag);
+        Job job = newJob(hz, dag);
         assertTrueEventually(() -> assertTrue(BlockingProcessor.hasStarted));
 
         // When-Then: should not fail
         CountDownLatch latch = new CountDownLatch(1);
-        List<Future> futures = new ArrayList<>();
+        List<Future<?>> futures = new ArrayList<>();
         for (int i = 0; i < 8; i++) {
             futures.add(spawn(() -> {
                 assertOpenEventually(latch);
@@ -346,32 +343,34 @@ public class CancellationTest extends JetTestSupport {
             }));
         }
         latch.countDown();
-        for (Future future : futures) {
+        for (Future<?> future : futures) {
             future.get();
         }
     }
 
     @Test
     public void when_cancelledDuringSnapshotPhase1_then_cancelled() {
-        JetInstance jet = createJetMember();
+        assumeFalse(useLightJob);
+        HazelcastInstance hz = createHazelcastInstance();
         SnapshotPhase1Operation.postponeResponses = true;
         DAG dag = new DAG();
         dag.newVertex("blocking", DummyStatefulP::new).localParallelism(1);
-        Job job = jet.newJob(dag, new JobConfig().setSnapshotIntervalMillis(100).setProcessingGuarantee(EXACTLY_ONCE));
+        Job job = hz.getJet().newJob(dag, new JobConfig().setSnapshotIntervalMillis(100).setProcessingGuarantee(EXACTLY_ONCE));
         sleepSeconds(2); // wait for the job to start and attempt the 1st snapshot
         cancelAndJoin(job);
     }
 
     @Test
     public void when_cancelledDuringSnapshotPhase2_then_cancelled() {
-        JetInstance jet = createJetMember();
-        createJetMember();
-        PacketFiltersUtil.dropOperationsFrom(jet.getHazelcastInstance(), JetInitDataSerializerHook.FACTORY_ID,
+        assumeFalse(useLightJob);
+        HazelcastInstance hz = createHazelcastInstance();
+        createHazelcastInstance();
+        PacketFiltersUtil.dropOperationsFrom(hz, JetInitDataSerializerHook.FACTORY_ID,
                 singletonList(JetInitDataSerializerHook.SNAPSHOT_PHASE2_OPERATION));
 
         DAG dag = new DAG();
         dag.newVertex("blocking", DummyStatefulP::new).localParallelism(1);
-        Job job = jet.newJob(dag, new JobConfig().setSnapshotIntervalMillis(100).setProcessingGuarantee(EXACTLY_ONCE));
+        Job job = hz.getJet().newJob(dag, new JobConfig().setSnapshotIntervalMillis(100).setProcessingGuarantee(EXACTLY_ONCE));
         sleepSeconds(2); // wait for the job to start and attempt the 1st snapshot
         cancelAndJoin(job);
     }
@@ -456,9 +455,9 @@ public class CancellationTest extends JetTestSupport {
 
     private static class SingleNodeFaultSupplier implements ProcessorMetaSupplier {
 
-        private String host;
-        private int port;
-        private RuntimeException e;
+        private final String host;
+        private final int port;
+        private final RuntimeException e;
 
         SingleNodeFaultSupplier(Address failOnAddress, RuntimeException e) {
             this.e = e;

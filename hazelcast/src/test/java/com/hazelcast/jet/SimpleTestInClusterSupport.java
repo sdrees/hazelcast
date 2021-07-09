@@ -17,12 +17,16 @@
 package com.hazelcast.jet;
 
 import com.hazelcast.client.config.ClientConfig;
+import com.hazelcast.client.test.TestHazelcastFactory;
 import com.hazelcast.config.Config;
 import com.hazelcast.core.DistributedObject;
+import com.hazelcast.core.HazelcastInstance;
 import com.hazelcast.jet.core.JetTestSupport;
+import com.hazelcast.jet.impl.JetServiceBackend;
 import com.hazelcast.logging.ILogger;
 import com.hazelcast.logging.Logger;
 import com.hazelcast.test.HazelcastSerialClassRunner;
+import com.hazelcast.test.PacketFiltersUtil;
 import org.junit.After;
 import org.junit.AfterClass;
 import org.junit.runner.RunWith;
@@ -46,22 +50,22 @@ public abstract class SimpleTestInClusterSupport extends JetTestSupport {
 
     private static final ILogger SUPPORT_LOGGER = Logger.getLogger(SimpleTestInClusterSupport.class);
 
-    private static JetTestInstanceFactory factory;
+    private static TestHazelcastFactory factory;
     private static Config config;
-    private static JetInstance[] instances;
-    private static JetInstance client;
+    private static HazelcastInstance[] instances;
+    private static HazelcastInstance client;
 
     protected static void initialize(int memberCount, @Nullable Config config) {
         assert factory == null : "already initialized";
-        factory = new JetTestInstanceFactory();
-        instances = new JetInstance[memberCount];
+        factory = new TestHazelcastFactory();
+        instances = new HazelcastInstance[memberCount];
         if (config == null) {
             config = smallInstanceConfig();
         }
         SimpleTestInClusterSupport.config = config;
         // create members
         for (int i = 0; i < memberCount; i++) {
-            instances[i] = factory.newMember(config);
+            instances[i] = factory.newHazelcastInstance(config);
         }
     }
 
@@ -74,7 +78,7 @@ public abstract class SimpleTestInClusterSupport extends JetTestSupport {
             clientConfig = new ClientConfig();
         }
         initialize(memberCount, config);
-        client = factory.newClient(clientConfig);
+        client = factory.newHazelcastClient(clientConfig);
     }
 
     @After
@@ -82,14 +86,23 @@ public abstract class SimpleTestInClusterSupport extends JetTestSupport {
         if (instances == null) {
             return;
         }
+        for (HazelcastInstance inst : instances) {
+            PacketFiltersUtil.resetPacketFiltersFrom(inst);
+        }
         // after each test ditch all jobs and objects
-        List<Job> jobs = instances[0].getJobs();
+        List<Job> jobs = instances[0].getJet().getJobs();
         SUPPORT_LOGGER.info("Ditching " + jobs.size() + " jobs in SimpleTestInClusterSupport.@After: " +
                 jobs.stream().map(j -> idToString(j.getId())).collect(joining(", ", "[", "]")));
         for (Job job : jobs) {
             ditchJob(job, instances());
         }
-        Collection<DistributedObject> objects = instances()[0].getHazelcastInstance().getDistributedObjects();
+        // cancel all light jobs by cancelling their executions
+        for (HazelcastInstance inst : instances) {
+            JetServiceBackend jetServiceBackend = getJetServiceBackend(inst);
+            jetServiceBackend.getJobExecutionService().cancelAllExecutions("ditching all jobs after a test");
+            jetServiceBackend.getJobExecutionService().waitAllExecutionsTerminated();
+        }
+        Collection<DistributedObject> objects = instances()[0].getDistributedObjects();
         SUPPORT_LOGGER.info("Destroying " + objects.size()
                 + " distributed objects in SimpleTestInClusterSupport.@After: "
                 + objects.stream().map(o -> o.getServiceName() + "/" + o.getName())
@@ -113,7 +126,7 @@ public abstract class SimpleTestInClusterSupport extends JetTestSupport {
     }
 
     @Nonnull
-    protected static JetTestInstanceFactory factory() {
+    protected static TestHazelcastFactory factory() {
         return factory;
     }
 
@@ -130,7 +143,7 @@ public abstract class SimpleTestInClusterSupport extends JetTestSupport {
      * Returns the first instance.
      */
     @Nonnull
-    protected static JetInstance instance() {
+    protected static HazelcastInstance instance() {
         return instances[0];
     }
 
@@ -138,14 +151,14 @@ public abstract class SimpleTestInClusterSupport extends JetTestSupport {
      * Returns all instances (except for the client).
      */
     @Nonnull
-    protected static JetInstance[] instances() {
+    protected static HazelcastInstance[] instances() {
         return instances;
     }
 
     /**
      * Returns the client or null, if a client wasn't requested.
      */
-    protected static JetInstance client() {
+    protected static HazelcastInstance client() {
         return client;
     }
 }

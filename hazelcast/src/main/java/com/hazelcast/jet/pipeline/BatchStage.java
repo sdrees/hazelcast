@@ -28,6 +28,7 @@ import com.hazelcast.jet.aggregate.AggregateOperation1;
 import com.hazelcast.jet.aggregate.AggregateOperation2;
 import com.hazelcast.jet.aggregate.AggregateOperation3;
 import com.hazelcast.jet.aggregate.AggregateOperations;
+import com.hazelcast.jet.config.InstanceConfig;
 import com.hazelcast.jet.core.Processor;
 import com.hazelcast.jet.core.ProcessorMetaSupplier;
 import com.hazelcast.jet.core.ProcessorSupplier;
@@ -52,7 +53,7 @@ import static com.hazelcast.jet.aggregate.AggregateOperations.aggregateOperation
  *
  * @param <T> the type of items coming out of this stage
  *
- * @since 3.0
+ * @since Jet 3.0
  */
 public interface BatchStage<T> extends GeneralStage<T> {
 
@@ -75,10 +76,14 @@ public interface BatchStage<T> extends GeneralStage<T> {
      * <pre>{@code
      * items.sort()
      * }</pre>
+     * <p>
+     * This operation is subject to memory limits. See {@link
+     * InstanceConfig#setMaxProcessorAccumulatedRecords(long)} for more
+     * information.
      *
      * @return the newly attached stage
      * @see ComparatorEx#naturalOrder
-     * @since 4.3
+     * @since Jet 4.3
      */
     @Nonnull
     BatchStage<T> sort();
@@ -93,12 +98,16 @@ public interface BatchStage<T> extends GeneralStage<T> {
      * BatchStage<Trade> trades = pipeline.readFrom(tradeSource);
      * BatchStage<Trade> sortedTrades = trades.sort(ComparatorEx.comparing(Trade::ticker));
      * }</pre>
+     * <p>
+     * This operation is subject to memory limits. See {@link
+     * InstanceConfig#setMaxProcessorAccumulatedRecords(long)} for more
+     * information.
      *
      * @param comparator the user-provided comparator that will be used for
      *     sorting. It must be stateless and {@linkplain Processor#isCooperative()
      *     cooperative}.
      * @return the newly attached stage
-     * @since 4.3
+     * @since Jet 4.3
      */
     @Nonnull
     BatchStage<T> sort(@Nonnull ComparatorEx<? super T> comparator);
@@ -214,6 +223,10 @@ public interface BatchStage<T> extends GeneralStage<T> {
      * Attaches a stage that emits just the items that are distinct according
      * to their definition of equality ({@code equals} and {@code hashCode}).
      * There is no guarantee which one of equal items it will emit.
+     * <p>
+     * This operation is subject to memory limits. See {@link
+     * InstanceConfig#setMaxProcessorAccumulatedRecords(long)} for more
+     * information.
      *
      * @return the newly attached stage
      */
@@ -601,7 +614,7 @@ public interface BatchStage<T> extends GeneralStage<T> {
      * @param transformFn function to transform this stage into another stage
      * @param <R> type of the returned stage
      *
-     * @since 3.1
+     * @since Jet 3.1
      */
     @Nonnull
     default <R> BatchStage<R> apply(@Nonnull FunctionEx<? super BatchStage<T>, ? extends BatchStage<R>> transformFn) {

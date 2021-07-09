@@ -16,7 +16,7 @@
 
 package com.hazelcast.jet.impl.operation;
 
-import com.hazelcast.jet.impl.JetService;
+import com.hazelcast.jet.impl.JetServiceBackend;
 import com.hazelcast.jet.impl.execution.ExecutionContext;
 import com.hazelcast.jet.impl.execution.init.JetInitDataSerializerHook;
 import com.hazelcast.nio.ObjectDataInput;
@@ -25,9 +25,13 @@ import com.hazelcast.nio.ObjectDataOutput;
 import java.io.IOException;
 import java.util.concurrent.CompletableFuture;
 
+import static com.hazelcast.jet.Util.idToString;
 import static com.hazelcast.jet.impl.util.LoggingUtil.logFine;
+import static java.util.concurrent.CompletableFuture.completedFuture;
 
 public class SnapshotPhase2Operation extends AsyncJobOperation {
+
+    private static final CompletableFuture<Void> EMPTY_RESULT = completedFuture(null);
 
     private long executionId;
     private long snapshotId;
@@ -46,10 +50,11 @@ public class SnapshotPhase2Operation extends AsyncJobOperation {
 
     @Override
     protected CompletableFuture<Void> doRun() {
-        JetService service = getService();
+        JetServiceBackend service = getService();
         ExecutionContext ctx = service.getJobExecutionService().assertExecutionContext(
                 getCallerAddress(), jobId(), executionId, getClass().getSimpleName()
         );
+        assert !ctx.isLightJob() : "snapshot phase 2 started on a light job: " + idToString(executionId);
 
         return ctx.beginSnapshotPhase2(snapshotId, success)
                   .whenComplete((r, t) -> {

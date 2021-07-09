@@ -1,15 +1,15 @@
 /*
- * Copyright (c) 2008-2021, Hazelcast, Inc. All Rights Reserved.
+ * Copyright 2021 Hazelcast Inc.
  *
- * Licensed under the Apache License, Version 2.0 (the "License");
+ * Licensed under the Hazelcast Community License (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
  *
- * http://www.apache.org/licenses/LICENSE-2.0
+ * http://hazelcast.com/hazelcast-community-license
  *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * WITHOUT WARRANTIES OF ANY KIND, either express or implied.
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
@@ -24,7 +24,7 @@ import com.hazelcast.sql.impl.type.converter.LocalDateTimeConverter;
 import com.hazelcast.sql.impl.type.converter.LocalTimeConverter;
 import com.hazelcast.sql.impl.type.converter.OffsetDateTimeConverter;
 import com.hazelcast.sql.support.expressions.ExpressionValue;
-import com.hazelcast.test.HazelcastParallelClassRunner;
+import com.hazelcast.test.HazelcastSerialClassRunner;
 import com.hazelcast.test.annotation.ParallelJVMTest;
 import com.hazelcast.test.annotation.QuickTest;
 import org.junit.Test;
@@ -55,7 +55,7 @@ import static com.hazelcast.sql.impl.SqlErrorCode.DATA_EXCEPTION;
 import static com.hazelcast.sql.impl.SqlErrorCode.PARSING;
 import static com.hazelcast.sql.impl.type.QueryDataType.INT;
 
-@RunWith(HazelcastParallelClassRunner.class)
+@RunWith(HazelcastSerialClassRunner.class)
 @Category({QuickTest.class, ParallelJVMTest.class})
 public class CastFunctionIntegrationTest extends ExpressionTestSupport {
     @Test
@@ -73,7 +73,7 @@ public class CastFunctionIntegrationTest extends ExpressionTestSupport {
         putAndCheckFailure('b', sql("this", DATE), DATA_EXCEPTION, "Cannot parse VARCHAR value to DATE");
         putAndCheckFailure('b', sql("this", TIME), DATA_EXCEPTION, "Cannot parse VARCHAR value to TIME");
         putAndCheckFailure('b', sql("this", TIMESTAMP), DATA_EXCEPTION, "Cannot parse VARCHAR value to TIMESTAMP");
-        putAndCheckFailure('b', sql("this", TIMESTAMP_WITH_TIME_ZONE), DATA_EXCEPTION, "Cannot parse VARCHAR value to TIMESTAMP_WITH_TIME_ZONE");
+        putAndCheckFailure('b', sql("this", TIMESTAMP_WITH_TIME_ZONE), DATA_EXCEPTION, "Cannot parse VARCHAR value to TIMESTAMP WITH TIME ZONE");
         putAndCheckValue('b', sql("this", OBJECT), OBJECT, "b");
     }
 
@@ -148,22 +148,27 @@ public class CastFunctionIntegrationTest extends ExpressionTestSupport {
         // LocalDate
         putAndCheckValue(new ExpressionValue.StringVal(), sql("field1", DATE), DATE, null);
         putAndCheckValue(LOCAL_DATE_VAL.toString(), sql("this", DATE), DATE, LOCAL_DATE_VAL);
+        // SQL standard also accepts DATE without leading zeroes to DATE.
+        putAndCheckValue(STANDARD_LOCAL_DATE_VAL, sql("this", DATE), DATE, LOCAL_DATE_VAL);
         putAndCheckFailure("bad", sql("this", DATE), DATA_EXCEPTION, "Cannot parse VARCHAR value to DATE");
 
         // LocalTime
         putAndCheckValue(new ExpressionValue.StringVal(), sql("field1", TIME), TIME, null);
         putAndCheckValue(LOCAL_TIME_VAL.toString(), sql("this", TIME), TIME, LOCAL_TIME_VAL);
+        putAndCheckValue(STANDARD_LOCAL_TIME_VAL, sql("this", TIME), TIME, LOCAL_TIME_VAL);
         putAndCheckFailure("bad", sql("this", TIME), DATA_EXCEPTION, "Cannot parse VARCHAR value to TIME");
 
         // LocalDateTime
         putAndCheckValue(new ExpressionValue.StringVal(), sql("field1", TIMESTAMP), TIMESTAMP, null);
         putAndCheckValue(LOCAL_DATE_TIME_VAL.toString(), sql("this", TIMESTAMP), TIMESTAMP, LOCAL_DATE_TIME_VAL);
+        putAndCheckValue(STANDARD_LOCAL_DATE_TIME_VAL, sql("this", TIMESTAMP), TIMESTAMP, LOCAL_DATE_TIME_VAL);
         putAndCheckFailure("bad", sql("this", TIMESTAMP), DATA_EXCEPTION, "Cannot parse VARCHAR value to TIMESTAMP");
 
         // OffsetDateTime
         putAndCheckValue(new ExpressionValue.StringVal(), sql("field1", TIMESTAMP_WITH_TIME_ZONE), TIMESTAMP_WITH_TIME_ZONE, null);
         putAndCheckValue(OFFSET_DATE_TIME_VAL.toString(), sql("this", TIMESTAMP_WITH_TIME_ZONE), TIMESTAMP_WITH_TIME_ZONE, OFFSET_DATE_TIME_VAL);
-        putAndCheckFailure("bad", sql("this", TIMESTAMP_WITH_TIME_ZONE), DATA_EXCEPTION, "Cannot parse VARCHAR value to TIMESTAMP_WITH_TIME_ZONE");
+        putAndCheckValue(STANDARD_LOCAL_OFFSET_TIME_VAL, sql("this", TIMESTAMP_WITH_TIME_ZONE), TIMESTAMP_WITH_TIME_ZONE, OFFSET_DATE_TIME_VAL);
+        putAndCheckFailure("bad", sql("this", TIMESTAMP_WITH_TIME_ZONE), DATA_EXCEPTION, "Cannot parse VARCHAR value to TIMESTAMP WITH TIME ZONE");
 
         // Object
         putAndCheckValue(new ExpressionValue.StringVal(), sql("field1", OBJECT), OBJECT, null);
@@ -259,18 +264,24 @@ public class CastFunctionIntegrationTest extends ExpressionTestSupport {
         checkFailure0(sql(stringLiteral("false"), DOUBLE), PARSING, "CAST function cannot convert literal 'false' to type DOUBLE: Cannot parse VARCHAR value to DOUBLE");
 
         // VARCHAR -> DATE
+        checkValue0(sql(stringLiteral("2020-1-01"), DATE), DATE, LocalDate.parse("2020-01-01"));
+        checkValue0(sql(stringLiteral("2020-9-1"), DATE), DATE, LocalDate.parse("2020-09-01"));
         checkValue0(sql(stringLiteral("2020-01-01"), DATE), DATE, LocalDate.parse("2020-01-01"));
         checkFailure0(sql(stringLiteral("foo"), DATE), PARSING, "CAST function cannot convert literal 'foo' to type DATE: Cannot parse VARCHAR value to DATE");
 
         // VARCHAR -> TIME
         checkValue0(sql(stringLiteral("00:00"), TIME), TIME, LocalTime.parse("00:00"));
+        checkValue0(sql(stringLiteral("0:0"), TIME), TIME, LocalTime.parse("00:00"));
+        checkValue0(sql(stringLiteral("9:0"), TIME), TIME, LocalTime.parse("09:00"));
         checkValue0(sql(stringLiteral("00:01"), TIME), TIME, LocalTime.parse("00:01"));
+        checkValue0(sql(stringLiteral("00:1"), TIME), TIME, LocalTime.parse("00:01"));
         checkValue0(sql(stringLiteral("02:01"), TIME), TIME, LocalTime.parse("02:01"));
         checkValue0(sql(stringLiteral("00:00:00"), TIME), TIME, LocalTime.parse("00:00:00"));
         checkValue0(sql(stringLiteral("00:00:01"), TIME), TIME, LocalTime.parse("00:00:01"));
         checkValue0(sql(stringLiteral("00:02:01"), TIME), TIME, LocalTime.parse("00:02:01"));
         checkValue0(sql(stringLiteral("03:02:01"), TIME), TIME, LocalTime.parse("03:02:01"));
 
+        checkFailure0(sql(stringLiteral("9"), TIME), PARSING, "CAST function cannot convert literal '9' to type TIME: Cannot parse VARCHAR value to TIME");
         checkFailure0(sql(stringLiteral("00:60"), TIME), PARSING, "CAST function cannot convert literal '00:60' to type TIME: Cannot parse VARCHAR value to TIME");
         checkFailure0(sql(stringLiteral("00:00:60"), TIME), PARSING, "CAST function cannot convert literal '00:00:60' to type TIME: Cannot parse VARCHAR value to TIME");
         checkFailure0(sql(stringLiteral("25:00"), TIME), PARSING, "CAST function cannot convert literal '25:00' to type TIME: Cannot parse VARCHAR value to TIME");
@@ -287,7 +298,7 @@ public class CastFunctionIntegrationTest extends ExpressionTestSupport {
 
         // VARCHAR -> TIMESTAMP_WITH_TIME_ZONE
         checkValue0(sql(stringLiteral(OFFSET_DATE_TIME_VAL), TIMESTAMP_WITH_TIME_ZONE), TIMESTAMP_WITH_TIME_ZONE, OFFSET_DATE_TIME_VAL);
-        checkFailure0(sql(stringLiteral("foo"), TIMESTAMP_WITH_TIME_ZONE), PARSING, "CAST function cannot convert literal 'foo' to type TIMESTAMP_WITH_TIME_ZONE: Cannot parse VARCHAR value to TIMESTAMP_WITH_TIME_ZONE");
+        checkFailure0(sql(stringLiteral("foo"), TIMESTAMP_WITH_TIME_ZONE), PARSING, "CAST function cannot convert literal 'foo' to type TIMESTAMP WITH TIME ZONE: Cannot parse VARCHAR value to TIMESTAMP WITH TIME ZONE");
 
         // VARCHAR -> OBJECT
         checkValue0(sql(stringLiteral("foo"), OBJECT), OBJECT, "foo");
@@ -1119,11 +1130,10 @@ public class CastFunctionIntegrationTest extends ExpressionTestSupport {
     }
 
     private static String sql(String source, SqlColumnType targetType) {
-        return sql(source, targetType.name());
-    }
-
-    private static String sql(String source, String target) {
-        return "SELECT CAST(" + source + " AS " + target + ") FROM map";
+        // TODO: reduce to else branch once engines are merged and custom date-time parsing is used
+        return targetType == TIMESTAMP_WITH_TIME_ZONE
+                ? "SELECT CAST(" + source + " AS TIMESTAMP WITH TIME ZONE) FROM (VALUES(1)) JOIN map ON 1 = 1"
+                : "SELECT CAST(" + source + " AS " + targetType + ") FROM map";
     }
 
     protected String castError(SqlColumnType type1, SqlColumnType type2) {

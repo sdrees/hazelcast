@@ -1,15 +1,15 @@
 /*
- * Copyright (c) 2008-2021, Hazelcast, Inc. All Rights Reserved.
+ * Copyright 2021 Hazelcast Inc.
  *
- * Licensed under the Apache License, Version 2.0 (the "License");
+ * Licensed under the Hazelcast Community License (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
  *
- * http://www.apache.org/licenses/LICENSE-2.0
+ * http://hazelcast.com/hazelcast-community-license
  *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * WITHOUT WARRANTIES OF ANY KIND, either express or implied.
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
@@ -219,9 +219,9 @@ public class SqlCsvTest extends SqlTestSupport {
                         + ", \"timestampTz\""
                         + " FROM TABLE ("
                         + "csv_file ("
-                        + " path => '" + RESOURCES_PATH + "'"
-                        + " , glob => 'file.csv'"
-                        + " , options => MAP['key', 'value']"
+                        + "path => '" + RESOURCES_PATH + "'"
+                        + ", options => MAP['key', 'value']"
+                        + ", glob => 'file.csv'"
                         + ")"
                         + ")",
                 singletonList(new Row(
@@ -243,20 +243,70 @@ public class SqlCsvTest extends SqlTestSupport {
     }
 
     @Test
+    public void test_tableFunctionWithExplicitNullArgument() {
+        assertRowsAnyOrder(
+                "SELECT "
+                        + "string"
+                        + ", \"int\""
+                        + " FROM TABLE ("
+                        + "csv_file ("
+                        + "path => '" + RESOURCES_PATH + "'"
+                        + ", options => null"
+                        + ", glob => 'file.csv'"
+                        + ")"
+                        + ")",
+                singletonList(new Row("string", "2147483647"))
+        );
+    }
+
+    @Test
+    public void test_tableFunctionWithArgumentTypeMismatch() {
+        assertThatThrownBy(() -> sqlService.execute("SELECT * FROM TABLE ("
+                + "csv_file ("
+                + "path => '" + RESOURCES_PATH + "'"
+                + ", glob => MAP['key', 'value']"
+                + ")"
+                + ")"
+        )).hasMessageContaining("Cannot apply 'CSV_FILE' function to [VARCHAR, MAP]");
+    }
+
+    @Test
+    public void test_tableFunctionWithUnknownParameter() {
+        assertThatThrownBy(() -> sqlService.execute("SELECT * FROM TABLE ("
+                + "csv_file ("
+                + "non_existing => 1"
+                + ")"
+                + ")"
+        )).hasMessageContaining("Unknown argument name 'non_existing'");
+    }
+
+    @Test
     public void test_tableFunctionWithDynamicParameters() {
         assertRowsAnyOrder(
                 "SELECT CAST(long AS BIGINT) - ?"
                         + " FROM TABLE ("
                         + "csv_file ("
-                        + " path => '" + RESOURCES_PATH + "'"
-                        + " , glob => 'file.csv'"
-                        + " , options => MAP['key', 'value']"
+                        + "path => ?"
+                        + ", glob => ?"
+                        + ", options => MAP[?, ?]"
                         + ")"
                         + ")"
                         + "WHERE byte = ?",
-                asList(6, "127"),
+                asList(6, RESOURCES_PATH, "file.csv", "key", "value", "127"),
                 singletonList(new Row(9223372036854775801L))
         );
+    }
+
+    @Test
+    public void test_tableFunctionWithDynamicParametersAndArgumentTypeMismatch() {
+        assertThatThrownBy(() -> sqlService.execute("SELECT *"
+                + " FROM TABLE ("
+                + "csv_file ("
+                + "path => '" + RESOURCES_PATH + "'"
+                + ", glob => ?"
+                + ")"
+                + ")", 1
+        )).hasMessageContaining("Parameter at position 0 must be of VARCHAR type, but INTEGER was found");
     }
 
     @Test
@@ -272,7 +322,7 @@ public class SqlCsvTest extends SqlTestSupport {
         );
 
         assertThatThrownBy(() -> sqlService.execute("SELECT * FROM " + name).iterator().hasNext())
-                .hasMessageEndingWith("Cannot parse VARCHAR value to INTEGER");
+                .hasMessageContaining("Cannot parse VARCHAR value to INTEGER");
     }
 
     @Test

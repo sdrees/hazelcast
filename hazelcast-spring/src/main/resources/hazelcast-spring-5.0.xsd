@@ -779,6 +779,7 @@
                         <xs:element name="cache" minOccurs="0" maxOccurs="unbounded">
                             <xs:complexType>
                                 <xs:sequence>
+                                    <xs:element name="merkle-tree" type="merkle-tree" minOccurs="0"/>
                                     <xs:element name="eviction" type="eviction" minOccurs="0">
                                         <xs:annotation>
                                             <xs:documentation>
@@ -5324,6 +5325,28 @@
                                 </xs:documentation>
                             </xs:annotation>
                         </xs:element>
+                        <xs:element name="max-processor-accumulated-records" type="xs:long" minOccurs="0">
+                            <xs:annotation>
+                                <xs:documentation>
+                                    Sets the maximum number of records that can be accumulated by any single
+                                    processor instance.
+                                    Operations like grouping, sorting or joining require certain amount of
+                                    records to be accumulated before they can proceed. You can set this option
+                                    to reduce the probability of OutOfMemoryError.
+                                    This option applies to each processor instance separately, hence the
+                                    effective limit of records accumulated by each cluster member is influenced
+                                    by the vertex's localParallelism and the number of jobs in the cluster.
+                                    Currently, maxProcessorAccumulatedRecords limits:
+                                    1. number of items sorted by the sort operation
+                                    2. number of distinct keys accumulated by aggregation operations
+                                    3. number of entries in each hash-join lookup table
+                                    4. number of entries in stateful transforms
+                                    5. number of distinct items in distinct operation
+                                    Note: the limit does not apply to streaming aggregations.
+                                    The default value is Long.MAX_VALUE.
+                                </xs:documentation>
+                            </xs:annotation>
+                        </xs:element>
                     </xs:all>
                 </xs:complexType>
             </xs:element>
@@ -5393,6 +5416,21 @@
                 </xs:complexType>
             </xs:element>
         </xs:all>
+        <xs:attribute name="enabled" type="xs:boolean" default="true">
+            <xs:annotation>
+                <xs:documentation>
+                    Specifies whether the Jet Service is enabled or not. Values can be true or false.
+                </xs:documentation>
+            </xs:annotation>
+        </xs:attribute>
+        <xs:attribute name="resource-upload-enabled" type="xs:boolean" default="false">
+            <xs:annotation>
+                <xs:documentation>
+                    Specifies whether the resource uploading for Jet jobs is enabled or not.
+                    Values can be true or false.
+                </xs:documentation>
+            </xs:annotation>
+        </xs:attribute>
     </xs:complexType>
 
     <xs:complexType name="realms">
@@ -5415,6 +5453,7 @@
             <xs:element name="tls" type="tls-authentication"/>
             <xs:element name="ldap" type="ldap-authentication"/>
             <xs:element name="kerberos" type="kerberos-authentication"/>
+            <xs:element name="simple" type="simple-authentication"/>
         </xs:choice>
     </xs:complexType>
 
@@ -5474,6 +5513,22 @@
             <xs:element name="keytab-file" type="xs:string" minOccurs="0"/>
             <xs:element name="ldap" type="ldap-authentication" minOccurs="0"/>
         </xs:all>
+    </xs:complexType>
+
+    <xs:complexType name="simple-authentication">
+        <xs:choice maxOccurs="unbounded">
+            <xs:element name="user" type="simple-user" minOccurs="0" maxOccurs="unbounded"/>
+            <xs:element name="role-separator" type="xs:string" minOccurs="0" default=","/>
+        </xs:choice>
+    </xs:complexType>
+    <xs:complexType name="simple-user">
+        <xs:complexContent>
+            <xs:extension base="username-password">
+                <xs:choice maxOccurs="unbounded">
+                    <xs:element name="role" type="xs:string" minOccurs="0" maxOccurs="unbounded"/>
+                </xs:choice>
+            </xs:extension>
+        </xs:complexContent>
     </xs:complexType>
 
     <xs:complexType name="identity">

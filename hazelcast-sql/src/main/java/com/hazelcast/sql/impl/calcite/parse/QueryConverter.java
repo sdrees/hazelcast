@@ -1,15 +1,15 @@
 /*
- * Copyright (c) 2008-2021, Hazelcast, Inc. All Rights Reserved.
+ * Copyright 2021 Hazelcast Inc.
  *
- * Licensed under the Apache License, Version 2.0 (the "License");
+ * Licensed under the Hazelcast Community License (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
  *
- * http://www.apache.org/licenses/LICENSE-2.0
+ * http://hazelcast.com/hazelcast-community-license
  *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * WITHOUT WARRANTIES OF ANY KIND, either express or implied.
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
@@ -49,11 +49,15 @@ public class QueryConverter {
     /** Whether to trim unused fields. The trimming is needed after subquery elimination. */
     private static final boolean TRIM_UNUSED_FIELDS = true;
 
+    /** Increase the maximum number of elements in the RHS to convert the IN operator to a sequence of OR comparisons. */
+    private static final int HAZELCAST_IN_ELEMENTS_THRESHOLD = 10_000;
+
     private static final SqlToRelConverter.Config CONFIG;
 
     static {
         SqlToRelConverter.ConfigBuilder configBuilder = SqlToRelConverter.configBuilder()
                                                                          .withExpand(EXPAND)
+                                                                         .withInSubQueryThreshold(HAZELCAST_IN_ELEMENTS_THRESHOLD)
                                                                          .withTrimUnusedFields(TRIM_UNUSED_FIELDS);
 
         CONFIG = configBuilder.build();

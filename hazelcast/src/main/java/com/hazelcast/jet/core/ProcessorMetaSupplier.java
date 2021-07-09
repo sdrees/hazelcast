@@ -17,15 +17,18 @@
 package com.hazelcast.jet.core;
 
 import com.hazelcast.cluster.Address;
+import com.hazelcast.core.HazelcastInstance;
 import com.hazelcast.function.FunctionEx;
 import com.hazelcast.function.SupplierEx;
 import com.hazelcast.internal.serialization.SerializableByConvention;
 import com.hazelcast.jet.JetException;
 import com.hazelcast.jet.JetInstance;
+import com.hazelcast.jet.JetService;
 import com.hazelcast.jet.config.JobConfig;
 import com.hazelcast.jet.config.ProcessingGuarantee;
 import com.hazelcast.jet.impl.processor.ExpectNothingP;
 import com.hazelcast.jet.impl.processor.MetaSupplierFromProcessorSupplier;
+import com.hazelcast.jet.pipeline.Pipeline;
 import com.hazelcast.logging.ILogger;
 import com.hazelcast.nio.ObjectDataInput;
 import com.hazelcast.nio.ObjectDataOutput;
@@ -69,7 +72,7 @@ import static java.util.Collections.singletonList;
  * precisely parameterize each {@code Processor} instance that will be created on
  * each member.
  *
- * @since 3.0
+ * @since Jet 3.0
  */
 @FunctionalInterface
 public interface ProcessorMetaSupplier extends Serializable {
@@ -79,7 +82,7 @@ public interface ProcessorMetaSupplier extends Serializable {
      * no predefined metadata; this facility exists to allow the DAG vertices
      * to contribute some information to the execution planning phase.
      *
-     * @since 4.0
+     * @since Jet 4.0
      */
     @Nonnull
     default Map<String, String> getTags() {
@@ -132,9 +135,13 @@ public interface ProcessorMetaSupplier extends Serializable {
      * <p>
      * If you rely on the fact that this method is run once per cluster, it can
      * happen that it is not called at all, if the coordinator member crashed.
+     * It can be also called multiple times, if the job restarts.
      *
      * @param error the exception (if any) that caused the job to fail;
-     *              {@code null} in the case of successful job completion
+     *              {@code null} in the case of successful job completion.
+     *              Note that it might not be the actual error that caused the job
+     *              to fail - it can be several other exceptions. We only guarantee
+     *              that it's non-null if the job didn't complete successfully.
      */
     default void close(@Nullable Throwable error) throws Exception {
     }
@@ -301,7 +308,7 @@ public interface ProcessorMetaSupplier extends Serializable {
                                     + "supports only total parallelism of 1. Local parallelism must be 1.");
                 }
                 String key = StringPartitioningStrategy.getPartitionKey(partitionKey);
-                ownerAddress = context.jetInstance().getHazelcastInstance().getPartitionService()
+                ownerAddress = context.hazelcastInstance().getPartitionService()
                                       .getPartition(key).getOwner().getAddress();
             }
 
@@ -341,6 +348,7 @@ public interface ProcessorMetaSupplier extends Serializable {
             @Nonnull ProcessorSupplier supplier,
             @Nonnull Address memberAddress
     ) {
+
         /**
          * A meta-supplier that will only use the given {@code ProcessorSupplier}
          * on a node with given {@link Address}.
@@ -403,14 +411,24 @@ public interface ProcessorMetaSupplier extends Serializable {
      * Context passed to the meta-supplier at init time on the member that
      * received a job request from the client.
      *
-     * @since 3.0
+     * @since Jet 3.0
      */
     interface Context {
 
         /**
-         * Returns the current Jet instance.
+         * Returns the current Hazelcast instance.
+         * @since 5.0
          */
         @Nonnull
+        HazelcastInstance hazelcastInstance();
+
+        /**
+         * Returns the current Jet instance.
+         *
+         * @deprecated Use {@code hazelcastInstance().getJet()} instead.
+         */
+        @Nonnull
+        @Deprecated
         JetInstance jetInstance();
 
         /**
@@ -480,5 +498,24 @@ public interface ProcessorMetaSupplier extends Serializable {
          * Returns the guarantee for current job.
          */
         ProcessingGuarantee processingGuarantee();
+
+        /**
+         * Returns the maximum number of records that can be accumulated by any
+         * single {@link Processor}.
+         */
+        long maxProcessorAccumulatedRecords();
+
+        /**
+         * Returns if this job runs as a light job, see {@link
+         * JetService#newLightJob(Pipeline)}.
+         */
+        boolean isLightJob();
+
+        /**
+         * Returns the partition assignment used by this job. This is the
+         * assignment partitioned edges will use and the assignment processors
+         * dealing with Hazelcast data structures should use.
+         */
+        Map<Address, int[]> partitionAssignment();
     }
 }

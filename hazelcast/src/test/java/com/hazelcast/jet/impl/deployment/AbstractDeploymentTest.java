@@ -16,7 +16,8 @@
 
 package com.hazelcast.jet.impl.deployment;
 
-import com.hazelcast.jet.JetInstance;
+import com.hazelcast.core.HazelcastInstance;
+import com.hazelcast.jet.JetService;
 import com.hazelcast.jet.Job;
 import com.hazelcast.jet.SimpleTestInClusterSupport;
 import com.hazelcast.jet.Traversers;
@@ -62,18 +63,25 @@ public abstract class AbstractDeploymentTest extends SimpleTestInClusterSupport 
 
     public static final String CLASS_DIRECTORY = "src/test/class";
 
-    protected abstract JetInstance getJetInstance();
+    // We must use 1 member because the tests use assertCollected which runs only on
+    // one member to check the existence of files. If 2 members are used, the path on the
+    // other member might be deleted before the check and the check will fail.
+    static final int MEMBER_COUNT = 1;
 
+    protected abstract HazelcastInstance getHazelcastInstance();
+
+    protected JetService getJet() {
+        return getHazelcastInstance().getJet();
+    }
     @Test
     public void testDeployment_whenJarAddedAsResource_thenClassesAvailableOnClassLoader() throws Throwable {
         DAG dag = new DAG();
         dag.newVertex("load class", () -> new LoadClassesIsolated(true));
 
-        JetInstance jetInstance = getJetInstance();
         JobConfig jobConfig = new JobConfig();
         jobConfig.addJar(this.getClass().getResource("/deployment/sample-pojo-1.0-person.jar"));
 
-        executeAndPeel(jetInstance.newJob(dag, jobConfig));
+        executeAndPeel(getJet().newJob(dag, jobConfig));
     }
 
     @Test
@@ -87,7 +95,7 @@ public abstract class AbstractDeploymentTest extends SimpleTestInClusterSupport 
         Class<?> appearance = urlClassLoader.loadClass("com.sample.pojo.person.Person$Appereance");
         jobConfig.addClass(appearance);
 
-        executeAndPeel(getJetInstance().newJob(dag, jobConfig));
+        executeAndPeel(getJet().newJob(dag, jobConfig));
     }
 
     @Test
@@ -102,7 +110,7 @@ public abstract class AbstractDeploymentTest extends SimpleTestInClusterSupport 
         Class<?> appearanceClz = urlClassLoader.loadClass("com.sample.pojo.person.Person$Appereance");
         jobConfig.addClass(appearanceClz);
 
-        Job job = getJetInstance().newJob(dag, jobConfig);
+        Job job = getJet().newJob(dag, jobConfig);
         assertJobStatusEventually(job, RUNNING);
         cancelAndJoin(job);
         if (LoadClassesIsolated.assertionErrorInClose != null) {
@@ -121,7 +129,7 @@ public abstract class AbstractDeploymentTest extends SimpleTestInClusterSupport 
         Class<?> worker = urlClassLoader.loadClass("com.sample.lambda.Worker");
         jobConfig.addClass(worker);
 
-        executeAndPeel(getJetInstance().newJob(dag, jobConfig));
+        executeAndPeel(getJet().newJob(dag, jobConfig));
     }
 
     @Test
@@ -132,7 +140,7 @@ public abstract class AbstractDeploymentTest extends SimpleTestInClusterSupport 
         JobConfig jobConfig = new JobConfig();
         jobConfig.setClassLoaderFactory(new MyJobClassLoaderFactory());
 
-        executeAndPeel(getJetInstance().newJob(dag, jobConfig));
+        executeAndPeel(getJet().newJob(dag, jobConfig));
     }
 
     @Test
@@ -140,11 +148,10 @@ public abstract class AbstractDeploymentTest extends SimpleTestInClusterSupport 
         DAG dag = new DAG();
         dag.newVertex("load class", () -> new LoadClassesIsolated(true));
 
-        JetInstance jetInstance = getJetInstance();
         JobConfig jobConfig = new JobConfig();
         jobConfig.addJarsInZip(this.getClass().getResource("/zip-resources/person-jar.zip"));
 
-        executeAndPeel(jetInstance.newJob(dag, jobConfig));
+        executeAndPeel(getJet().newJob(dag, jobConfig));
     }
 
     @Test
@@ -157,11 +164,10 @@ public abstract class AbstractDeploymentTest extends SimpleTestInClusterSupport 
         notOnClasspath.add("com.sample.pojo.address.Address");
         dag.newVertex("load class", () -> new LoadClassesIsolated(onClasspath, notOnClasspath, true));
 
-        JetInstance jetInstance = getJetInstance();
         JobConfig jobConfig = new JobConfig();
         jobConfig.addJarsInZip(this.getClass().getResource("/zip-resources/person-car-jar.zip"));
 
-        executeAndPeel(jetInstance.newJob(dag, jobConfig));
+        executeAndPeel(getJet().newJob(dag, jobConfig));
     }
 
     @Test
@@ -170,11 +176,10 @@ public abstract class AbstractDeploymentTest extends SimpleTestInClusterSupport 
 
         Pipeline pipeline = attachFilePipeline(fileToAttach);
 
-        JetInstance jetInstance = getJetInstance();
         JobConfig jobConfig = new JobConfig();
         jobConfig.attachFile(fileToAttach, fileToAttach);
 
-        executeAndPeel(jetInstance.newJob(pipeline, jobConfig));
+        executeAndPeel(getJet().newJob(pipeline, jobConfig));
     }
 
     @Test
@@ -184,11 +189,10 @@ public abstract class AbstractDeploymentTest extends SimpleTestInClusterSupport 
 
         Pipeline pipeline = attachFilePipeline(fileName);
 
-        JetInstance jetInstance = getJetInstance();
         JobConfig jobConfig = new JobConfig();
         jobConfig.attachFile(fileToAttach);
 
-        executeAndPeel(jetInstance.newJob(pipeline, jobConfig));
+        executeAndPeel(getJet().newJob(pipeline, jobConfig));
     }
 
     private Pipeline attachFilePipeline(String attachedFile) {
@@ -217,11 +221,10 @@ public abstract class AbstractDeploymentTest extends SimpleTestInClusterSupport 
 
         Pipeline pipeline = attachDirectoryPipeline(dirToAttach);
 
-        JetInstance jetInstance = getJetInstance();
         JobConfig jobConfig = new JobConfig();
         jobConfig.attachDirectory(dirToAttach, dirToAttach);
 
-        executeAndPeel(jetInstance.newJob(pipeline, jobConfig));
+        executeAndPeel(getJet().newJob(pipeline, jobConfig));
     }
 
     @Test
@@ -231,11 +234,10 @@ public abstract class AbstractDeploymentTest extends SimpleTestInClusterSupport 
 
         Pipeline pipeline = attachDirectoryPipeline(dirName);
 
-        JetInstance jetInstance = getJetInstance();
         JobConfig jobConfig = new JobConfig();
         jobConfig.attachDirectory(dirToAttach);
 
-        executeAndPeel(jetInstance.newJob(pipeline, jobConfig));
+        executeAndPeel(getJet().newJob(pipeline, jobConfig));
     }
 
     private Pipeline attachDirectoryPipeline(String attachedDirectory) {
@@ -277,11 +279,10 @@ public abstract class AbstractDeploymentTest extends SimpleTestInClusterSupport 
                 }))
                 .writeTo(Sinks.logger());
 
-        JetInstance jetInstance = getJetInstance();
         JobConfig jobConfig = new JobConfig();
         jobConfig.attachDirectory(dirToAttach);
 
-        executeAndPeel(jetInstance.newJob(pipeline, jobConfig));
+        executeAndPeel(getJet().newJob(pipeline, jobConfig));
     }
 
     @Test
@@ -308,14 +309,13 @@ public abstract class AbstractDeploymentTest extends SimpleTestInClusterSupport 
                         (state, integer) -> state)
                 .writeTo(Sinks.logger());
 
-        JetInstance jetInstance = getJetInstance();
         JobConfig jobConfig = new JobConfig();
         jobConfig.attachDirectory(dirToAttach1, dirToAttach1);
         jobConfig.attachDirectory(dirToAttach2, dirToAttach2);
         jobConfig.attachFile(fileToAttach1, fileToAttach1);
         jobConfig.attachFile(fileToAttach2, fileToAttach2);
 
-        executeAndPeel(jetInstance.newJob(pipeline, jobConfig));
+        executeAndPeel(getJet().newJob(pipeline, jobConfig));
     }
 
     @Test
@@ -326,7 +326,7 @@ public abstract class AbstractDeploymentTest extends SimpleTestInClusterSupport 
         JobConfig jobConfig = new JobConfig();
         jobConfig.addClasspathResource(this.getClass().getResource("/deployment/resource.txt"), "customId");
 
-        executeAndPeel(getJetInstance().newJob(dag, jobConfig));
+        executeAndPeel(getJet().newJob(dag, jobConfig));
     }
 
     static class MyJobClassLoaderFactory implements JobClassLoaderFactory {

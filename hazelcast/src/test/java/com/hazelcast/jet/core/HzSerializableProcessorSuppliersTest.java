@@ -16,6 +16,7 @@
 
 package com.hazelcast.jet.core;
 
+import com.hazelcast.config.Config;
 import com.hazelcast.function.SupplierEx;
 import com.hazelcast.internal.nio.ClassLoaderUtil;
 import com.hazelcast.jet.SimpleTestInClusterSupport;
@@ -41,7 +42,9 @@ public class HzSerializableProcessorSuppliersTest extends SimpleTestInClusterSup
 
     @BeforeClass
     public static void beforeClass() {
-        initialize(2, null);
+        Config config = smallInstanceConfig();
+        config.getJetConfig().setResourceUploadEnabled(true);
+        initialize(2, config);
     }
 
     @Test
@@ -71,6 +74,6 @@ public class HzSerializableProcessorSuppliersTest extends SimpleTestInClusterSup
     private void submitJob() {
         JobConfig config = new JobConfig();
         config.addJar(url);
-        instances()[1].newJob(dag, config).join();
+        instances()[1].getJet().newJob(dag, config).join();
     }
 }

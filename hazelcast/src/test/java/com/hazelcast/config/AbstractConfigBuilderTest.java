@@ -73,7 +73,7 @@ public abstract class AbstractConfigBuilderTest extends HazelcastTestSupport {
     public abstract void testJoinValidation();
 
     @Test
-    public abstract void testSecurityInterceptorConfig();
+    public abstract void testSecurityConfig();
 
     @Test
     public abstract void readAwsConfig();
@@ -245,8 +245,6 @@ public abstract class AbstractConfigBuilderTest extends HazelcastTestSupport {
 
     @Test
     public abstract void testCachePartitionLostListenerConfigReadOnly();
-
-    protected abstract Config buildConfig(String xml);
 
     @Test
     public abstract void readMulticastConfig();

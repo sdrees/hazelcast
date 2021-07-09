@@ -1,15 +1,15 @@
 /*
- * Copyright (c) 2008-2021, Hazelcast, Inc. All Rights Reserved.
+ * Copyright 2021 Hazelcast Inc.
  *
- * Licensed under the Apache License, Version 2.0 (the "License");
+ * Licensed under the Hazelcast Community License (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
  *
- * http://www.apache.org/licenses/LICENSE-2.0
+ * http://hazelcast.com/hazelcast-community-license
  *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * WITHOUT WARRANTIES OF ANY KIND, either express or implied.
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
@@ -27,14 +27,13 @@ import org.apache.calcite.sql.SqlCall;
 import org.apache.calcite.sql.SqlCallBinding;
 import org.apache.calcite.sql.SqlDataTypeSpec;
 import org.apache.calcite.sql.SqlFunction;
-import org.apache.calcite.sql.SqlIdentifier;
 import org.apache.calcite.sql.SqlInsert;
 import org.apache.calcite.sql.SqlKind;
-import org.apache.calcite.sql.SqlLiteral;
 import org.apache.calcite.sql.SqlNode;
 import org.apache.calcite.sql.SqlNodeList;
 import org.apache.calcite.sql.SqlSelect;
 import org.apache.calcite.sql.SqlUpdate;
+import org.apache.calcite.sql.SqlUserDefinedTypeNameSpec;
 import org.apache.calcite.sql.SqlUtil;
 import org.apache.calcite.sql.parser.SqlParserPos;
 import org.apache.calcite.sql.type.SqlTypeFamily;
@@ -46,6 +45,7 @@ import java.util.List;
 import java.util.function.Consumer;
 
 import static com.hazelcast.sql.impl.type.QueryDataType.OBJECT;
+import static org.apache.calcite.sql.type.SqlTypeName.ANY;
 import static org.apache.calcite.sql.type.SqlTypeName.NULL;
 import static org.apache.calcite.util.Static.RESOURCE;
 
@@ -85,15 +85,19 @@ public final class HazelcastTypeCoercion extends TypeCoercionImpl {
                     SqlParserPos.ZERO
             );
         } else {
-            targetTypeSpec = SqlTypeUtil.convertTypeToSpec(targetType);
+            if (targetType.getSqlTypeName() == ANY) {
+                // without this the subsequent call to UnsupportedOperationVerifier will fail with "we do not support ANY"
+                targetTypeSpec =
+                        new SqlDataTypeSpec(new SqlUserDefinedTypeNameSpec("OBJECT", SqlParserPos.ZERO), SqlParserPos.ZERO)
+                                .withNullable(targetType.isNullable());
+            } else {
+                targetTypeSpec = SqlTypeUtil.convertTypeToSpec(targetType);
+            }
         }
 
         SqlNode cast = cast(node, targetTypeSpec);
-
         replaceFn.accept(cast);
-
         validator.deriveType(scope, cast);
-
         return true;
     }
 
@@ -111,11 +115,6 @@ public final class HazelcastTypeCoercion extends TypeCoercionImpl {
         } else {
             return HazelcastSqlOperatorTable.CAST.createCall(SqlParserPos.ZERO, node, targetTypeSpec);
         }
-    }
-
-    @Override
-    protected boolean coerceColumnType(SqlValidatorScope scope, SqlNodeList nodeList, int index, RelDataType targetType) {
-        throw new UnsupportedOperationException("Should not be called");
     }
 
     private boolean requiresCast(SqlValidatorScope scope, SqlNode node, RelDataType to) {
@@ -158,12 +157,12 @@ public final class HazelcastTypeCoercion extends TypeCoercionImpl {
         switch (query.getKind()) {
             case SELECT:
                 SqlSelect selectNode = (SqlSelect) query;
-                SqlValidatorScope scope1 = validator.getSelectScope(selectNode);
-                if (!rowTypeElementCoercion(scope1, selectNode.getSelectList().get(columnIndex), targetType,
+                SqlValidatorScope selectScope = validator.getSelectScope(selectNode);
+                if (!rowTypeElementCoercion(selectScope, selectNode.getSelectList().get(columnIndex), targetType,
                         newNode -> selectNode.getSelectList().set(columnIndex, newNode))) {
                     return false;
                 }
-                updateInferredColumnType(scope1, query, columnIndex, targetType);
+                updateInferredColumnType(selectScope, query, columnIndex, targetType);
                 return true;
             case VALUES:
                 for (SqlNode rowConstructor : ((SqlCall) query).getOperandList()) {
@@ -179,12 +178,15 @@ public final class HazelcastTypeCoercion extends TypeCoercionImpl {
         }
     }
 
-    private boolean rowTypeElementCoercion(
+    public boolean rowTypeElementCoercion(
             SqlValidatorScope scope,
             SqlNode rowElement,
             RelDataType targetType,
             Consumer<SqlNode> replaceFn
     ) {
+        if (targetType.equals(scope.getValidator().getUnknownType())) {
+            return false;
+        }
         RelDataType sourceType = validator.deriveType(scope, rowElement);
 
         QueryDataType sourceHzType = HazelcastTypeUtils.toHazelcastType(sourceType.getSqlTypeName());
@@ -197,7 +199,8 @@ public final class HazelcastTypeCoercion extends TypeCoercionImpl {
 
         boolean valid = sourceAndTargetAreNumeric(targetHzType, sourceHzType)
                 || sourceAndTargetAreTemporalAndSourceCanBeConvertedToTarget(targetHzType, sourceHzType)
-                || targetIsTemporalAndSourceIsVarcharLiteral(targetHzType, sourceHzType, rowElement);
+                || targetIsTemporalAndSourceIsVarcharLiteral(targetHzType, sourceHzType, rowElement)
+                || sourceHzType.getTypeFamily() == QueryDataTypeFamily.NULL;
 
         if (!valid) {
             // Types cannot be converted to each other, fail to coerce
@@ -222,18 +225,22 @@ public final class HazelcastTypeCoercion extends TypeCoercionImpl {
 
     private static boolean targetIsTemporalAndSourceIsVarcharLiteral(QueryDataType targetHzType,
                                                                      QueryDataType sourceHzType, SqlNode sourceNode) {
-        return targetHzType.getTypeFamily().isTemporal()
-                && sourceHzType.getTypeFamily() == QueryDataTypeFamily.VARCHAR
-                && sourceNode instanceof SqlLiteral;
+        SqlKind sourceKind = sourceNode.getKind();
+        if (sourceKind == SqlKind.AS) {
+            return targetIsTemporalAndSourceIsVarcharLiteral(
+                    targetHzType,
+                    sourceHzType,
+                    ((SqlBasicCall) sourceNode).operand(0)
+            );
+        } else {
+            return targetHzType.getTypeFamily().isTemporal()
+                    && sourceHzType.getTypeFamily() == QueryDataTypeFamily.VARCHAR
+                    && sourceKind == SqlKind.LITERAL;
+        }
     }
 
     @Override
     public boolean caseWhenCoercion(SqlCallBinding callBinding) {
-        throw new UnsupportedOperationException("Should not be called");
-    }
-
-    @Override
-    public boolean inOperationCoercion(SqlCallBinding binding) {
         throw new UnsupportedOperationException("Should not be called");
     }
 
@@ -248,28 +255,7 @@ public final class HazelcastTypeCoercion extends TypeCoercionImpl {
 
     @Override
     public boolean userDefinedFunctionCoercion(SqlValidatorScope scope, SqlCall call, SqlFunction function) {
-        // the code below is copied from superclass implementation, added here to ensure that we never rely on Calcite's
-        // coercion logic, but instead provide our own, to fully control operator behavior
-        final List<RelDataType> paramTypes = function.getParamTypes();
-        assert paramTypes != null;
-        boolean coerced = false;
-        for (int i = 0; i < call.operandCount(); i++) {
-            SqlNode operand = call.operand(i);
-            if (operand.getKind() == SqlKind.ARGUMENT_ASSIGNMENT) {
-                final List<SqlNode> operandList = ((SqlCall) operand).getOperandList();
-                String name = ((SqlIdentifier) operandList.get(1)).getSimple();
-                int formalIndex = function.getParamNames().indexOf(name);
-                if (formalIndex < 0) {
-                    return false;
-                }
-                // Column list operand type is not supported now.
-                coerced = coerceOperandType(scope, (SqlCall) operand, 0,
-                        paramTypes.get(formalIndex)) || coerced;
-            } else {
-                coerced = coerceOperandType(scope, call, i, paramTypes.get(i)) || coerced;
-            }
-        }
-        return coerced;
+        throw new UnsupportedOperationException("Should not be called");
     }
 
     @Override
@@ -289,7 +275,7 @@ public final class HazelcastTypeCoercion extends TypeCoercionImpl {
             RelDataType targetType = targetFields.get(i).getType();
             if (!SqlTypeUtil.equalSansNullability(validator.getTypeFactory(), sourceType, targetType)
                     && !HazelcastTypeUtils.canCast(sourceType, targetType)
-                    || !coerceSourceRowType(scope, query, i, targetType)) {
+                    || !coerceSourceRowType(scope, query, i, fieldCount, targetType)) {
                 SqlNode node = getNthExpr(query, i, fieldCount);
                 throw scope.getValidator().newValidationError(node,
                         RESOURCE.typeNotAssignable(
@@ -302,7 +288,6 @@ public final class HazelcastTypeCoercion extends TypeCoercionImpl {
         // Instead, we throw the validation error ourselves above if we can't assign.
         return true;
     }
-
 
     /**
      * Copied from {@code org.apache.calcite.sql.validate.SqlValidatorImpl#getNthExpr()}.
@@ -326,15 +311,11 @@ public final class HazelcastTypeCoercion extends TypeCoercionImpl {
                         sourceCount);
             }
         } else if (query instanceof SqlUpdate) {
+            // trailing elements of selectList are equal to elements of sourceExpressionList
+            // see JetSqlValidator.validateUpdate()
             SqlUpdate update = (SqlUpdate) query;
-            if (update.getSourceExpressionList() != null) {
-                return update.getSourceExpressionList().get(ordinal);
-            } else {
-                return getNthExpr(
-                        update.getSourceSelect(),
-                        ordinal,
-                        sourceCount);
-            }
+            SqlNodeList selectList = update.getSourceSelect().getSelectList();
+            return selectList.get(selectList.size() - sourceCount + ordinal);
         } else if (query instanceof SqlSelect) {
             SqlSelect select = (SqlSelect) query;
             if (select.getSelectList().size() == sourceCount) {
@@ -349,32 +330,35 @@ public final class HazelcastTypeCoercion extends TypeCoercionImpl {
         }
     }
 
-    // copied from TypeCoercionImpl
+    // originally copied from TypeCoercionImpl
     private boolean coerceSourceRowType(
             SqlValidatorScope sourceScope,
             SqlNode query,
             int columnIndex,
-            RelDataType targetType) {
+            int totalColumns,
+            RelDataType targetType
+    ) {
         switch (query.getKind()) {
             case INSERT:
                 SqlInsert insert = (SqlInsert) query;
                 return coerceSourceRowType(sourceScope,
                         insert.getSource(),
                         columnIndex,
+                        totalColumns,
                         targetType);
             case UPDATE:
+                // trailing elements of selectList are equal to elements of sourceExpressionList
+                // see JetSqlValidator.validateUpdate()
                 SqlUpdate update = (SqlUpdate) query;
-                if (update.getSourceExpressionList() != null) {
-                    final SqlNodeList sourceExpressionList = update.getSourceExpressionList();
-                    return coerceColumnType(sourceScope, sourceExpressionList, columnIndex, targetType);
-                } else {
-                    return coerceSourceRowType(sourceScope,
-                            update.getSourceSelect(),
-                            columnIndex,
-                            targetType);
-                }
+                SqlNodeList selectList = update.getSourceSelect().getSelectList();
+                return coerceSourceRowType(sourceScope, selectList, selectList.size() - totalColumns + columnIndex, targetType);
             default:
                 return rowTypeCoercion(sourceScope, query, columnIndex, targetType);
         }
+    }
+
+    private boolean coerceSourceRowType(SqlValidatorScope scope, SqlNodeList nodeList, int index, RelDataType targetType) {
+        SqlNode node = nodeList.get(index);
+        return rowTypeElementCoercion(scope, node, targetType, cast -> nodeList.set(index, cast));
     }
 }

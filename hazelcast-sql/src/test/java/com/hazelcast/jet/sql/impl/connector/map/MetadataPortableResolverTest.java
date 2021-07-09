@@ -1,15 +1,15 @@
 /*
- * Copyright (c) 2008-2021, Hazelcast, Inc. All Rights Reserved.
+ * Copyright 2021 Hazelcast Inc.
  *
- * Licensed under the Apache License, Version 2.0 (the "License");
+ * Licensed under the Hazelcast Community License (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
  *
- * http://www.apache.org/licenses/LICENSE-2.0
+ * http://hazelcast.com/hazelcast-community-license
  *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * WITHOUT WARRANTIES OF ANY KIND, either express or implied.
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
@@ -21,7 +21,7 @@ import com.hazelcast.internal.serialization.InternalSerializationService;
 import com.hazelcast.internal.serialization.impl.DefaultSerializationServiceBuilder;
 import com.hazelcast.jet.sql.impl.connector.keyvalue.KvMetadata;
 import com.hazelcast.jet.sql.impl.inject.PortableUpsertTargetDescriptor;
-import com.hazelcast.jet.sql.impl.schema.MappingField;
+import com.hazelcast.sql.impl.schema.MappingField;
 import com.hazelcast.nio.serialization.ClassDefinition;
 import com.hazelcast.nio.serialization.ClassDefinitionBuilder;
 import com.hazelcast.sql.impl.QueryException;
@@ -34,8 +34,8 @@ import junitparams.Parameters;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 
-import java.util.List;
 import java.util.Map;
+import java.util.stream.Stream;
 
 import static com.hazelcast.jet.sql.impl.connector.SqlConnector.OPTION_KEY_CLASS_ID;
 import static com.hazelcast.jet.sql.impl.connector.SqlConnector.OPTION_KEY_CLASS_VERSION;
@@ -59,7 +59,7 @@ public class MetadataPortableResolverTest {
             "false, this"
     })
     public void test_resolveFields(boolean key, String prefix) {
-        List<MappingField> fields = INSTANCE.resolveAndValidateFields(
+        Stream<MappingField> fields = INSTANCE.resolveAndValidateFields(
                 key,
                 singletonList(field("field", QueryDataType.INT, prefix + ".field")),
                 ImmutableMap.of(
@@ -104,7 +104,7 @@ public class MetadataPortableResolverTest {
                 (key ? OPTION_KEY_CLASS_VERSION : OPTION_VALUE_CLASS_VERSION), String.valueOf(classDefinition.getVersion())
         );
 
-        List<MappingField> fields = INSTANCE.resolveAndValidateFields(key, emptyList(), options, ss);
+        Stream<MappingField> fields = INSTANCE.resolveAndValidateFields(key, emptyList(), options, ss);
 
         assertThat(fields).containsExactly(
                 field("string", QueryDataType.VARCHAR, prefix + ".string"),
@@ -142,7 +142,7 @@ public class MetadataPortableResolverTest {
                 (key ? OPTION_KEY_CLASS_VERSION : OPTION_VALUE_CLASS_VERSION), String.valueOf(classDefinition.getVersion())
         );
 
-        List<MappingField> fields = INSTANCE.resolveAndValidateFields(
+        Stream<MappingField> fields = INSTANCE.resolveAndValidateFields(
                 key,
                 singletonList(field("renamed_field", QueryDataType.INT, prefix + ".field")),
                 options,
@@ -173,7 +173,7 @@ public class MetadataPortableResolverTest {
                 (key ? OPTION_KEY_CLASS_VERSION : OPTION_VALUE_CLASS_VERSION), String.valueOf(classDefinition.getVersion())
         );
 
-        List<MappingField> fields = INSTANCE.resolveAndValidateFields(
+        Stream<MappingField> fields = INSTANCE.resolveAndValidateFields(
                 key,
                 singletonList(field("field2", QueryDataType.VARCHAR, prefix + ".field2")),
                 options,

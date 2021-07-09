@@ -35,7 +35,7 @@ import java.util.List;
  * operator on the pipeline. For assertions that can be used directly
  * as sinks, see {@link AssertionSinks}.
  *
- * @since 3.2
+ * @since Jet 3.2
  */
 public final class Assertions {
 
@@ -178,7 +178,7 @@ public final class Assertions {
 
     /**
      * Collects all the received items in a list and once the upstream stage is
-     * completed it executes the assertion supplied by {@code assertFn}. If no
+     * completed, it executes the assertion supplied by {@code assertFn}. If no
      * items were collected, it will be called with empty list.
      * <p>
      * Example:

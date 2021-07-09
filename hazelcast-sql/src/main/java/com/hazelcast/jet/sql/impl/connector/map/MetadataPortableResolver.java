@@ -1,15 +1,15 @@
 /*
- * Copyright (c) 2008-2021, Hazelcast, Inc. All Rights Reserved.
+ * Copyright 2021 Hazelcast Inc.
  *
- * Licensed under the Apache License, Version 2.0 (the "License");
+ * Licensed under the Hazelcast Community License (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
  *
- * http://www.apache.org/licenses/LICENSE-2.0
+ * http://hazelcast.com/hazelcast-community-license
  *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * WITHOUT WARRANTIES OF ANY KIND, either express or implied.
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
@@ -20,7 +20,7 @@ import com.hazelcast.internal.serialization.InternalSerializationService;
 import com.hazelcast.jet.sql.impl.connector.keyvalue.KvMetadata;
 import com.hazelcast.jet.sql.impl.connector.keyvalue.KvMetadataResolver;
 import com.hazelcast.jet.sql.impl.inject.PortableUpsertTargetDescriptor;
-import com.hazelcast.jet.sql.impl.schema.MappingField;
+import com.hazelcast.sql.impl.schema.MappingField;
 import com.hazelcast.nio.serialization.ClassDefinition;
 import com.hazelcast.nio.serialization.ClassDefinitionBuilder;
 import com.hazelcast.nio.serialization.FieldType;
@@ -46,8 +46,8 @@ import static com.hazelcast.jet.sql.impl.connector.SqlConnector.OPTION_VALUE_CLA
 import static com.hazelcast.jet.sql.impl.connector.SqlConnector.OPTION_VALUE_CLASS_VERSION;
 import static com.hazelcast.jet.sql.impl.connector.SqlConnector.OPTION_VALUE_FACTORY_ID;
 import static com.hazelcast.jet.sql.impl.connector.SqlConnector.PORTABLE_FORMAT;
-import static com.hazelcast.jet.sql.impl.connector.keyvalue.KvMetadataResolvers.extractFields;
-import static com.hazelcast.jet.sql.impl.connector.keyvalue.KvMetadataResolvers.maybeAddDefaultField;
+import static com.hazelcast.jet.sql.impl.connector.keyvalue.KvMetadataResolver.extractFields;
+import static com.hazelcast.jet.sql.impl.connector.keyvalue.KvMetadataResolver.maybeAddDefaultField;
 
 final class MetadataPortableResolver implements KvMetadataResolver {
 
@@ -62,7 +62,7 @@ final class MetadataPortableResolver implements KvMetadataResolver {
     }
 
     @Override
-    public List<MappingField> resolveAndValidateFields(
+    public Stream<MappingField> resolveAndValidateFields(
             boolean isKey,
             List<MappingField> userFields,
             Map<String, String> options,
@@ -77,18 +77,17 @@ final class MetadataPortableResolver implements KvMetadataResolver {
                 : resolveAndValidateFields(isKey, userFieldsByPath, classDefinition);
     }
 
-    List<MappingField> resolveFields(boolean isKey, ClassDefinition clazz) {
-        List<MappingField> fields = new ArrayList<>();
-        for (String name : clazz.getFieldNames()) {
-            QueryPath path = new QueryPath(name, isKey);
-            QueryDataType type = resolvePortableType(clazz.getFieldType(name));
+    Stream<MappingField> resolveFields(boolean isKey, ClassDefinition clazz) {
+        return clazz.getFieldNames().stream()
+                .map(name -> {
+                    QueryPath path = new QueryPath(name, isKey);
+                    QueryDataType type = resolvePortableType(clazz.getFieldType(name));
 
-            fields.add(new MappingField(name, type, path.toString()));
-        }
-        return fields;
+                    return new MappingField(name, type, path.toString());
+                });
     }
 
-    private static List<MappingField> resolveAndValidateFields(
+    private static Stream<MappingField> resolveAndValidateFields(
             boolean isKey,
             Map<QueryPath, MappingField> userFieldsByPath,
             ClassDefinition clazz
@@ -97,12 +96,12 @@ final class MetadataPortableResolver implements KvMetadataResolver {
             QueryPath path = new QueryPath(name, isKey);
             QueryDataType type = resolvePortableType(clazz.getFieldType(name));
 
-            MappingField mappingField = userFieldsByPath.get(path);
-            if (mappingField != null && !type.getTypeFamily().equals(mappingField.type().getTypeFamily())) {
-                throw QueryException.error("Mismatch between declared and resolved type: " + mappingField.name());
+            MappingField userField = userFieldsByPath.get(path);
+            if (userField != null && !type.getTypeFamily().equals(userField.type().getTypeFamily())) {
+                throw QueryException.error("Mismatch between declared and resolved type: " + userField.name());
             }
         }
-        return new ArrayList<>(userFieldsByPath.values());
+        return userFieldsByPath.values().stream();
     }
 
     @SuppressWarnings("checkstyle:ReturnCount")

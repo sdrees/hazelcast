@@ -1,15 +1,15 @@
 /*
- * Copyright (c) 2008-2021, Hazelcast, Inc. All Rights Reserved.
+ * Copyright 2021 Hazelcast Inc.
  *
- * Licensed under the Apache License, Version 2.0 (the "License");
+ * Licensed under the Hazelcast Community License (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
  *
- * http://www.apache.org/licenses/LICENSE-2.0
+ * http://hazelcast.com/hazelcast-community-license
  *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * WITHOUT WARRANTIES OF ANY KIND, either express or implied.
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
@@ -17,22 +17,23 @@
 package com.hazelcast.jet.sql.impl;
 
 import com.hazelcast.cluster.Address;
-import com.hazelcast.jet.core.DAG;
-import com.hazelcast.jet.datamodel.Tuple2;
 import com.hazelcast.jet.sql.impl.JetPlan.AlterJobPlan;
 import com.hazelcast.jet.sql.impl.JetPlan.CreateJobPlan;
 import com.hazelcast.jet.sql.impl.JetPlan.CreateMappingPlan;
 import com.hazelcast.jet.sql.impl.JetPlan.CreateSnapshotPlan;
+import com.hazelcast.jet.sql.impl.JetPlan.DmlPlan;
 import com.hazelcast.jet.sql.impl.JetPlan.DropJobPlan;
 import com.hazelcast.jet.sql.impl.JetPlan.DropMappingPlan;
 import com.hazelcast.jet.sql.impl.JetPlan.DropSnapshotPlan;
-import com.hazelcast.jet.sql.impl.JetPlan.SelectOrSinkPlan;
+import com.hazelcast.jet.sql.impl.JetPlan.IMapDeletePlan;
+import com.hazelcast.jet.sql.impl.JetPlan.SelectPlan;
 import com.hazelcast.jet.sql.impl.JetPlan.ShowStatementPlan;
 import com.hazelcast.jet.sql.impl.calcite.parser.JetSqlParser;
 import com.hazelcast.jet.sql.impl.opt.OptUtils;
 import com.hazelcast.jet.sql.impl.opt.logical.LogicalRel;
 import com.hazelcast.jet.sql.impl.opt.logical.LogicalRules;
 import com.hazelcast.jet.sql.impl.opt.physical.CreateDagVisitor;
+import com.hazelcast.jet.sql.impl.opt.physical.DeleteByKeyMapPhysicalRel;
 import com.hazelcast.jet.sql.impl.opt.physical.JetRootRel;
 import com.hazelcast.jet.sql.impl.opt.physical.PhysicalRel;
 import com.hazelcast.jet.sql.impl.opt.physical.PhysicalRules;
@@ -44,8 +45,8 @@ import com.hazelcast.jet.sql.impl.parse.SqlDropJob;
 import com.hazelcast.jet.sql.impl.parse.SqlDropMapping;
 import com.hazelcast.jet.sql.impl.parse.SqlDropSnapshot;
 import com.hazelcast.jet.sql.impl.parse.SqlShowStatement;
-import com.hazelcast.jet.sql.impl.schema.Mapping;
-import com.hazelcast.jet.sql.impl.schema.MappingField;
+import com.hazelcast.sql.impl.schema.Mapping;
+import com.hazelcast.sql.impl.schema.MappingField;
 import com.hazelcast.jet.sql.impl.validate.JetSqlValidator;
 import com.hazelcast.jet.sql.impl.validate.UnsupportedOperationVisitor;
 import com.hazelcast.logging.ILogger;
@@ -64,7 +65,6 @@ import com.hazelcast.sql.impl.calcite.schema.HazelcastTable;
 import com.hazelcast.sql.impl.calcite.validate.types.HazelcastTypeFactory;
 import com.hazelcast.sql.impl.optimizer.OptimizationTask;
 import com.hazelcast.sql.impl.optimizer.PlanKey;
-import com.hazelcast.sql.impl.optimizer.PlanObjectKey;
 import com.hazelcast.sql.impl.optimizer.SqlPlan;
 import com.hazelcast.sql.impl.schema.map.AbstractMapTable;
 import com.hazelcast.sql.impl.type.QueryDataType;
@@ -76,6 +76,7 @@ import org.apache.calcite.prepare.Prepare.CatalogReader;
 import org.apache.calcite.rel.RelNode;
 import org.apache.calcite.rel.RelShuttleImpl;
 import org.apache.calcite.rel.core.TableModify;
+import org.apache.calcite.rel.core.TableModify.Operation;
 import org.apache.calcite.rel.core.TableScan;
 import org.apache.calcite.sql.SqlNode;
 import org.apache.calcite.sql.parser.SqlParserImplFactory;
@@ -89,18 +90,17 @@ import org.apache.calcite.sql2rel.SqlToRelConverter.Config;
 import java.security.Permission;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Set;
 
 import static java.util.stream.Collectors.toList;
 
-class JetSqlBackend implements SqlBackend {
+public class JetSqlBackend implements SqlBackend {
 
     private final NodeEngine nodeEngine;
     private final JetPlanExecutor planExecutor;
 
     private final ILogger logger;
 
-    JetSqlBackend(NodeEngine nodeEngine, JetPlanExecutor planExecutor) {
+    public JetSqlBackend(NodeEngine nodeEngine, JetPlanExecutor planExecutor) {
         this.nodeEngine = nodeEngine;
         this.planExecutor = planExecutor;
 
@@ -116,14 +116,15 @@ class JetSqlBackend implements SqlBackend {
     public SqlValidator validator(
             CatalogReader catalogReader,
             HazelcastTypeFactory typeFactory,
-            SqlConformance sqlConformance
+            SqlConformance sqlConformance,
+            List<Object> arguments
     ) {
-        return new JetSqlValidator(catalogReader, typeFactory, sqlConformance);
+        return new JetSqlValidator(catalogReader, typeFactory, sqlConformance, arguments);
     }
 
     @Override
     public SqlVisitor<Void> unsupportedOperationVisitor(CatalogReader catalogReader) {
-        return UnsupportedOperationVisitor.INSTANCE;
+        return new UnsupportedOperationVisitor();
     }
 
     @Override
@@ -216,7 +217,7 @@ class JetSqlBackend implements SqlBackend {
         QueryParseResult dmlParseResult =
                 new QueryParseResult(source, parseResult.getParameterMetadata(), parseResult.getValidator(), this, false);
         QueryConvertResult dmlConvertedResult = context.convert(dmlParseResult);
-        SelectOrSinkPlan dmlPlan = toPlan(
+        JetPlan dmlPlan = toPlan(
                 null,
                 parseResult.getParameterMetadata(),
                 dmlConvertedResult.getRel(),
@@ -224,13 +225,13 @@ class JetSqlBackend implements SqlBackend {
                 context,
                 dmlParseResult.isInfiniteRows()
         );
-        assert dmlPlan.isInsert();
+        assert dmlPlan instanceof DmlPlan && ((DmlPlan) dmlPlan).getOperation() == Operation.INSERT;
 
         return new CreateJobPlan(
                 planKey,
                 sqlCreateJob.jobConfig(),
                 sqlCreateJob.ifNotExists(),
-                dmlPlan,
+                (DmlPlan) dmlPlan,
                 planExecutor
         );
     }
@@ -261,7 +262,7 @@ class JetSqlBackend implements SqlBackend {
         return new ShowStatementPlan(planKey, sqlNode.getTarget(), planExecutor);
     }
 
-    private SelectOrSinkPlan toPlan(
+    private JetPlan toPlan(
             PlanKey planKey,
             QueryParameterMetadata parameterMetadata,
             RelNode rel,
@@ -269,28 +270,24 @@ class JetSqlBackend implements SqlBackend {
             OptimizerContext context,
             boolean isInfiniteRows
     ) {
-        context.setParameterMetadata(parameterMetadata);
-
-        logger.fine("Before logical opt:\n" + RelOptUtil.toString(rel));
-        LogicalRel logicalRel = optimizeLogical(context, rel);
-        logger.fine("After logical opt:\n" + RelOptUtil.toString(logicalRel));
-        PhysicalRel physicalRel = optimizePhysical(context, logicalRel);
-        logger.fine("After physical opt:\n" + RelOptUtil.toString(physicalRel));
-
-        boolean isInsert = physicalRel instanceof TableModify;
+        PhysicalRel physicalRel = optimize(parameterMetadata, rel, context);
 
         Address localAddress = nodeEngine.getThisAddress();
         List<Permission> permissions = extractPermissions(physicalRel);
 
-        if (isInsert) {
-            Tuple2<DAG, Set<PlanObjectKey>> result = createDag(physicalRel, localAddress, parameterMetadata);
-            return new SelectOrSinkPlan(planKey, parameterMetadata, result.f1(), result.f0(), isInfiniteRows, true,
-                    null, planExecutor, permissions);
+        if (physicalRel instanceof DeleteByKeyMapPhysicalRel) {
+            DeleteByKeyMapPhysicalRel deleteRel = (DeleteByKeyMapPhysicalRel) physicalRel;
+            return new IMapDeletePlan(planKey, deleteRel.objectKey(), parameterMetadata, deleteRel.mapName(),
+                    deleteRel.keyCondition(parameterMetadata), planExecutor, permissions);
+        } else if (physicalRel instanceof TableModify) {
+            CreateDagVisitor visitor = traverseRel(physicalRel, parameterMetadata);
+            Operation operation = ((TableModify) physicalRel).getOperation();
+            return new DmlPlan(operation, planKey, parameterMetadata, visitor.getObjectKeys(), visitor.getDag(),
+                    planExecutor, permissions);
         } else {
-            Tuple2<DAG, Set<PlanObjectKey>> result =
-                    createDag(new JetRootRel(physicalRel, localAddress), localAddress, parameterMetadata);
+            CreateDagVisitor visitor = traverseRel(new JetRootRel(physicalRel, localAddress), parameterMetadata);
             SqlRowMetadata rowMetadata = createRowMetadata(fieldNames, physicalRel.schema(parameterMetadata).getTypes());
-            return new SelectOrSinkPlan(planKey, parameterMetadata, result.f1(), result.f0(), isInfiniteRows, false,
+            return new SelectPlan(planKey, parameterMetadata, visitor.getObjectKeys(), visitor.getDag(), isInfiniteRows,
                     rowMetadata, planExecutor, permissions);
         }
     }
@@ -324,6 +321,17 @@ class JetSqlBackend implements SqlBackend {
         });
 
         return permissions;
+    }
+
+    private PhysicalRel optimize(QueryParameterMetadata parameterMetadata, RelNode rel, OptimizerContext context) {
+        context.setParameterMetadata(parameterMetadata);
+
+        logger.fine("Before logical opt:\n" + RelOptUtil.toString(rel));
+        LogicalRel logicalRel = optimizeLogical(context, rel);
+        logger.fine("After logical opt:\n" + RelOptUtil.toString(logicalRel));
+        PhysicalRel physicalRel = optimizePhysical(context, logicalRel);
+        logger.fine("After physical opt:\n" + RelOptUtil.toString(physicalRel));
+        return physicalRel;
     }
 
     /**
@@ -366,13 +374,12 @@ class JetSqlBackend implements SqlBackend {
         return new SqlRowMetadata(columns);
     }
 
-    private Tuple2<DAG, Set<PlanObjectKey>> createDag(
+    private CreateDagVisitor traverseRel(
             PhysicalRel physicalRel,
-            Address localAddress,
             QueryParameterMetadata parameterMetadata
     ) {
-        CreateDagVisitor visitor = new CreateDagVisitor(localAddress, parameterMetadata);
+        CreateDagVisitor visitor = new CreateDagVisitor(this.nodeEngine, parameterMetadata);
         physicalRel.accept(visitor);
-        return Tuple2.tuple2(visitor.getDag(), visitor.getObjectKeys());
+        return visitor;
     }
 }

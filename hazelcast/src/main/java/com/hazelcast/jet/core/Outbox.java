@@ -42,7 +42,7 @@ import javax.annotation.Nonnull;
  * queue, add to it in the callback and drain it in e.g. {@link
  * Processor#tryProcess()}.
  *
- * @since 3.0
+ * @since Jet 3.0
  */
 public interface Outbox {
 
@@ -91,7 +91,7 @@ public interface Outbox {
      * Otherwise the key will be distributed according to default partitioning
      * and only a single processor instance will receive the key.
      * <p>
-     * This method may only be called from the {@link
+     * This method must only be called from the {@link
      * Processor#saveToSnapshot()} or {@link Processor#snapshotCommitPrepare()}
      * methods.
      * <p>

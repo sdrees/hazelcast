@@ -1,15 +1,15 @@
 /*
- * Copyright (c) 2008-2021, Hazelcast, Inc. All Rights Reserved.
+ * Copyright 2021 Hazelcast Inc.
  *
- * Licensed under the Apache License, Version 2.0 (the "License");
+ * Licensed under the Hazelcast Community License (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
  *
- * http://www.apache.org/licenses/LICENSE-2.0
+ * http://hazelcast.com/hazelcast-community-license
  *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * WITHOUT WARRANTIES OF ANY KIND, either express or implied.
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
@@ -69,25 +69,31 @@ public class HazelcastSqlValidator extends SqlValidatorImplBridge {
     /** Parameter positions. */
     private final Map<Integer, SqlParserPos> parameterPositionMap = new HashMap<>();
 
+    /** Parameter values. */
+    private final List<Object> arguments;
+
     public HazelcastSqlValidator(
             SqlValidatorCatalogReader catalogReader,
             HazelcastTypeFactory typeFactory,
-            SqlConformance conformance
+            SqlConformance conformance,
+            List<Object> arguments
     ) {
-        this(null, catalogReader, typeFactory, conformance);
+        this(null, catalogReader, typeFactory, conformance, arguments);
     }
 
     public HazelcastSqlValidator(
             SqlOperatorTable extensionOperatorTable,
             SqlValidatorCatalogReader catalogReader,
             HazelcastTypeFactory typeFactory,
-            SqlConformance conformance
+            SqlConformance conformance,
+            List<Object> arguments
     ) {
         super(operatorTable(extensionOperatorTable), catalogReader, typeFactory, CONFIG.withSqlConformance(conformance));
 
         setTypeCoercion(new HazelcastTypeCoercion(this));
 
-        rewriteVisitor = new HazelcastSqlOperatorTable.RewriteVisitor(this);
+        this.rewriteVisitor = new HazelcastSqlOperatorTable.RewriteVisitor(this);
+        this.arguments = arguments;
     }
 
     private static SqlOperatorTable operatorTable(SqlOperatorTable extensionOperatorTable) {
@@ -151,7 +157,6 @@ public class HazelcastSqlValidator extends SqlValidatorImplBridge {
         // skip it if a call has a fixed type, for instance AND always has
         // BOOLEAN type, so operands may end up having no validated type.
         deriveType(scope, call);
-
         super.validateCall(call, scope);
     }
 
@@ -216,6 +221,12 @@ public class HazelcastSqlValidator extends SqlValidatorImplBridge {
 
     public void setParameterConverter(int ordinal, ParameterConverter parameterConverter) {
         parameterConverterMap.put(ordinal, parameterConverter);
+    }
+
+    public Object getArgumentAt(int index) {
+        ParameterConverter parameterConverter = parameterConverterMap.get(index);
+        Object argument = arguments.get(index);
+        return parameterConverter.convert(argument);
     }
 
     public ParameterConverter[] getParameterConverters(SqlNode node) {

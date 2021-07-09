@@ -1,15 +1,15 @@
 /*
- * Copyright (c) 2008-2021, Hazelcast, Inc. All Rights Reserved.
+ * Copyright 2021 Hazelcast Inc.
  *
- * Licensed under the Apache License, Version 2.0 (the "License");
+ * Licensed under the Hazelcast Community License (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
  *
- * http://www.apache.org/licenses/LICENSE-2.0
+ * http://hazelcast.com/hazelcast-community-license
  *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * WITHOUT WARRANTIES OF ANY KIND, either express or implied.
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
@@ -49,7 +49,6 @@ import java.util.HashSet;
 import java.util.Set;
 
 import static com.hazelcast.sql.impl.calcite.validate.types.HazelcastTypeUtils.isObjectIdentifier;
-import static com.hazelcast.sql.impl.calcite.validate.types.HazelcastTypeUtils.isTimestampWithTimeZoneIdentifier;
 
 /**
  * Visitor that throws exceptions for unsupported SQL features.
@@ -76,6 +75,9 @@ public final class UnsupportedOperationVisitor implements SqlVisitor<Void> {
         SUPPORTED_KINDS.add(SqlKind.AND);
         SUPPORTED_KINDS.add(SqlKind.OR);
         SUPPORTED_KINDS.add(SqlKind.NOT);
+        SUPPORTED_KINDS.add(SqlKind.IN);
+        SUPPORTED_KINDS.add(SqlKind.NOT_IN);
+        SUPPORTED_KINDS.add(SqlKind.BETWEEN);
 
         // Arithmetics
         SUPPORTED_KINDS.add(SqlKind.PLUS);
@@ -109,6 +111,10 @@ public final class UnsupportedOperationVisitor implements SqlVisitor<Void> {
         SUPPORTED_KINDS.add(SqlKind.FLOOR);
         SUPPORTED_KINDS.add(SqlKind.LIKE);
         SUPPORTED_KINDS.add(SqlKind.TRIM);
+
+        SUPPORTED_KINDS.add(SqlKind.CASE);
+        SUPPORTED_KINDS.add(SqlKind.NULLIF);
+        SUPPORTED_KINDS.add(SqlKind.COALESCE);
 
         // Supported operators
         SUPPORTED_OPERATORS = new HashSet<>();
@@ -153,6 +159,11 @@ public final class UnsupportedOperationVisitor implements SqlVisitor<Void> {
         SUPPORTED_OPERATORS.add(HazelcastSqlOperatorTable.BTRIM);
         SUPPORTED_OPERATORS.add(HazelcastSqlOperatorTable.REPLACE);
         SUPPORTED_OPERATORS.add(HazelcastSqlOperatorTable.POSITION);
+
+        // Datetime
+        SUPPORTED_OPERATORS.add(HazelcastSqlOperatorTable.EXTRACT);
+        SUPPORTED_OPERATORS.add(HazelcastSqlOperatorTable.TO_TIMESTAMP_TZ);
+        SUPPORTED_OPERATORS.add(HazelcastSqlOperatorTable.TO_EPOCH_MILLIS);
 
         // Sorting
         SUPPORTED_OPERATORS.add(HazelcastSqlOperatorTable.DESC);
@@ -211,7 +222,7 @@ public final class UnsupportedOperationVisitor implements SqlVisitor<Void> {
         if (type.getTypeNameSpec() instanceof SqlUserDefinedTypeNameSpec) {
             SqlIdentifier typeName = type.getTypeName();
 
-            if (isObjectIdentifier(typeName) || isTimestampWithTimeZoneIdentifier(typeName)) {
+            if (isObjectIdentifier(typeName)) {
                 return null;
             }
         }
@@ -275,6 +286,10 @@ public final class UnsupportedOperationVisitor implements SqlVisitor<Void> {
                 // string literals to be of CHAR type, not VARCHAR. Validated type
                 // of string literals is still VARCHAR in HazelcastSqlValidator.
             case CHAR:
+            case TIMESTAMP:
+            case TIMESTAMP_WITH_LOCAL_TIME_ZONE:
+            case DATE:
+            case TIME:
             case ANY:
             case NULL:
                 return null;
@@ -312,6 +327,7 @@ public final class UnsupportedOperationVisitor implements SqlVisitor<Void> {
                 return;
             case DESCENDING:
             case POSITION:
+            case EXTRACT:
             case OTHER:
             case OTHER_FUNCTION:
                 processOther(call);

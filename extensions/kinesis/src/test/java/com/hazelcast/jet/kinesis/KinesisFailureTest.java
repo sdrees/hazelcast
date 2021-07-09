@@ -51,6 +51,7 @@ import static java.util.concurrent.TimeUnit.SECONDS;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.junit.Assert.assertFalse;
 import static org.testcontainers.shaded.org.apache.commons.lang.StringUtils.repeat;
+import static org.testcontainers.utility.DockerImageName.parse;
 
 public class KinesisFailureTest extends AbstractKinesisTest {
 
@@ -58,12 +59,14 @@ public class KinesisFailureTest extends AbstractKinesisTest {
     public static final Network NETWORK = Network.newNetwork();
 
     @ClassRule
-    public static final LocalStackContainer LOCALSTACK = new LocalStackContainer("localstack/localstack:0.12.3")
+    public static final LocalStackContainer LOCALSTACK = new LocalStackContainer(parse("localstack/localstack")
+            .withTag("0.12.3"))
             .withNetwork(NETWORK)
             .withServices(Service.KINESIS);
 
     @ClassRule
-    public static final ToxiproxyContainer TOXIPROXY = new ToxiproxyContainer("shopify/toxiproxy:2.1.0")
+    public static final ToxiproxyContainer TOXIPROXY = new ToxiproxyContainer(parse("shopify/toxiproxy")
+            .withTag("2.1.0"))
             .withNetwork(NETWORK)
             .withNetworkAliases("toxiproxy");
 
@@ -105,7 +108,7 @@ public class KinesisFailureTest extends AbstractKinesisTest {
         System.err.println("Cutting network connection ...");
         PROXY.setConnectionCut(true);
 
-        jet().newJob(getPipeline(kinesisSource().build()));
+        hz().getJet().newJob(getPipeline(kinesisSource().build()));
         Map<String, List<String>> expectedMessages = sendMessages();
 
         SECONDS.sleep(5);
@@ -121,7 +124,7 @@ public class KinesisFailureTest extends AbstractKinesisTest {
     public void networkOutageWhileRunning() throws Exception {
         HELPER.createStream(10);
 
-        jet().newJob(getPipeline(kinesisSource().build()));
+        hz().getJet().newJob(getPipeline(kinesisSource().build()));
         Map<String, List<String>> expectedMessages = sendMessages();
 
         //wait for some data to start coming out of the pipeline
@@ -155,7 +158,7 @@ public class KinesisFailureTest extends AbstractKinesisTest {
                         .withRetryStrategy(KinesisTestHelper.RETRY_STRATEGY)
                         .build());
 
-        Job job = jet().newJob(p);
+        Job job = hz().getJet().newJob(p);
         assertThrowsJetException(job, "The security token included in the request is invalid");
     }
 
@@ -177,7 +180,7 @@ public class KinesisFailureTest extends AbstractKinesisTest {
                 .withoutTimestamps()
                 .writeTo(Sinks.noop());
 
-        Job job = jet().newJob(p);
+        Job job = hz().getJet().newJob(p);
         assertThrowsJetException(job, "The security token included in the request is invalid");
     }
 
@@ -229,7 +232,7 @@ public class KinesisFailureTest extends AbstractKinesisTest {
         p.readFrom(TestSources.items(entry))
                 .writeTo(kinesisSink());
 
-        return jet().newJob(p);
+        return hz().getJet().newJob(p);
     }
 
     private static void assertThrowsJetException(Job job, String messageFragment) {

@@ -25,6 +25,7 @@ import com.hazelcast.function.ToLongFunctionEx;
 import com.hazelcast.jet.Traverser;
 import com.hazelcast.jet.Traversers;
 import com.hazelcast.jet.aggregate.AggregateOperation1;
+import com.hazelcast.jet.config.InstanceConfig;
 import com.hazelcast.jet.core.Processor;
 import com.hazelcast.jet.core.ProcessorMetaSupplier;
 import com.hazelcast.jet.core.ProcessorSupplier;
@@ -51,7 +52,7 @@ import static com.hazelcast.function.PredicateEx.alwaysTrue;
  *
  * @param <T> the type of items coming out of this stage
  *
- * @since 3.0
+ * @since Jet 3.0
  */
 public interface GeneralStage<T> extends Stage {
 
@@ -72,7 +73,7 @@ public interface GeneralStage<T> extends Stage {
      * <p>
      * This sample takes a stream of names and outputs the names in lowercase:
      * <pre>{@code
-     * stage.map(name -> name.toLowerCase())
+     * stage.map(name -> name.toLowerCase(Locale.ROOT))
      * }</pre>
      *
      * @param mapFn a mapping function. It must be stateless and {@linkplain
@@ -285,7 +286,7 @@ public interface GeneralStage<T> extends Stage {
      * field on them by looking up from a registry:
      * <pre>{@code
      * stage.mapUsingService(
-     *     ServiceFactories.sharedService(ctx -> new ItemDetailRegistry(ctx.jetInstance())),
+     *     ServiceFactories.sharedService(ctx -> new ItemDetailRegistry(ctx.hazelcastInstance())),
      *     (reg, item) -> item.setDetail(reg.fetchDetail(item))
      * )
      * }</pre>
@@ -333,7 +334,7 @@ public interface GeneralStage<T> extends Stage {
      * field on them by looking up from a registry:
      * <pre>{@code
      * stage.mapUsingServiceAsync(
-     *     ServiceFactories.sharedService(ctx -> new ItemDetailRegistry(ctx.jetInstance())),
+     *     ServiceFactories.sharedService(ctx -> new ItemDetailRegistry(ctx.hazelcastInstance())),
      *     (reg, item) -> reg.fetchDetailAsync(item)
      *                       .thenApply(detail -> item.setDetail(detail))
      * )
@@ -378,7 +379,7 @@ public interface GeneralStage<T> extends Stage {
      * field on them by looking up from a registry:
      * <pre>{@code
      * stage.mapUsingServiceAsync(
-     *     ServiceFactories.sharedService(ctx -> new ItemDetailRegistry(ctx.jetInstance())),
+     *     ServiceFactories.sharedService(ctx -> new ItemDetailRegistry(ctx.hazelcastInstance())),
      *     (reg, item) -> reg.fetchDetailAsync(item)
      *                       .thenApply(detail -> item.setDetail(detail))
      * )
@@ -431,7 +432,7 @@ public interface GeneralStage<T> extends Stage {
      * size of the items to lookup is specified as {@code 100}:
      * <pre>{@code
      * stage.mapUsingServiceAsyncBatched(
-     *     ServiceFactories.sharedService(ctx -> new ItemDetailRegistry(ctx.jetInstance())),
+     *     ServiceFactories.sharedService(ctx -> new ItemDetailRegistry(ctx.hazelcastInstance())),
      *     100,
      *     (reg, itemList) -> reg
      *             .fetchDetailsAsync(itemList)
@@ -459,7 +460,7 @@ public interface GeneralStage<T> extends Stage {
      * @param <S> type of service object
      * @param <R> the future result type of the mapping function
      * @return the newly attached stage
-     * @since 4.0
+     * @since Jet 4.0
      */
     @Nonnull
     <S, R> GeneralStage<R> mapUsingServiceAsyncBatched(
@@ -479,7 +480,7 @@ public interface GeneralStage<T> extends Stage {
      * about their contents, and keeps only photos of cats:
      * <pre>{@code
      * photos.filterUsingService(
-     *     ServiceFactories.sharedService(ctx -> new ImageClassifier(ctx.jetInstance())),
+     *     ServiceFactories.sharedService(ctx -> new ImageClassifier(ctx.hazelcastInstance())),
      *     (classifier, photo) -> classifier.classify(photo).equals("cat")
      * )
      * }</pre>
@@ -764,6 +765,10 @@ public interface GeneralStage<T> extends Stage {
      *     (user, country) -> user.setCountry(country)
      * )
      * }</pre>
+     * <p>
+     * This operation is subject to memory limits. See {@link
+     * InstanceConfig#setMaxProcessorAccumulatedRecords(long)} for more
+     * information.
      *
      * @param stage1        the stage to hash-join with this one
      * @param joinClause1   specifies how to join the two streams
@@ -807,6 +812,10 @@ public interface GeneralStage<T> extends Stage {
      * This method is similar to {@link #hashJoin} method, but it guarantees
      * that both input items will be not-null. Nulls will be filtered out
      * before reaching {@code #mapToOutputFn}.
+     * <p>
+     * This operation is subject to memory limits. See {@link
+     * InstanceConfig#setMaxProcessorAccumulatedRecords(long)} for more
+     * information.
      *
      * @param stage1        the stage to hash-join with this one
      * @param joinClause1   specifies how to join the two streams
@@ -819,7 +828,7 @@ public interface GeneralStage<T> extends Stage {
      * @param <R>           the resulting output type
      * @return the newly attached stage
      *
-     * @since 4.1
+     * @since Jet 4.1
      */
     @Nonnull
     <K, T1_IN, T1, R> GeneralStage<R> innerHashJoin(
@@ -849,6 +858,10 @@ public interface GeneralStage<T> extends Stage {
      *     (user, country, company) -> user.setCountry(country).setCompany(company)
      * )
      * }</pre>
+     * <p>
+     * This operation is subject to memory limits. See {@link
+     * InstanceConfig#setMaxProcessorAccumulatedRecords(long)} for more
+     * information.
      *
      * @param stage1        the first stage to join
      * @param joinClause1   specifies how to join with {@code stage1}
@@ -896,6 +909,10 @@ public interface GeneralStage<T> extends Stage {
      *     (user, country, company) -> user.setCountry(country).setCompany(company)
      * )
      * }</pre>
+     * <p>
+     * This operation is subject to memory limits. See {@link
+     * InstanceConfig#setMaxProcessorAccumulatedRecords(long)} for more
+     * information.
      *
      * <p>
      * This method is similar to {@link #hashJoin2} method, but it guarantees
@@ -918,7 +935,7 @@ public interface GeneralStage<T> extends Stage {
      * @param <R>           the resulting output type
      * @return the newly attached stage
      *
-     * @since 4.1
+     * @since Jet 4.1
      */
     @Nonnull
     <K1, K2, T1_IN, T2_IN, T1, T2, R> GeneralStage<R> innerHashJoin2(
@@ -953,6 +970,10 @@ public interface GeneralStage<T> extends Stage {
      * StreamStage<User> joined = builder.build((user, itemsByTag) ->
      *         user.setCountry(itemsByTag.get(tCountry)).setCompany(itemsByTag.get(tCompany)));
      * }</pre>
+     * <p>
+     * This operation is subject to memory limits. See {@link
+     * InstanceConfig#setMaxProcessorAccumulatedRecords(long)} for more
+     * information.
      *
      * @return the newly attached stage
      */
@@ -1031,7 +1052,7 @@ public interface GeneralStage<T> extends Stage {
      * @return a new stage using the same transform as this one, only with a
      *         rebalancing flag raised that will affect data routing into the next
      *         stage.
-     * @since 4.2
+     * @since Jet 4.2
      */
     @Nonnull
     GeneralStage<T> rebalance();
@@ -1098,7 +1119,7 @@ public interface GeneralStage<T> extends Stage {
      * @return a new stage using the same transform as this one, only with a
      *         rebalancing flag raised that will affect data routing into the next
      *         stage.
-     * @since 4.2
+     * @since Jet 4.2
      */
     @Nonnull
     <K> GeneralStage<T> rebalance(@Nonnull FunctionEx<? super T, ? extends K> keyFn);

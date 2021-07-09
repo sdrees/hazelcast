@@ -1619,6 +1619,21 @@ hazelcast:
   # - com.hazelcast.spi.merge.PutIfAbsentMergePolicy (PUT_IF_ABSENT)
   # - com.hazelcast.spi.merge.HigherHitsMergePolicy (HIGHER_HITS)
   # - com.hazelcast.spi.merge.LatestAccessMergePolicy (LATEST_ACCESS)
+  # * "merkle-tree":
+  # It has the following sub-elements:
+  # - "enabled":
+  # 	Specifies whether the merkle tree is enabled.
+  # - "depth":
+  # 	The depth of the merkle tree.
+  # 	A larger depth means that a data synchronization mechanism will be able
+  # 	to pinpoint a smaller subset of the data structure contents in which a
+  # 	change occurred. This causes the synchronization mechanism to be more
+  # 	efficient. On the other hand, a larger tree depth means the merkle tree
+  # 	will consume more memory.
+  # 	A smaller depth means the data synchronization mechanism will have to
+  # 	transfer larger chunks of the data structure in which a possible change
+  # 	happened. On the other hand, a shallower tree consumes less memory.
+  # 	The depth must be between 2 and 27 (exclusive). The default depth is 10.
   # * "hot-restart":
   # Used to enable Hazelcast's Hot Restart Persistence feature for the cache. It is available only in Hazelcast
   # Enterprise HD. Set its "enabled" to true to enable the feature. By default, it is disabled. It has the following
@@ -1666,8 +1681,7 @@ hazelcast:
       expiry-policy-factory:
         class-name: com.example.cache.MyExpirePolicyFactory
       cache-entry-listeners:
-        cache-entry-listener:
-          old-value-required: false
+        - old-value-required: false
           synchronous: false
           cache-entry-listener-factory:
             class-name: com.example.cache.MyEntryListenerFactory
@@ -1699,6 +1713,9 @@ hazelcast:
         enabled: false
         capacity: 10000
         time-to-live-seconds: 0
+      merkle-tree:
+        enabled: false
+        depth: 10
       disable-per-entry-invalidation-events: true
 
   #
@@ -2208,7 +2225,20 @@ hazelcast:
   security:
     enabled: false
     realms:
-      - name: mr
+      - name: simpleRealm
+        authentication:
+          simple:
+            users:
+              - username: test
+                password: 'a1234'
+                roles:
+                  - monitor
+                  - hazelcast
+              - username: dev
+                password: 'secret'
+                roles:
+                  - root
+      - name: jaasRealm
         authentication:
           jaas:
             - class-name: com.hazelcast.examples.MyRequiredLoginModule
@@ -2220,17 +2250,6 @@ hazelcast:
             class-name: com.hazelcast.examples.MyCredentialsFactory
             properties:
               property: value
-      - name: cr
-        authentication:
-          jaas:
-            - class-name: com.hazelcast.examples.MyOptionalLoginModule
-              usage: OPTIONAL
-              properties:
-                property: value
-            - class-name: com.hazelcast.examples.MyRequiredLoginModule
-              usage: REQUIRED
-              properties:
-                property: value
       - name: ldapRealm
         authentication:
           ldap:
@@ -2325,9 +2344,9 @@ hazelcast:
                 principal: hz/127.0.0.1@HAZELCAST.COM
                 keyTab: /opt/hz-localhost.keytab
     member-authentication:
-      realm: mr
+      realm: jaasRealm
     client-authentication:
-      realm: cr
+      realm: simpleRealm
     client-permission-policy:
       class-name: com.hazelcast.examples.MyPermissionPolicy
       properties:
@@ -3490,6 +3509,11 @@ hazelcast:
   #  ===== HAZELCAST JET CONFIGURATION =====
   #
   #  Configuration element's name is <jet>.
+  #  It has the following attributes:
+  #  - enabled:
+  #    Enables or disables Jet Service.
+  #  - resource-upload-enabled
+  #    Enables or disables resource uploading for Jet jobs.
   #
   #    It has the following sub-elements:
   #
@@ -3532,6 +3556,23 @@ hazelcast:
   #          Feature is disabled by default. If you enable this option in open-source,
   #          the member will fail to start, you need Enterprise to run it and obtain a
   #          license from Hazelcast.
+  #      * <max-processor-accumulated-records>:
+  #          Sets the maximum number of records that can be accumulated by any single
+  #          processor instance.
+  #          Operations like grouping, sorting or joining require certain amount of
+  #          records to be accumulated before they can proceed. You can set this option
+  #          to reduce the probability of OutOfMemoryError.
+  #          This option applies to each processor instance separately, hence the
+  #          effective limit of records accumulated by each cluster member is influenced
+  #          by the vertex's localParallelism and the number of jobs in the cluster.
+  #          Currently, maxProcessorAccumulatedRecords limits:
+  #          1. number of items sorted by the sort operation
+  #          2. number of distinct keys accumulated by aggregation operations
+  #          3. number of entries in each hash-join lookup table
+  #          4. number of entries in stateful transforms
+  #          5. number of distinct items in distinct operation
+  #          Note: the limit does not apply to streaming aggregations.
+  #          The default value is Long.MAX_VALUE.
   #
   #  * <edge-defaults>
   #  A configuration object for a DAG `Edge` that holds fine-tuning parameters
@@ -3577,12 +3618,15 @@ hazelcast:
   #  the last acked byte.
   #  This setting has no effect on a non-distributed edge.
   jet:
+    enabled: true
+    resource-upload-enabled: true
     instance:
       cooperative-thread-count: 4
       flow-control-period: 100
       backup-count: 1
       scale-up-delay-millis: 10000
       lossless-restart-enabled: false
+      max-processor-accumulated-records: 1000000000
     edge-defaults:
       queue-size: 1024
       packet-size-limit: 16384

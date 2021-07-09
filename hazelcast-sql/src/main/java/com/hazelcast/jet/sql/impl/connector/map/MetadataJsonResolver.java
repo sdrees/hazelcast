@@ -1,15 +1,15 @@
 /*
- * Copyright (c) 2008-2021, Hazelcast, Inc. All Rights Reserved.
+ * Copyright 2021 Hazelcast Inc.
  *
- * Licensed under the Apache License, Version 2.0 (the "License");
+ * Licensed under the Hazelcast Community License (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
  *
- * http://www.apache.org/licenses/LICENSE-2.0
+ * http://hazelcast.com/hazelcast-community-license
  *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * WITHOUT WARRANTIES OF ANY KIND, either express or implied.
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
@@ -21,7 +21,7 @@ import com.hazelcast.jet.sql.impl.connector.keyvalue.KvMetadata;
 import com.hazelcast.jet.sql.impl.connector.keyvalue.KvMetadataResolver;
 import com.hazelcast.jet.sql.impl.extract.HazelcastJsonQueryTargetDescriptor;
 import com.hazelcast.jet.sql.impl.inject.HazelcastJsonUpsertTargetDescriptor;
-import com.hazelcast.jet.sql.impl.schema.MappingField;
+import com.hazelcast.sql.impl.schema.MappingField;
 import com.hazelcast.sql.impl.QueryException;
 import com.hazelcast.sql.impl.extract.QueryPath;
 import com.hazelcast.sql.impl.schema.TableField;
@@ -29,15 +29,14 @@ import com.hazelcast.sql.impl.schema.map.MapTableField;
 import com.hazelcast.sql.impl.type.QueryDataType;
 
 import java.util.ArrayList;
-import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Map.Entry;
 import java.util.stream.Stream;
 
 import static com.hazelcast.jet.sql.impl.connector.SqlConnector.JSON_FORMAT;
-import static com.hazelcast.jet.sql.impl.connector.keyvalue.KvMetadataResolvers.extractFields;
-import static com.hazelcast.jet.sql.impl.connector.keyvalue.KvMetadataResolvers.maybeAddDefaultField;
+import static com.hazelcast.jet.sql.impl.connector.keyvalue.KvMetadataResolver.extractFields;
+import static com.hazelcast.jet.sql.impl.connector.keyvalue.KvMetadataResolver.maybeAddDefaultField;
 
 final class MetadataJsonResolver implements KvMetadataResolver {
 
@@ -52,7 +51,7 @@ final class MetadataJsonResolver implements KvMetadataResolver {
     }
 
     @Override
-    public List<MappingField> resolveAndValidateFields(
+    public Stream<MappingField> resolveAndValidateFields(
             boolean isKey,
             List<MappingField> userFields,
             Map<String, String> options,
@@ -62,19 +61,14 @@ final class MetadataJsonResolver implements KvMetadataResolver {
             throw QueryException.error("Column list is required for JSON format");
         }
 
-        Map<QueryPath, MappingField> userFieldsByPath = extractFields(userFields, isKey);
-
-        Map<String, MappingField> fields = new LinkedHashMap<>();
-        for (Entry<QueryPath, MappingField> entry : userFieldsByPath.entrySet()) {
-            QueryPath path = entry.getKey();
-            if (path.getPath() == null) {
-                throw QueryException.error("Cannot use the '" + path + "' field with JSON serialization");
-            }
-            MappingField field = entry.getValue();
-
-            fields.putIfAbsent(field.name(), field);
-        }
-        return new ArrayList<>(fields.values());
+        return extractFields(userFields, isKey).entrySet().stream()
+                .map(entry -> {
+                    QueryPath path = entry.getKey();
+                    if (path.getPath() == null) {
+                        throw QueryException.error("Cannot use the '" + path + "' field with JSON serialization");
+                    }
+                    return entry.getValue();
+                });
     }
 
     @Override
@@ -94,8 +88,8 @@ final class MetadataJsonResolver implements KvMetadataResolver {
 
             fields.add(new MapTableField(name, type, false, path));
         }
-
         maybeAddDefaultField(isKey, resolvedFields, fields);
+
         return new KvMetadata(
                 fields,
                 HazelcastJsonQueryTargetDescriptor.INSTANCE,

@@ -1,15 +1,15 @@
 /*
- * Copyright (c) 2008-2021, Hazelcast, Inc. All Rights Reserved.
+ * Copyright 2021 Hazelcast Inc.
  *
- * Licensed under the Apache License, Version 2.0 (the "License");
+ * Licensed under the Hazelcast Community License (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
  *
- * http://www.apache.org/licenses/LICENSE-2.0
+ * http://hazelcast.com/hazelcast-community-license
  *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * WITHOUT WARRANTIES OF ANY KIND, either express or implied.
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
@@ -44,7 +44,6 @@ import com.hazelcast.sql.impl.type.QueryDataType;
 import org.apache.calcite.plan.RelOptCost;
 import org.apache.calcite.plan.RelOptUtil;
 import org.apache.calcite.plan.RelTraitSet;
-import org.apache.calcite.plan.volcano.VolcanoPlanner;
 import org.apache.calcite.rel.RelNode;
 import org.apache.calcite.schema.Table;
 import org.apache.calcite.sql.SqlExplainLevel;
@@ -53,9 +52,7 @@ import org.apache.calcite.sql.parser.SqlParserPos;
 
 import java.io.BufferedReader;
 import java.io.IOException;
-import java.io.PrintWriter;
 import java.io.StringReader;
-import java.io.StringWriter;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -63,6 +60,7 @@ import java.util.Map;
 
 import static com.hazelcast.sql.impl.QueryUtils.SCHEMA_NAME_PARTITIONED;
 import static com.hazelcast.sql.impl.type.QueryDataType.INT;
+import static java.util.Collections.emptyList;
 import static junit.framework.TestCase.assertEquals;
 
 /**
@@ -75,10 +73,6 @@ public abstract class OptimizerTestSupport extends SqlTestSupport {
 
     protected RelNode optimizePhysical(String sql, QueryDataType... parameterTypes) {
         return optimize(sql, 1, true, parameterTypes).getPhysical();
-    }
-
-    protected RelNode optimizeLogical(String sql, int nodeCount, QueryDataType... parameterTypes) {
-        return optimize(sql, nodeCount, false, parameterTypes).getLogical();
     }
 
     protected RelNode optimizePhysical(String sql, int nodeCount, QueryDataType... parameterTypes) {
@@ -122,6 +116,7 @@ public abstract class OptimizerTestSupport extends SqlTestSupport {
         OptimizerContext context = OptimizerContext.create(
                 HazelcastSchemaUtils.createCatalog(schema),
                 QueryUtils.prepareSearchPaths(null, null),
+                emptyList(),
                 nodeCount,
                 new HazelcastSqlBackend(null),
                 null
@@ -320,16 +315,6 @@ public abstract class OptimizerTestSupport extends SqlTestSupport {
 
     private static String planErrorMessage(String message, PlanRows expected, PlanRows actual) {
         return message + "\n\n>>> EXPECTED PLAN:\n" + expected + "\n>>> ACTUAL PLAN:\n" + actual;
-    }
-
-    public static void dump(RelNode node) {
-        VolcanoPlanner planner = (VolcanoPlanner) node.getCluster().getPlanner();
-
-        StringWriter sw = new StringWriter();
-
-        planner.dump(new PrintWriter(sw));
-
-        System.out.println(sw);
     }
 
     /**

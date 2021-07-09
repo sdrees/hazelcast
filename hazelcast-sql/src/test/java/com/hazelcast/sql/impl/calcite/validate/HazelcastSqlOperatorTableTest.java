@@ -1,15 +1,15 @@
 /*
- * Copyright (c) 2008-2021, Hazelcast, Inc. All Rights Reserved.
+ * Copyright 2021 Hazelcast Inc.
  *
- * Licensed under the Apache License, Version 2.0 (the "License");
+ * Licensed under the Hazelcast Community License (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
  *
- * http://www.apache.org/licenses/LICENSE-2.0
+ * http://hazelcast.com/hazelcast-community-license
  *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * WITHOUT WARRANTIES OF ANY KIND, either express or implied.
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
@@ -18,14 +18,13 @@ package com.hazelcast.sql.impl.calcite.validate;
 
 import com.hazelcast.internal.util.BiTuple;
 import com.hazelcast.sql.impl.calcite.validate.operators.HazelcastReturnTypeInference;
-import com.hazelcast.sql.impl.calcite.validate.operators.common.HazelcastBinaryOperator;
 import com.hazelcast.sql.impl.calcite.validate.operators.common.HazelcastFunction;
-import com.hazelcast.sql.impl.calcite.validate.operators.common.HazelcastPostfixOperator;
-import com.hazelcast.sql.impl.calcite.validate.operators.common.HazelcastPrefixOperator;
-import com.hazelcast.sql.impl.calcite.validate.operators.common.HazelcastSpecialOperator;
+import com.hazelcast.sql.impl.calcite.validate.operators.common.HazelcastOperandTypeCheckerAware;
+import com.hazelcast.sql.impl.calcite.validate.operators.misc.HazelcastCaseOperator;
 import com.hazelcast.test.HazelcastParallelClassRunner;
 import com.hazelcast.test.annotation.ParallelJVMTest;
 import com.hazelcast.test.annotation.QuickTest;
+import org.apache.calcite.sql.SqlKind;
 import org.apache.calcite.sql.SqlOperator;
 import org.apache.calcite.sql.SqlSyntax;
 import org.junit.Test;
@@ -64,11 +63,8 @@ public class HazelcastSqlOperatorTableTest {
     @Test
     public void testOperandTypeChecker() {
         for (SqlOperator operator : HazelcastSqlOperatorTable.instance().getOperatorList()) {
-            boolean valid = operator instanceof HazelcastFunction
-                    || operator instanceof HazelcastPrefixOperator
-                    || operator instanceof HazelcastPostfixOperator
-                    || operator instanceof HazelcastBinaryOperator
-                    || operator instanceof HazelcastSpecialOperator;
+            boolean valid = operator instanceof HazelcastOperandTypeCheckerAware
+                    || operator instanceof HazelcastCaseOperator;
 
             assertTrue("Operator must implement one of classes from " + HazelcastFunction.class.getPackage().toString()
                     + ": " + operator.getClass().getSimpleName(), valid);
@@ -78,6 +74,13 @@ public class HazelcastSqlOperatorTableTest {
     @Test
     public void testReturnTypeInference() {
         for (SqlOperator operator : HazelcastSqlOperatorTable.instance().getOperatorList()) {
+            /**
+             * HazelcastInPredicate inherits from Calcite's SqlInOperator due to hacks inside SqlToRelConverter
+             * @see org.apache.calcite.sql2rel.SqlToRelConverter##substituteSubQuery
+             * */
+            if (operator.getKind() == SqlKind.IN || operator.getKind() == SqlKind.NOT_IN) {
+                continue;
+            }
             boolean valid = operator.getReturnTypeInference() instanceof HazelcastReturnTypeInference;
 
             assertTrue("Operator must have " + HazelcastReturnTypeInference.class.getSimpleName() + ": " + operator.getClass().getSimpleName(), valid);

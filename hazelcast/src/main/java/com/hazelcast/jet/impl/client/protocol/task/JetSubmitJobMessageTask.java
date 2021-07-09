@@ -23,6 +23,8 @@ import com.hazelcast.jet.impl.client.protocol.codec.JetSubmitJobCodec;
 import com.hazelcast.jet.impl.operation.SubmitJobOperation;
 import com.hazelcast.spi.impl.operationservice.Operation;
 
+import java.util.UUID;
+
 public class JetSubmitJobMessageTask extends AbstractJetMessageTask<JetSubmitJobCodec.RequestParameters, Void> {
     protected JetSubmitJobMessageTask(ClientMessage clientMessage, Node node, Connection connection) {
         super(clientMessage, node, connection, JetSubmitJobCodec::decodeRequest,
@@ -30,8 +32,13 @@ public class JetSubmitJobMessageTask extends AbstractJetMessageTask<JetSubmitJob
     }
 
     @Override
+    protected UUID getLightJobCoordinator() {
+        return parameters.isLightJob ? nodeEngine.getLocalMember().getUuid() : null;
+    }
+
+    @Override
     protected Operation prepareOperation() {
-        return new SubmitJobOperation(parameters.jobId, parameters.dag, parameters.jobConfig);
+        return new SubmitJobOperation(parameters.jobId, parameters.dag, parameters.jobConfig, parameters.isLightJob);
     }
 
     @Override

@@ -21,11 +21,6 @@ import com.hazelcast.cluster.Address;
 import java.util.Arrays;
 import java.util.HashMap;
 import java.util.Map;
-import java.util.stream.Collectors;
-import java.util.stream.IntStream;
-
-import static java.util.stream.Collectors.collectingAndThen;
-import static java.util.stream.Collectors.groupingBy;
 
 /**
  * Collaborator of {@link ExecutionPlan} that takes care of assigning
@@ -44,18 +39,17 @@ class PartitionArrangement {
     /** Array of local partitions */
     private final int[] localPartitions;
 
-    PartitionArrangement(Address[] partitionOwners, Address thisAddress) {
-        localPartitions = IntStream.range(0, partitionOwners.length)
-                .filter(partitionId -> thisAddress.equals(partitionOwners[partitionId]))
-                .toArray();
-
-        allPartitions = IntStream.range(0, partitionOwners.length).toArray();
-
-        remotePartitionAssignment = IntStream.range(0, partitionOwners.length)
-                .filter(partitionId -> !thisAddress.equals(partitionOwners[partitionId]))
-                .boxed()
-                .collect(groupingBy(partitionId -> partitionOwners[partitionId],
-                        collectingAndThen(Collectors.toList(), l -> l.stream().mapToInt(i -> i).toArray())));
+    PartitionArrangement(Map<Address, int[]> partitionAssignment, Address thisAddress) {
+        remotePartitionAssignment = new HashMap<>(partitionAssignment);
+        localPartitions = remotePartitionAssignment.remove(thisAddress);
+        int partitionCount = 0;
+        for (int[] value : partitionAssignment.values()) {
+            partitionCount += value.length;
+        }
+        allPartitions = new int[partitionCount];
+        for (int i = 0; i < allPartitions.length; i++) {
+            allPartitions[i] = i;
+        }
     }
 
     Map<Address, int[]> getRemotePartitionAssignment() {

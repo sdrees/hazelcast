@@ -1,15 +1,15 @@
 /*
- * Copyright (c) 2008-2021, Hazelcast, Inc. All Rights Reserved.
+ * Copyright 2021 Hazelcast Inc.
  *
- * Licensed under the Apache License, Version 2.0 (the "License");
+ * Licensed under the Hazelcast Community License (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
  *
- * http://www.apache.org/licenses/LICENSE-2.0
+ * http://hazelcast.com/hazelcast-community-license
  *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * WITHOUT WARRANTIES OF ANY KIND, either express or implied.
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
@@ -109,6 +109,24 @@ public class SqlSeriesGeneratorTest extends SqlTestSupport {
     }
 
     @Test
+    public void test_generateSeriesNamedArgumentsAndExplicitNull() {
+        assertThatThrownBy(() -> sqlService.execute("SELECT * FROM TABLE(GENERATE_SERIES(stop => null, \"start\" => null))").iterator().next())
+                .hasMessageContaining("GENERATE_SERIES - null argument(s)");
+    }
+
+    @Test
+    public void test_generateSeriesNamedArgumentsAndExplicitNullStep() {
+        assertRowsAnyOrder(
+                "SELECT * FROM TABLE(GENERATE_SERIES(stop => 2 + 1, \"start\" => 1, step => null))",
+                asList(
+                        new Row(1),
+                        new Row(2),
+                        new Row(3)
+                )
+        );
+    }
+
+    @Test
     public void test_generateSeriesFilterAndProject() {
         assertRowsAnyOrder(
                 "SELECT v * 2 FROM TABLE(GENERATE_SERIES(0, 5)) WHERE v > 0 AND v < 5",
@@ -133,6 +151,31 @@ public class SqlSeriesGeneratorTest extends SqlTestSupport {
                         new Row(8L)
                 )
         );
+    }
+
+    @Test
+    public void test_generateSeriesWithNamedArgumentsAndDynamicParameters() {
+        assertRowsAnyOrder(
+                "SELECT v * ? FROM TABLE(GENERATE_SERIES(stop => ?, \"start\" => ?)) WHERE v > ? AND v < 5",
+                asList(2, 5, 0, 1),
+                asList(
+                        new Row(4L),
+                        new Row(6L),
+                        new Row(8L)
+                )
+        );
+    }
+
+    @Test
+    public void test_generateSeriesWithDynamicParametersAndArgumentTypeMismatch() {
+        assertThatThrownBy(() -> sqlService.execute("SELECT * FROM TABLE(GENERATE_SERIES(0, ?))", "1"))
+                .hasMessageContaining("Parameter at position 0 must be of INTEGER type, but VARCHAR was found");
+    }
+
+    @Test
+    public void test_generateSeriesWithNamedArgumentsDynamicParametersAndArgumentTypeMismatch() {
+        assertThatThrownBy(() -> sqlService.execute("SELECT * FROM TABLE(GENERATE_SERIES(stop => 10, \"start\" => ?))", "1"))
+                .hasMessageContaining("Parameter at position 0 must be of INTEGER type, but VARCHAR was found");
     }
 
     @Test

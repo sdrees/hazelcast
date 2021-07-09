@@ -1,15 +1,15 @@
 /*
- * Copyright (c) 2008-2021, Hazelcast, Inc. All Rights Reserved.
+ * Copyright 2021 Hazelcast Inc.
  *
- * Licensed under the Apache License, Version 2.0 (the "License");
+ * Licensed under the Hazelcast Community License (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
  *
- * http://www.apache.org/licenses/LICENSE-2.0
+ * http://hazelcast.com/hazelcast-community-license
  *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * WITHOUT WARRANTIES OF ANY KIND, either express or implied.
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
@@ -22,6 +22,7 @@ import com.hazelcast.jet.sql.impl.schema.model.Person;
 import com.hazelcast.sql.HazelcastSqlException;
 import com.hazelcast.sql.SqlResult;
 import com.hazelcast.sql.SqlService;
+import com.hazelcast.sql.impl.schema.Mapping;
 import org.junit.BeforeClass;
 import org.junit.Test;
 
@@ -164,25 +165,11 @@ public class SqlMappingTest extends SqlTestSupport {
     }
 
     @Test
-    public void when_noFieldsResolved_then_wholeValueMapped() {
-        String name = randomName();
-
-        sqlService.execute(javaSerializableMapDdl(name, Object.class, Object.class));
-
-        Person key = new Person("foo");
-        Person value = new Person("bar");
-        instance().getMap(name).put(key, value);
-
-        assertRowsAnyOrder("SELECT __key, this FROM " + name,
-                singletonList(new Row(key, value)));
-    }
-
-    @Test
     public void test_caseInsensitiveType() {
-        sqlService.execute("CREATE MAPPING t1 TYPE TestStream");
-        sqlService.execute("CREATE MAPPING t2 TYPE teststream");
-        sqlService.execute("CREATE MAPPING t3 TYPE TESTSTREAM");
-        sqlService.execute("CREATE MAPPING t4 TYPE tEsTsTrEaM");
+        sqlService.execute("CREATE MAPPING t1 TYPE AllTypes");
+        sqlService.execute("CREATE MAPPING t2 TYPE alltypes");
+        sqlService.execute("CREATE MAPPING t3 TYPE ALLTYPES");
+        sqlService.execute("CREATE MAPPING t4 TYPE aLlTyPeS");
     }
 
     @Test

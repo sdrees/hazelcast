@@ -26,7 +26,9 @@ import com.hazelcast.config.security.KerberosAuthenticationConfig;
 import com.hazelcast.config.security.KerberosIdentityConfig;
 import com.hazelcast.config.security.LdapAuthenticationConfig;
 import com.hazelcast.config.security.RealmConfig;
+import com.hazelcast.config.security.SimpleAuthenticationConfig;
 import com.hazelcast.instance.EndpointQualifier;
+import com.hazelcast.internal.config.SchemaViolationConfigurationException;
 import com.hazelcast.internal.nio.IOUtil;
 import com.hazelcast.splitbrainprotection.SplitBrainProtectionOn;
 import com.hazelcast.splitbrainprotection.impl.ProbabilisticSplitBrainProtectionFunction;
@@ -48,7 +50,6 @@ import java.io.PrintWriter;
 import java.io.Writer;
 import java.net.URL;
 import java.text.MessageFormat;
-import java.util.Arrays;
 import java.util.Collection;
 import java.util.HashSet;
 import java.util.Iterator;
@@ -65,7 +66,10 @@ import static com.hazelcast.config.PersistentMemoryMode.MOUNTED;
 import static com.hazelcast.config.PersistentMemoryMode.SYSTEM_MEMORY;
 import static com.hazelcast.config.WanQueueFullBehavior.DISCARD_AFTER_MUTATION;
 import static com.hazelcast.config.WanQueueFullBehavior.THROW_EXCEPTION;
+import static com.hazelcast.internal.util.StringUtil.lowerCaseInternal;
 import static java.io.File.createTempFile;
+import static java.util.Arrays.asList;
+import static java.util.Collections.singletonList;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotNull;
@@ -91,11 +95,13 @@ import static org.junit.Assert.fail;
  */
 @RunWith(HazelcastParallelClassRunner.class)
 @Category({QuickTest.class, ParallelJVMTest.class})
-public class YamlConfigBuilderTest extends AbstractConfigBuilderTest {
+public class YamlConfigBuilderTest
+        extends AbstractConfigBuilderTest {
 
     @Override
     @Test
-    public void testConfigurationURL() throws Exception {
+    public void testConfigurationURL()
+            throws Exception {
         URL configURL = getClass().getClassLoader().getResource("hazelcast-default.yaml");
         Config config = new YamlConfigBuilder(configURL).build();
         assertEquals(configURL, config.getConfigurationUrl());
@@ -115,7 +121,8 @@ public class YamlConfigBuilderTest extends AbstractConfigBuilderTest {
 
     @Override
     @Test
-    public void testConfigurationWithFileName() throws Exception {
+    public void testConfigurationWithFileName()
+            throws Exception {
         assumeThatNotZingJDK6(); // https://github.com/hazelcast/hazelcast/issues/9044
 
         File file = createTempFile("foo", "bar");
@@ -123,9 +130,9 @@ public class YamlConfigBuilderTest extends AbstractConfigBuilderTest {
 
         String yaml = ""
                 + "hazelcast:\n"
-                + "  group:\n"
-                + "    name: foobar\n"
-                + "    password: dev-pass";
+                + "  map:\n"
+                + "    my-map:\n"
+                + "      backup-count: 1";
         Writer writer = new PrintWriter(file, "UTF-8");
         writer.write(yaml);
         writer.close();
@@ -158,7 +165,7 @@ public class YamlConfigBuilderTest extends AbstractConfigBuilderTest {
 
     @Override
     @Test
-    public void testSecurityInterceptorConfig() {
+    public void testSecurityConfig() {
         String yaml = ""
                 + "hazelcast:\n"
                 + "  security:\n"
@@ -217,6 +224,20 @@ public class YamlConfigBuilderTest extends AbstractConfigBuilderTest {
                 + "            principal: jduke@HAZELCAST.COM\n"
                 + "            keytab-file: /opt/jduke.keytab\n"
                 + "            use-canonical-hostname: true\n"
+                + "      - name: simple\n"
+                + "        authentication:\n"
+                + "          simple:\n"
+                + "            skip-role: true\n"
+                + "            users:\n"
+                + "              - username: test\n"
+                + "                password: 'a1234'\n"
+                + "                roles:\n"
+                + "                  - monitor\n"
+                + "                  - hazelcast\n"
+                + "              - username: dev\n"
+                + "                password: secret\n"
+                + "                roles:\n"
+                + "                  - root\n"
                 + "    client-permission-policy:\n"
                 + "      class-name: MyPermissionPolicy\n"
                 + "      properties:\n"
@@ -293,6 +314,19 @@ public class YamlConfigBuilderTest extends AbstractConfigBuilderTest {
         LdapAuthenticationConfig kerbLdapAuthentication = kerbAuthentication.getLdapAuthenticationConfig();
         assertNotNull(kerbLdapAuthentication);
         assertEquals("ldap://127.0.0.1", kerbLdapAuthentication.getUrl());
+
+        RealmConfig simpleRealm = securityConfig.getRealmConfig("simple");
+        assertNotNull(simpleRealm);
+        SimpleAuthenticationConfig simpleAuthnCfg = simpleRealm.getSimpleAuthenticationConfig();
+        assertNotNull(simpleAuthnCfg);
+        assertEquals(2, simpleAuthnCfg.getUsernames().size());
+        assertTrue(simpleAuthnCfg.getUsernames().contains("test"));
+        assertEquals("a1234", simpleAuthnCfg.getPassword("test"));
+        Set<String> expectedRoles = new HashSet<>();
+        expectedRoles.add("monitor");
+        expectedRoles.add("hazelcast");
+        assertEquals(expectedRoles, simpleAuthnCfg.getRoles("test"));
+        assertEquals(Boolean.TRUE, simpleAuthnCfg.getSkipRole());
 
         // client-permission-policy
         PermissionPolicyConfig permissionPolicyConfig = securityConfig.getClientPolicyConfig();
@@ -516,8 +550,10 @@ public class YamlConfigBuilderTest extends AbstractConfigBuilderTest {
         config = buildConfig(""
                 + "hazelcast:\n"
                 + "  network:\n"
-                + "    port: 5701\n");
+                + "    port:\n"
+                + "      port: 5703\n");
         assertEquals(100, config.getNetworkConfig().getPortCount());
+        assertEquals(5703, config.getNetworkConfig().getPort());
     }
 
     @Override
@@ -536,8 +572,10 @@ public class YamlConfigBuilderTest extends AbstractConfigBuilderTest {
         config = buildConfig(""
                 + "hazelcast:\n"
                 + "  network:\n"
-                + "    port: 5701\n");
+                + "    port: \n"
+                + "      port: 5801\n");
         assertTrue(config.getNetworkConfig().isPortAutoIncrement());
+        assertEquals(5801, config.getNetworkConfig().getPort());
     }
 
     @Override
@@ -589,7 +627,8 @@ public class YamlConfigBuilderTest extends AbstractConfigBuilderTest {
         assertEquals(2, customQueueConfig.getBackupCount());
         assertEquals(1, customQueueConfig.getAsyncBackupCount());
         assertEquals(1, customQueueConfig.getEmptyQueueTtl());
-        assertEquals("com.hazelcast.collection.impl.queue.model.PriorityElementComparator", customQueueConfig.getPriorityComparatorClassName());
+        assertEquals("com.hazelcast.collection.impl.queue.model.PriorityElementComparator",
+                customQueueConfig.getPriorityComparatorClassName());
 
         MergePolicyConfig mergePolicyConfig = customQueueConfig.getMergePolicyConfig();
         assertEquals("CustomMergePolicy", mergePolicyConfig.getPolicy());
@@ -804,6 +843,7 @@ public class YamlConfigBuilderTest extends AbstractConfigBuilderTest {
 
     @Override
     @Test
+    @Ignore
     public void testCaseInsensitivityOfSettings() {
         String yaml = ""
                 + "hazelcast:\n"
@@ -1161,7 +1201,7 @@ public class YamlConfigBuilderTest extends AbstractConfigBuilderTest {
                 + "  map:\n"
                 + "    mymap:\n"
                 + "      map-store:"
-                + (useDefault ? "{}" : "\n        write-coalescing: " + String.valueOf(value) + "\n");
+                + (useDefault ? " {}" : "\n        write-coalescing: " + String.valueOf(value) + "\n");
     }
 
     @Override
@@ -1779,7 +1819,7 @@ public class YamlConfigBuilderTest extends AbstractConfigBuilderTest {
         assertFalse(consumerConfig.isPersistWanReplicatedData());
     }
 
-    protected Config buildConfig(String yaml) {
+    protected static Config buildConfig(String yaml) {
         ByteArrayInputStream bis = new ByteArrayInputStream(yaml.getBytes());
         YamlConfigBuilder configBuilder = new YamlConfigBuilder(bis);
         return configBuilder.build();
@@ -1839,7 +1879,8 @@ public class YamlConfigBuilderTest extends AbstractConfigBuilderTest {
         SplitBrainProtectionConfig splitBrainProtectionConfig = config.getSplitBrainProtectionConfig("mySplitBrainProtection");
 
         assertFalse(splitBrainProtectionConfig.getListenerConfigs().isEmpty());
-        assertEquals("com.abc.my.splitbrainprotection.listener", splitBrainProtectionConfig.getListenerConfigs().get(0).getClassName());
+        assertEquals("com.abc.my.splitbrainprotection.listener",
+                splitBrainProtectionConfig.getListenerConfigs().get(0).getClassName());
         assertEquals("com.abc.my.second.listener", splitBrainProtectionConfig.getListenerConfigs().get(1).getClassName());
         assertEquals("com.hazelcast.SomeSplitBrainProtectionFunction", splitBrainProtectionConfig.getFunctionClassName());
     }
@@ -1903,7 +1944,8 @@ public class YamlConfigBuilderTest extends AbstractConfigBuilderTest {
 
         Config config = buildConfig(yaml);
         SplitBrainProtectionConfig splitBrainProtectionConfig = config.getSplitBrainProtectionConfig("mySplitBrainProtection");
-        assertInstanceOf(RecentlyActiveSplitBrainProtectionFunction.class, splitBrainProtectionConfig.getFunctionImplementation());
+        assertInstanceOf(RecentlyActiveSplitBrainProtectionFunction.class,
+                splitBrainProtectionConfig.getFunctionImplementation());
         RecentlyActiveSplitBrainProtectionFunction splitBrainProtectionFunction = (RecentlyActiveSplitBrainProtectionFunction) splitBrainProtectionConfig
                 .getFunctionImplementation();
         assertEquals(RecentlyActiveSplitBrainProtectionConfigBuilder.DEFAULT_HEARTBEAT_TOLERANCE_MILLIS,
@@ -1925,7 +1967,8 @@ public class YamlConfigBuilderTest extends AbstractConfigBuilderTest {
         Config config = buildConfig(yaml);
         SplitBrainProtectionConfig splitBrainProtectionConfig = config.getSplitBrainProtectionConfig("mySplitBrainProtection");
         assertEquals(3, splitBrainProtectionConfig.getMinimumClusterSize());
-        assertInstanceOf(RecentlyActiveSplitBrainProtectionFunction.class, splitBrainProtectionConfig.getFunctionImplementation());
+        assertInstanceOf(RecentlyActiveSplitBrainProtectionFunction.class,
+                splitBrainProtectionConfig.getFunctionImplementation());
         RecentlyActiveSplitBrainProtectionFunction splitBrainProtectionFunction = (RecentlyActiveSplitBrainProtectionFunction) splitBrainProtectionConfig
                 .getFunctionImplementation();
         assertEquals(13000, splitBrainProtectionFunction.getHeartbeatToleranceMillis());
@@ -1952,8 +1995,10 @@ public class YamlConfigBuilderTest extends AbstractConfigBuilderTest {
                 splitBrainProtectionFunction.getAcceptableHeartbeatPauseMillis());
         assertEquals(ProbabilisticSplitBrainProtectionConfigBuilder.DEFAULT_MIN_STD_DEVIATION,
                 splitBrainProtectionFunction.getMinStdDeviationMillis());
-        assertEquals(ProbabilisticSplitBrainProtectionConfigBuilder.DEFAULT_PHI_THRESHOLD, splitBrainProtectionFunction.getSuspicionThreshold(), 0.01);
-        assertEquals(ProbabilisticSplitBrainProtectionConfigBuilder.DEFAULT_SAMPLE_SIZE, splitBrainProtectionFunction.getMaxSampleSize());
+        assertEquals(ProbabilisticSplitBrainProtectionConfigBuilder.DEFAULT_PHI_THRESHOLD,
+                splitBrainProtectionFunction.getSuspicionThreshold(), 0.01);
+        assertEquals(ProbabilisticSplitBrainProtectionConfigBuilder.DEFAULT_SAMPLE_SIZE,
+                splitBrainProtectionFunction.getMaxSampleSize());
     }
 
     @Override
@@ -2017,6 +2062,9 @@ public class YamlConfigBuilderTest extends AbstractConfigBuilderTest {
                 + "         batch-size: 100\n"
                 + "         class-name: LatestAccessMergePolicy\n"
                 + "      disable-per-entry-invalidation-events: true\n"
+                + "      merkle-tree:\n"
+                + "        enabled: true\n"
+                + "        depth: 20\n"
                 + "      hot-restart:\n"
                 + "        enabled: false\n"
                 + "        fsync: false\n"
@@ -2027,8 +2075,7 @@ public class YamlConfigBuilderTest extends AbstractConfigBuilderTest {
                 + "      partition-lost-listeners:\n"
                 + "        - com.your-package.YourPartitionLostListener\n"
                 + "      cache-entry-listeners:\n"
-                + "        cache-entry-listener:\n"
-                + "          old-value-required: false\n"
+                + "        - old-value-required: false\n"
                 + "          synchronous: false\n"
                 + "          cache-entry-listener-factory:\n"
                 + "            class-name: com.example.cache.MyEntryListenerFactory\n"
@@ -2059,6 +2106,8 @@ public class YamlConfigBuilderTest extends AbstractConfigBuilderTest {
         assertEquals("LatestAccessMergePolicy",
                 cacheConfig.getMergePolicyConfig().getPolicy());
         assertTrue(cacheConfig.isDisablePerEntryInvalidationEvents());
+        assertTrue(cacheConfig.getMerkleTreeConfig().isEnabled());
+        assertEquals(20, cacheConfig.getMerkleTreeConfig().getDepth());
         assertFalse(cacheConfig.getHotRestartConfig().isEnabled());
         assertFalse(cacheConfig.getHotRestartConfig().isFsync());
 
@@ -2486,7 +2535,7 @@ public class YamlConfigBuilderTest extends AbstractConfigBuilderTest {
         assertFalse(wanReplicationRef.isRepublishingEnabled());
         assertEquals("PassThroughMergePolicy", wanReplicationRef.getMergePolicyClassName());
         assertEquals(1, wanReplicationRef.getFilters().size());
-        assertEquals("com.example.SampleFilter".toLowerCase(), wanReplicationRef.getFilters().get(0).toLowerCase());
+        assertEquals(lowerCaseInternal("com.example.SampleFilter"), lowerCaseInternal(wanReplicationRef.getFilters().get(0)));
     }
 
     @Override
@@ -2550,7 +2599,7 @@ public class YamlConfigBuilderTest extends AbstractConfigBuilderTest {
     }
 
     @Override
-    @Test(expected = IllegalArgumentException.class)
+    @Test(expected = SchemaViolationConfigurationException.class)
     public void testAttributeConfig_noName_emptyTag() {
         String yaml = ""
                 + "hazelcast:\n"
@@ -2568,7 +2617,7 @@ public class YamlConfigBuilderTest extends AbstractConfigBuilderTest {
     }
 
     @Override
-    @Test(expected = IllegalArgumentException.class)
+    @Test(expected = SchemaViolationConfigurationException.class)
     public void testAttributeConfig_noName_singleTag() {
         String yaml = ""
                 + "hazelcast:\n"
@@ -2580,7 +2629,7 @@ public class YamlConfigBuilderTest extends AbstractConfigBuilderTest {
     }
 
     @Override
-    @Test(expected = IllegalArgumentException.class)
+    @Test(expected = SchemaViolationConfigurationException.class)
     public void testAttributeConfig_noExtractor() {
         String yaml = ""
                 + "hazelcast:\n"
@@ -2714,8 +2763,7 @@ public class YamlConfigBuilderTest extends AbstractConfigBuilderTest {
     }
 
     @Override
-    @Test(expected = InvalidConfigurationException.class)
-    @Ignore("Schema validation is supposed to fail with missing mandatory field: enabled")
+    @Test(expected = SchemaViolationConfigurationException.class)
     public void testNonLiteMemberConfigWithoutEnabledField() {
         String yaml = ""
                 + "hazelcast:\n"
@@ -2725,8 +2773,7 @@ public class YamlConfigBuilderTest extends AbstractConfigBuilderTest {
     }
 
     @Override
-    @Test(expected = InvalidConfigurationException.class)
-    @Ignore("Schema validation is supposed to fail with invalid boolean in enabled")
+    @Test(expected = SchemaViolationConfigurationException.class)
     public void testInvalidLiteMemberConfig() {
         String yaml = ""
                 + "hazelcast:\n"
@@ -2915,16 +2962,15 @@ public class YamlConfigBuilderTest extends AbstractConfigBuilderTest {
     @Test
     public void testAllowOverrideDefaultSerializers() {
         final String yaml = ""
-          + "hazelcast:\n"
-          + "  serialization:\n"
-          + "    allow-override-default-serializers: true\n";
+                + "hazelcast:\n"
+                + "  serialization:\n"
+                + "    allow-override-default-serializers: true\n";
 
         final Config config = new InMemoryYamlConfig(yaml);
         final boolean isAllowOverrideDefaultSerializers
-          = config.getSerializationConfig().isAllowOverrideDefaultSerializers();
+                = config.getSerializationConfig().isAllowOverrideDefaultSerializers();
         assertTrue(isAllowOverrideDefaultSerializers);
     }
-
 
     @Override
     @Test
@@ -3136,8 +3182,7 @@ public class YamlConfigBuilderTest extends AbstractConfigBuilderTest {
         } finally {
             IOUtil.closeResource(yamlResource);
         }
-        Set<PermissionConfig.PermissionType> permTypes = new HashSet<>(Arrays
-                .asList(PermissionConfig.PermissionType.values()));
+        Set<PermissionConfig.PermissionType> permTypes = new HashSet<>(asList(PermissionConfig.PermissionType.values()));
         for (PermissionConfig pc : config.getSecurityConfig().getClientPermissionConfigs()) {
             permTypes.remove(pc.getType());
         }
@@ -3376,6 +3421,30 @@ public class YamlConfigBuilderTest extends AbstractConfigBuilderTest {
 
     }
 
+    @Test
+    public void outboundPorts_asObject_ParsingTest() {
+        String yaml = ""
+                + "hazelcast:\n"
+                + "  network:\n"
+                + "    outbound-ports:\n"
+                + "      ports: 2500-3000\n"
+                + "      more-ports: 2600-3500\n";
+        Config actual = buildConfig(yaml);
+        assertEquals(new HashSet<>(asList("2500-3000", "2600-3500")), actual.getNetworkConfig().getOutboundPortDefinitions());
+    }
+
+    @Test
+    public void outboundPorts_asSequence_ParsingTest() {
+        String yaml = ""
+                + "hazelcast:\n"
+                + "  network:\n"
+                + "    outbound-ports:\n"
+                + "      - 1234-1999\n"
+                + "      - 2500\n";
+        Config actual = buildConfig(yaml);
+        assertEquals(new HashSet<>(asList("2500", "1234-1999")), actual.getNetworkConfig().getOutboundPortDefinitions());
+    }
+
     @Override
     protected Config buildCompleteAdvancedNetworkConfig() {
         String yaml = ""
@@ -3553,10 +3622,10 @@ public class YamlConfigBuilderTest extends AbstractConfigBuilderTest {
     @Test
     public void testSqlConfig() {
         String yaml = ""
-            + "hazelcast:\n"
-            + "  sql:\n"
-            + "    executor-pool-size: 10\n"
-            + "    statement-timeout-millis: 30\n";
+                + "hazelcast:\n"
+                + "  sql:\n"
+                + "    executor-pool-size: 10\n"
+                + "    statement-timeout-millis: 30\n";
         Config config = buildConfig(yaml);
         SqlConfig sqlConfig = config.getSqlConfig();
         assertEquals(10, sqlConfig.getExecutorPoolSize());
@@ -3569,9 +3638,9 @@ public class YamlConfigBuilderTest extends AbstractConfigBuilderTest {
         String yaml = ""
                 + "hazelcast:\n"
                 + "  split-brain-protection:\n"
-                + "    enabled: true\n"
-                + "    name: q\n"
-                + "    protect-on:   WRITE   \n";
+                + "    name-of-split-brain-protection:\n"
+                + "      enabled: true\n"
+                + "      protect-on:   WRITE   \n";
 
         buildConfig(yaml);
     }
@@ -3594,7 +3663,7 @@ public class YamlConfigBuilderTest extends AbstractConfigBuilderTest {
         PersistentMemoryConfig pmemConfig = yamlConfig.getNativeMemoryConfig()
                 .getPersistentMemoryConfig();
         List<PersistentMemoryDirectoryConfig> directoryConfigs = pmemConfig
-                                                                           .getDirectoryConfigs();
+                .getDirectoryConfigs();
         assertFalse(pmemConfig.isEnabled());
         assertEquals(MOUNTED, pmemConfig.getMode());
         assertEquals(2, directoryConfigs.size());
@@ -3604,6 +3673,29 @@ public class YamlConfigBuilderTest extends AbstractConfigBuilderTest {
         assertEquals(0, dir0Config.getNumaNode());
         assertEquals("/mnt/pmem1", dir1Config.getDirectory());
         assertEquals(1, dir1Config.getNumaNode());
+    }
+
+    @Test
+    public void cacheEntryListenerConfigParsing() {
+        String yaml = "hazelcast:\n"
+                + "  cache:\n"
+                + "    my-cache:\n"
+                + "      cache-entry-listeners:\n"
+                + "        - old-value-required: true\n"
+                + "          synchronous: true\n"
+                + "          cache-entry-listener-factory:\n"
+                + "            class-name: com.example.cache.MyEntryListenerFactory\n"
+                + "          cache-entry-event-filter-factory:\n"
+                + "            class-name: com.example.cache.MyEntryEventFilterFactory";
+        Config actual = buildConfig(yaml);
+        CacheSimpleEntryListenerConfig expected = new CacheSimpleEntryListenerConfig()
+                .setOldValueRequired(true)
+                .setSynchronous(true)
+                .setCacheEntryListenerFactory("com.example.cache.MyEntryListenerFactory")
+                .setCacheEntryEventFilterFactory("com.example.cache.MyEntryEventFilterFactory");
+
+        List<CacheSimpleEntryListenerConfig> actualListeners = actual.findCacheConfig("my-cache").getCacheEntryListeners();
+        assertEquals(singletonList(expected), actualListeners);
     }
 
     @Override

@@ -15,6 +15,7 @@
  */
 package com.hazelcast.jet.python;
 
+import com.hazelcast.config.Config;
 import com.hazelcast.jet.SimpleTestInClusterSupport;
 import com.hazelcast.jet.pipeline.BatchStage;
 import com.hazelcast.jet.pipeline.Pipeline;
@@ -63,7 +64,8 @@ public class PythonServiceTest extends SimpleTestInClusterSupport {
 
     @BeforeClass
     public static void beforeClass() {
-        initialize(2, null);
+        Config config = smallInstanceWithResourceUploadConfig();
+        initialize(1, config);
         assumeThatNoWindowsOS();
     }
 
@@ -97,7 +99,7 @@ public class PythonServiceTest extends SimpleTestInClusterSupport {
         mapped.writeTo(AssertionSinks.assertAnyOrder(
                  "Python didn't map the items correctly", items.stream().map(i -> "echo-" + i).collect(toList())
         ));
-        instance().newJob(p).join();
+        instance().getJet().newJob(p).join();
     }
 
     @Test
@@ -118,7 +120,7 @@ public class PythonServiceTest extends SimpleTestInClusterSupport {
         mapped.writeTo(AssertionSinks.assertAnyOrder(
                 "Python didn't map the items correctly", items.stream().map(i -> "echo-" + i).collect(toList())
         ));
-        instance().newJob(p).join();
+        instance().getJet().newJob(p).join();
     }
 
     @Test
@@ -140,7 +142,7 @@ public class PythonServiceTest extends SimpleTestInClusterSupport {
         mapped.writeTo(AssertionSinks.assertAnyOrder(
                  "Python didn't map the items correctly", items.stream().map(i -> "echo-" + i).collect(toList())
         ));
-        instance().newJob(p).join();
+        instance().getJet().newJob(p).join();
     }
 
     @Test
@@ -161,7 +163,7 @@ public class PythonServiceTest extends SimpleTestInClusterSupport {
         mapped.writeTo(AssertionSinks.assertAnyOrder(
                  "Python didn't map the items correctly", items.stream().map(i -> "echo-" + i).collect(toList())
         ));
-        instance().newJob(p).join();
+        instance().getJet().newJob(p).join();
     }
 
     @Test
@@ -183,7 +185,7 @@ public class PythonServiceTest extends SimpleTestInClusterSupport {
         mapped.writeTo(AssertionSinks.assertAnyOrder(
                  "Python didn't map the items correctly", items.stream().map(i -> "echo-" + i).collect(toList())
         ));
-        instance().newJob(p).join();
+        instance().getJet().newJob(p).join();
     }
 
     @Test
@@ -212,7 +214,7 @@ public class PythonServiceTest extends SimpleTestInClusterSupport {
         mapped.writeTo(AssertionSinks.assertAnyOrder(
                 "Python didn't map the items correctly", items.stream().map(i -> "echo-" + i).collect(toList())
         ));
-        instance().newJob(p).join();
+        instance().getJet().newJob(p).join();
         assertTrue("Init script didn't run", new File(baseDir, outcomeFilename).isFile());
     }
 
@@ -242,7 +244,7 @@ public class PythonServiceTest extends SimpleTestInClusterSupport {
         mapped.writeTo(AssertionSinks.assertAnyOrder(
                 "Python didn't map the items correctly", items.stream().map(i -> "echo-" + i).collect(toList())
         ));
-        instance().newJob(p).join();
+        instance().getJet().newJob(p).join();
         assertTrue("Cleanup script didn't run", new File(baseDir, outcomeFilename).isFile());
     }
 
@@ -263,7 +265,7 @@ public class PythonServiceTest extends SimpleTestInClusterSupport {
 
         // Then
         try {
-            instance().newJob(p).join();
+            instance().getJet().newJob(p).join();
             fail();
         } catch (CompletionException ex) {
             // expected
@@ -287,7 +289,7 @@ public class PythonServiceTest extends SimpleTestInClusterSupport {
 
         // Then
         try {
-            instance().newJob(p).join();
+            instance().getJet().newJob(p).join();
             fail();
         } catch (CompletionException ex) {
             // expected
@@ -312,7 +314,7 @@ public class PythonServiceTest extends SimpleTestInClusterSupport {
 
         // Then
         try {
-            instance().newJob(p).join();
+            instance().getJet().newJob(p).join();
             fail();
         } catch (CompletionException ex) {
             // expected
@@ -337,7 +339,7 @@ public class PythonServiceTest extends SimpleTestInClusterSupport {
 
         // Then
         try {
-            instance().newJob(p).join();
+            instance().getJet().newJob(p).join();
             fail();
         } catch (CompletionException ex) {
             // expected

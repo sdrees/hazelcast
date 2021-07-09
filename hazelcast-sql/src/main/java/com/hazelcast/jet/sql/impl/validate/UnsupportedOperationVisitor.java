@@ -1,15 +1,15 @@
 /*
- * Copyright (c) 2008-2021, Hazelcast, Inc. All Rights Reserved.
+ * Copyright 2021 Hazelcast Inc.
  *
- * Licensed under the Apache License, Version 2.0 (the "License");
+ * Licensed under the Hazelcast Community License (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
  *
- * http://www.apache.org/licenses/LICENSE-2.0
+ * http://hazelcast.com/hazelcast-community-license
  *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * WITHOUT WARRANTIES OF ANY KIND, either express or implied.
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
@@ -23,6 +23,7 @@ import com.hazelcast.jet.sql.impl.parse.SqlDropJob;
 import com.hazelcast.jet.sql.impl.parse.SqlDropSnapshot;
 import com.hazelcast.jet.sql.impl.parse.SqlOption;
 import com.hazelcast.jet.sql.impl.parse.SqlShowStatement;
+import com.hazelcast.jet.sql.impl.schema.JetDynamicTableFunction;
 import com.hazelcast.sql.impl.calcite.validate.HazelcastSqlOperatorTable;
 import com.hazelcast.sql.impl.calcite.validate.types.HazelcastTypeUtils;
 import org.apache.calcite.runtime.CalciteContextException;
@@ -62,8 +63,6 @@ import static com.hazelcast.jet.sql.impl.validate.ValidatorResource.RESOURCE;
 @SuppressWarnings("checkstyle:ExecutableStatementCount")
 public final class UnsupportedOperationVisitor extends SqlBasicVisitor<Void> {
 
-    public static final UnsupportedOperationVisitor INSTANCE = new UnsupportedOperationVisitor();
-
     /**
      * A set of {@link SqlKind} values that are supported without any additional validation.
      */
@@ -73,11 +72,6 @@ public final class UnsupportedOperationVisitor extends SqlBasicVisitor<Void> {
      * A set of supported operators for functions.
      */
     private static final Set<SqlOperator> SUPPORTED_OPERATORS;
-
-    /**
-     * A set of supported functions.
-     */
-    private static final Set<SqlOperator> SUPPORTED_FUNCTIONS;
 
     static {
         // We define all supported features explicitly instead of getting them from predefined sets of SqlKind class.
@@ -89,6 +83,9 @@ public final class UnsupportedOperationVisitor extends SqlBasicVisitor<Void> {
         SUPPORTED_KINDS.add(SqlKind.AND);
         SUPPORTED_KINDS.add(SqlKind.OR);
         SUPPORTED_KINDS.add(SqlKind.NOT);
+        SUPPORTED_KINDS.add(SqlKind.IN);
+        SUPPORTED_KINDS.add(SqlKind.NOT_IN);
+        SUPPORTED_KINDS.add(SqlKind.BETWEEN);
 
         // Arithmetics
         SUPPORTED_KINDS.add(SqlKind.PLUS);
@@ -123,6 +120,10 @@ public final class UnsupportedOperationVisitor extends SqlBasicVisitor<Void> {
         SUPPORTED_KINDS.add(SqlKind.LIKE);
         SUPPORTED_KINDS.add(SqlKind.TRIM);
 
+        SUPPORTED_KINDS.add(SqlKind.CASE);
+        SUPPORTED_KINDS.add(SqlKind.NULLIF);
+        SUPPORTED_KINDS.add(SqlKind.COALESCE);
+
         // Aggregations
         SUPPORTED_KINDS.add(SqlKind.COUNT);
         SUPPORTED_KINDS.add(SqlKind.MIN);
@@ -143,10 +144,19 @@ public final class UnsupportedOperationVisitor extends SqlBasicVisitor<Void> {
         SUPPORTED_KINDS.add(SqlKind.COLLECTION_TABLE);
         SUPPORTED_KINDS.add(SqlKind.ARGUMENT_ASSIGNMENT);
 
+        // Ordering
+        SUPPORTED_KINDS.add(SqlKind.NULLS_FIRST);
+        SUPPORTED_KINDS.add(SqlKind.NULLS_LAST);
+        SUPPORTED_KINDS.add(SqlKind.DESCENDING);
+
         // Supported operators
         SUPPORTED_OPERATORS = new HashSet<>();
 
         // Math
+        SUPPORTED_OPERATORS.add(HazelcastSqlOperatorTable.POWER);
+        SUPPORTED_OPERATORS.add(HazelcastSqlOperatorTable.SQUARE);
+        SUPPORTED_OPERATORS.add(HazelcastSqlOperatorTable.SQRT);
+        SUPPORTED_OPERATORS.add(HazelcastSqlOperatorTable.CBRT);
         SUPPORTED_OPERATORS.add(HazelcastSqlOperatorTable.COS);
         SUPPORTED_OPERATORS.add(HazelcastSqlOperatorTable.SIN);
         SUPPORTED_OPERATORS.add(HazelcastSqlOperatorTable.TAN);
@@ -154,6 +164,7 @@ public final class UnsupportedOperationVisitor extends SqlBasicVisitor<Void> {
         SUPPORTED_OPERATORS.add(HazelcastSqlOperatorTable.ACOS);
         SUPPORTED_OPERATORS.add(HazelcastSqlOperatorTable.ASIN);
         SUPPORTED_OPERATORS.add(HazelcastSqlOperatorTable.ATAN);
+        SUPPORTED_OPERATORS.add(HazelcastSqlOperatorTable.ATAN2);
         SUPPORTED_OPERATORS.add(HazelcastSqlOperatorTable.EXP);
         SUPPORTED_OPERATORS.add(HazelcastSqlOperatorTable.LN);
         SUPPORTED_OPERATORS.add(HazelcastSqlOperatorTable.LOG10);
@@ -179,6 +190,13 @@ public final class UnsupportedOperationVisitor extends SqlBasicVisitor<Void> {
         SUPPORTED_OPERATORS.add(HazelcastSqlOperatorTable.LTRIM);
         SUPPORTED_OPERATORS.add(HazelcastSqlOperatorTable.RTRIM);
         SUPPORTED_OPERATORS.add(HazelcastSqlOperatorTable.BTRIM);
+        SUPPORTED_OPERATORS.add(HazelcastSqlOperatorTable.REPLACE);
+        SUPPORTED_OPERATORS.add(HazelcastSqlOperatorTable.POSITION);
+
+        // Datetime
+        SUPPORTED_OPERATORS.add(HazelcastSqlOperatorTable.EXTRACT);
+        SUPPORTED_OPERATORS.add(HazelcastSqlOperatorTable.TO_TIMESTAMP_TZ);
+        SUPPORTED_OPERATORS.add(HazelcastSqlOperatorTable.TO_EPOCH_MILLIS);
 
         // Extensions
         SUPPORTED_OPERATORS.add(SqlOption.OPERATOR);
@@ -188,21 +206,19 @@ public final class UnsupportedOperationVisitor extends SqlBasicVisitor<Void> {
         SUPPORTED_OPERATORS.add(JetSqlOperatorTable.GENERATE_SERIES);
         SUPPORTED_OPERATORS.add(JetSqlOperatorTable.GENERATE_STREAM);
 
-        // Supported functions
-        SUPPORTED_FUNCTIONS = new HashSet<>();
-        SUPPORTED_FUNCTIONS.add(JetSqlOperatorTable.CSV_FILE);
-        SUPPORTED_FUNCTIONS.add(JetSqlOperatorTable.JSON_FILE);
-        SUPPORTED_FUNCTIONS.add(JetSqlOperatorTable.AVRO_FILE);
-        SUPPORTED_FUNCTIONS.add(JetSqlOperatorTable.PARQUET_FILE);
+        SUPPORTED_OPERATORS.add(JetSqlOperatorTable.CSV_FILE);
+        SUPPORTED_OPERATORS.add(JetSqlOperatorTable.JSON_FILE);
+        SUPPORTED_OPERATORS.add(JetSqlOperatorTable.AVRO_FILE);
+        SUPPORTED_OPERATORS.add(JetSqlOperatorTable.PARQUET_FILE);
     }
 
-    private UnsupportedOperationVisitor() {
-    }
+    // The top level select is used to filter out nested selects with FETCH/OFFSET
+    private SqlSelect topLevelSelect;
 
     @Override
     public Void visit(SqlCall call) {
-        // validation of custom functions is already performed as part of argument resolution in JetSqlOperatorTable
-        if (!SUPPORTED_FUNCTIONS.contains(call.getOperator())) {
+        // remove the branch when MAP/MAP_VALUE_CONSTRUCTOR gets proper support
+        if (!(call.getOperator() instanceof JetDynamicTableFunction)) {
             processCall(call);
 
             call.getOperator().acceptCall(this, call);
@@ -216,8 +232,7 @@ public final class UnsupportedOperationVisitor extends SqlBasicVisitor<Void> {
         if (type.getTypeNameSpec() instanceof SqlUserDefinedTypeNameSpec) {
             SqlIdentifier typeName = type.getTypeName();
 
-            if (HazelcastTypeUtils.isObjectIdentifier(typeName)
-                    || HazelcastTypeUtils.isTimestampWithTimeZoneIdentifier(typeName)) {
+            if (HazelcastTypeUtils.isObjectIdentifier(typeName)) {
                 return null;
             }
         }
@@ -257,6 +272,10 @@ public final class UnsupportedOperationVisitor extends SqlBasicVisitor<Void> {
     public Void visit(SqlLiteral literal) {
         SqlTypeName typeName = literal.getTypeName();
 
+        if (HazelcastTypeUtils.isIntervalType(typeName)) {
+            return null;
+        }
+
         switch (typeName) {
             case BOOLEAN:
             case TINYINT:
@@ -271,6 +290,10 @@ public final class UnsupportedOperationVisitor extends SqlBasicVisitor<Void> {
                 // string literals to be of CHAR type, not VARCHAR. Validated type
                 // of string literals is still VARCHAR in HazelcastSqlValidator.
             case CHAR:
+            case TIMESTAMP:
+            case TIMESTAMP_WITH_LOCAL_TIME_ZONE:
+            case DATE:
+            case TIME:
             case ANY:
             case NULL:
                 return null;
@@ -319,6 +342,10 @@ public final class UnsupportedOperationVisitor extends SqlBasicVisitor<Void> {
                 processSelect((SqlSelect) call);
                 break;
 
+            case UPDATE:
+            case DELETE:
+                break;
+
             case JOIN:
                 processJoin((SqlJoin) call);
                 break;
@@ -338,12 +365,13 @@ public final class UnsupportedOperationVisitor extends SqlBasicVisitor<Void> {
     }
 
     private void processSelect(SqlSelect select) {
-        if (select.hasOrderBy()) {
-            throw unsupported(select.getOrderList(), SqlKind.ORDER_BY);
-        }
-
-        if (select.getOffset() != null) {
-            throw unsupported(select.getOffset(), "OFFSET");
+        if (topLevelSelect == null) {
+            topLevelSelect = select;
+        } else {
+            // Check for nested fetch offset
+            if (select.getFetch() != null || select.getOffset() != null) {
+                throw error(select, "FETCH/OFFSET is only supported for the top-level SELECT");
+            }
         }
     }
 
@@ -388,7 +416,11 @@ public final class UnsupportedOperationVisitor extends SqlBasicVisitor<Void> {
         return error(node, ValidatorResource.RESOURCE.notSupported(name));
     }
 
-    private CalciteContextException error(SqlNode node, ExInst<SqlValidatorException> error) {
+    private static CalciteContextException error(SqlNode node, ExInst<SqlValidatorException> error) {
         return SqlUtil.newContextException(node.getParserPosition(), error);
+    }
+
+    public static CalciteContextException error(SqlNode node, String name) {
+        return error(node, RESOURCE.error(name));
     }
 }

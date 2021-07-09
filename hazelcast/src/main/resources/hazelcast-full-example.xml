@@ -1710,6 +1710,9 @@
             <partition-lost-listener>com.your-package.YourPartitionLostListener</partition-lost-listener>
         </partition-lost-listeners>
         <merge-policy batch-size="100">LatestAccessMergePolicy</merge-policy>
+        <merkle-tree enabled="false">
+            <depth>10</depth>
+        </merkle-tree>
         <hot-restart enabled="false">
             <fsync>false</fsync>
         </hot-restart>
@@ -2200,6 +2203,8 @@
                 Currently, the realms support configuring <authentication> and/or <identity>. Only one type of authentication
                 configuration and one type of identity configuration is allowed per the realm.
                 Authentication types:
+                * <simple>
+                    Simple authentication where users with their username, password and roles are directly listed in the configuration
                 * <jaas>
                     Defines JAAS authentication - i.e. list of <login-modules> and its optional <properties>
                 * <tls>
@@ -2227,7 +2232,20 @@
                 * <kerberos>
                     Uses Kerberos ticket (wrapped as GSS-API init token) as the identity.
             -->
-            <realm name="mr">
+            <realm name="simpleRealm">
+                <authentication>
+                    <simple>
+                        <user username="test" password="a1234">
+                            <role>monitor</role>
+                            <role>hazelcast</role>
+                        </user>
+                        <user username="dev" password="secret">
+                            <role>root</role>
+                        </user>
+                    </simple>
+                </authentication>
+            </realm>
+            <realm name="jaasRealm">
                 <authentication>
                     <jaas>
                         <login-module class-name="com.hazelcast.examples.MyRequiredLoginModule" usage="REQUIRED">
@@ -2244,22 +2262,6 @@
                         </properties>
                     </credentials-factory>
                 </identity>
-            </realm>
-            <realm name="cr">
-                <authentication>
-                    <jaas>
-                        <login-module class-name="com.hazelcast.examples.MyOptionalLoginModule" usage="OPTIONAL">
-                            <properties>
-                                <property name="property">value</property>
-                            </properties>
-                        </login-module>
-                        <login-module class-name="com.hazelcast.examples.MyRequiredLoginModule" usage="REQUIRED">
-                            <properties>
-                                <property name="property">value</property>
-                            </properties>
-                        </login-module>
-                    </jaas>
-                </authentication>
             </realm>
             <realm name="ldapRealm">
                 <authentication>
@@ -2378,8 +2380,8 @@
                 </authentication>
             </realm>
         </realms>
-        <member-authentication realm="mr"/>
-        <client-authentication realm="cr"/>
+        <member-authentication realm="jaasRealm"/>
+        <client-authentication realm="simpleRealm"/>
         <client-permission-policy class-name="com.hazelcast.examples.MyPermissionPolicy">
             <properties>
                 <property name="property">value</property>
@@ -3611,6 +3613,12 @@
 
         Configuration element's name is <jet>.
 
+        It has the following attributes:
+        - enabled:
+            Enables or disables Jet Service.
+        - resource-upload-enabled
+            Enables or disables resource uploading for Jet jobs.
+
         It has the following sub-elements:
 
         * <instance>:
@@ -3652,6 +3660,23 @@
                 Feature is disabled by default. If you enable this option in open-source,
                 the member will fail to start, you need Enterprise to run it and obtain a
                 license from Hazelcast.
+            * <max-processor-accumulated-records>:
+                Sets the maximum number of records that can be accumulated by any single
+                processor instance.
+                Operations like grouping, sorting or joining require certain amount of
+                records to be accumulated before they can proceed. You can set this option
+                to reduce the probability of OutOfMemoryError.
+                This option applies to each processor instance separately, hence the
+                effective limit of records accumulated by each cluster member is influenced
+                by the vertex's localParallelism and the number of jobs in the cluster.
+                Currently, maxProcessorAccumulatedRecords limits:
+                1. number of items sorted by the sort operation
+                2. number of distinct keys accumulated by aggregation operations
+                3. number of entries in each hash-join lookup table
+                4. number of entries in stateful transforms
+                5. number of distinct items in distinct operation
+                Note: the limit does not apply to streaming aggregations.
+                The default value is Long.MAX_VALUE.
 
         * <edge-defaults>
             A configuration object for a DAG `Edge` that holds fine-tuning parameters
@@ -3697,13 +3722,14 @@
                 the last acked byte.
                 This setting has no effect on a non-distributed edge.
     -->
-    <jet>
+    <jet enabled="true" resource-upload-enabled="true">
         <instance>
             <cooperative-thread-count>4</cooperative-thread-count>
             <flow-control-period>100</flow-control-period>
             <backup-count>1</backup-count>
             <scale-up-delay-millis>10000</scale-up-delay-millis>
             <lossless-restart-enabled>false</lossless-restart-enabled>
+            <max-processor-accumulated-records>1000000000</max-processor-accumulated-records>
         </instance>
         <edge-defaults>
             <queue-size>1024</queue-size>

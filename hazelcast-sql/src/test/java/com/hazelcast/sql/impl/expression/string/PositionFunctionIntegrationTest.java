@@ -1,15 +1,15 @@
 /*
- * Copyright (c) 2008-2021, Hazelcast, Inc. All Rights Reserved.
+ * Copyright 2021 Hazelcast Inc.
  *
- * Licensed under the Apache License, Version 2.0 (the "License");
+ * Licensed under the Hazelcast Community License (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
  *
- * http://www.apache.org/licenses/LICENSE-2.0
+ * http://hazelcast.com/hazelcast-community-license
  *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * WITHOUT WARRANTIES OF ANY KIND, either express or implied.
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
@@ -23,7 +23,7 @@ import com.hazelcast.sql.impl.SqlDataSerializerHook;
 import com.hazelcast.sql.impl.expression.ConstantExpression;
 import com.hazelcast.sql.impl.expression.ExpressionTestSupport;
 import com.hazelcast.sql.impl.type.QueryDataType;
-import com.hazelcast.test.HazelcastParallelClassRunner;
+import com.hazelcast.test.HazelcastSerialClassRunner;
 import com.hazelcast.test.annotation.ParallelJVMTest;
 import com.hazelcast.test.annotation.QuickTest;
 import org.junit.Test;
@@ -36,7 +36,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.fail;
 
-@RunWith(HazelcastParallelClassRunner.class)
+@RunWith(HazelcastSerialClassRunner.class)
 @Category({QuickTest.class, ParallelJVMTest.class})
 public class PositionFunctionIntegrationTest extends ExpressionTestSupport {
 
@@ -110,13 +110,13 @@ public class PositionFunctionIntegrationTest extends ExpressionTestSupport {
         checkError(sql("?", "?"), "Parameter at position 1 must be of VARCHAR type, but BOOLEAN was found (consider adding an explicit CAST)", STRING_VAL, BOOLEAN_VAL);
         checkError(sql("?", "?"), "Parameter at position 0 must be of VARCHAR type, but BOOLEAN was found (consider adding an explicit CAST)", BOOLEAN_VAL, STRING_VAL);
 
-        checkError(sql("?", "?"), "Parameter at position 0 must be of VARCHAR type, but TIMESTAMP_WITH_TIME_ZONE was found (consider adding an explicit CAST)", OFFSET_DATE_TIME_VAL, OFFSET_DATE_TIME_VAL);
-        checkError(sql("?", "?"), "Parameter at position 1 must be of VARCHAR type, but TIMESTAMP_WITH_TIME_ZONE was found (consider adding an explicit CAST)", STRING_VAL, OFFSET_DATE_TIME_VAL);
-        checkError(sql("?", "?"), "Parameter at position 0 must be of VARCHAR type, but TIMESTAMP_WITH_TIME_ZONE was found (consider adding an explicit CAST)", OFFSET_DATE_TIME_VAL, STRING_VAL);
+        checkError(sql("?", "?"), "Parameter at position 0 must be of VARCHAR type, but TIMESTAMP WITH TIME ZONE was found (consider adding an explicit CAST)", OFFSET_DATE_TIME_VAL, OFFSET_DATE_TIME_VAL);
+        checkError(sql("?", "?"), "Parameter at position 1 must be of VARCHAR type, but TIMESTAMP WITH TIME ZONE was found (consider adding an explicit CAST)", STRING_VAL, OFFSET_DATE_TIME_VAL);
+        checkError(sql("?", "?"), "Parameter at position 0 must be of VARCHAR type, but TIMESTAMP WITH TIME ZONE was found (consider adding an explicit CAST)", OFFSET_DATE_TIME_VAL, STRING_VAL);
 
         checkError(sql("?", "?", "?"), "Parameter at position 2 must be of INTEGER type, but VARCHAR was found (consider adding an explicit CAST)", STRING_VAL, STRING_VAL, STRING_VAL);
         checkError(sql("?", "?", "?"), "Parameter at position 2 must be of INTEGER type, but BOOLEAN was found (consider adding an explicit CAST)", STRING_VAL, STRING_VAL, BOOLEAN_VAL);
-        checkError(sql("?", "?", "?"), "Parameter at position 2 must be of INTEGER type, but TIMESTAMP_WITH_TIME_ZONE was found (consider adding an explicit CAST)", STRING_VAL, STRING_VAL, OFFSET_DATE_TIME_VAL);
+        checkError(sql("?", "?", "?"), "Parameter at position 2 must be of INTEGER type, but TIMESTAMP WITH TIME ZONE was found (consider adding an explicit CAST)", STRING_VAL, STRING_VAL, OFFSET_DATE_TIME_VAL);
     }
 
     @Test
@@ -166,7 +166,7 @@ public class PositionFunctionIntegrationTest extends ExpressionTestSupport {
                     fail("did not throw exception");
                 })
                 .isInstanceOf(HazelcastSqlException.class)
-                .hasMessageEndingWith(expectedError);
+                .hasMessageContaining(expectedError);
     }
 
     private String sql(Object text, Object search) {

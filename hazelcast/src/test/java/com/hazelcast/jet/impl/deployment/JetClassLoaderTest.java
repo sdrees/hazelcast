@@ -16,7 +16,8 @@
 
 package com.hazelcast.jet.impl.deployment;
 
-import com.hazelcast.jet.JetInstance;
+import com.hazelcast.config.Config;
+import com.hazelcast.core.HazelcastInstance;
 import com.hazelcast.jet.core.AbstractProcessor;
 import com.hazelcast.jet.core.DAG;
 import com.hazelcast.jet.core.JetTestSupport;
@@ -38,10 +39,12 @@ public class JetClassLoaderTest extends JetTestSupport {
         DAG dag = new DAG();
         dag.newVertex("v", LeakClassLoaderP::new).localParallelism(1);
 
-        JetInstance instance = createJetMember();
+        Config config = smallInstanceConfig();
+        config.getJetConfig().setResourceUploadEnabled(true);
+        HazelcastInstance instance = createHazelcastInstance(config);
 
         // When
-        instance.newJob(dag).join();
+        instance.getJet().newJob(dag).join();
 
         // Then
         assertTrue("The classloader should have been shutdown after job completion",

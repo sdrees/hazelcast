@@ -1,15 +1,15 @@
 /*
- * Copyright (c) 2008-2021, Hazelcast, Inc. All Rights Reserved.
+ * Copyright 2021 Hazelcast Inc.
  *
- * Licensed under the Apache License, Version 2.0 (the "License");
+ * Licensed under the Hazelcast Community License (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
  *
- * http://www.apache.org/licenses/LICENSE-2.0
+ * http://hazelcast.com/hazelcast-community-license
  *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * WITHOUT WARRANTIES OF ANY KIND, either express or implied.
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
@@ -22,13 +22,16 @@ import com.hazelcast.sql.impl.type.QueryDataTypeFamily;
 import org.apache.calcite.rel.type.RelDataType;
 import org.apache.calcite.rel.type.RelDataTypeFactory;
 import org.apache.calcite.rel.type.RelDataTypeField;
+import org.apache.calcite.sql.SqlCallBinding;
 import org.apache.calcite.sql.SqlIdentifier;
+import org.apache.calcite.sql.SqlKind;
 import org.apache.calcite.sql.type.SqlTypeFamily;
 import org.apache.calcite.sql.type.SqlTypeName;
 
 import java.util.HashMap;
 import java.util.Map;
 
+import static com.hazelcast.internal.util.StringUtil.equalsIgnoreCase;
 import static org.apache.calcite.sql.type.SqlTypeFamily.INTERVAL_DAY_TIME;
 import static org.apache.calcite.sql.type.SqlTypeName.DAY_INTERVAL_TYPES;
 import static org.apache.calcite.sql.type.SqlTypeName.INTERVAL_DAY_SECOND;
@@ -88,6 +91,8 @@ public final class HazelcastTypeUtils {
         // The inverse mapping is not needed, because we map multiple interval type to two internal types.
         HZ_TO_CALCITE.put(QueryDataTypeFamily.INTERVAL_YEAR_MONTH, INTERVAL_YEAR_MONTH);
         HZ_TO_CALCITE.put(QueryDataTypeFamily.INTERVAL_DAY_SECOND, INTERVAL_DAY_SECOND);
+
+        CALCITE_TO_HZ.put(SqlTypeName.MAP, QueryDataType.MAP);
     }
 
     private HazelcastTypeUtils() {
@@ -135,12 +140,7 @@ public final class HazelcastTypeUtils {
     }
 
     public static boolean isObjectIdentifier(SqlIdentifier identifier) {
-        return identifier.isSimple() && SqlColumnType.OBJECT.name().equalsIgnoreCase(identifier.getSimple());
-    }
-
-    public static boolean isTimestampWithTimeZoneIdentifier(SqlIdentifier identifier) {
-        return identifier.isSimple()
-                && SqlColumnType.TIMESTAMP_WITH_TIME_ZONE.name().equalsIgnoreCase(identifier.getSimple());
+        return identifier.isSimple() && equalsIgnoreCase(SqlColumnType.OBJECT.name(), identifier.getSimple());
     }
 
     /**
@@ -286,7 +286,7 @@ public final class HazelcastTypeUtils {
         return precedence1 > precedence2 ? type1 : type2;
     }
 
-    private static int precedenceOf(RelDataType type) {
+    public static int precedenceOf(RelDataType type) {
         SqlTypeName typeName = type.getSqlTypeName();
 
         if (YEAR_INTERVAL_TYPES.contains(typeName)) {
@@ -330,5 +330,9 @@ public final class HazelcastTypeUtils {
         QueryDataType queryTo = toHazelcastType(targetType.getSqlTypeName());
 
         return queryFrom.getConverter().canConvertTo(queryTo.getTypeFamily());
+    }
+
+    public static boolean hasParameters(SqlCallBinding binding) {
+        return binding.operands().stream().anyMatch((operand) -> operand.getKind() == SqlKind.DYNAMIC_PARAM);
     }
 }

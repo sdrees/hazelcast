@@ -29,6 +29,7 @@ import com.hazelcast.config.security.KerberosAuthenticationConfig;
 import com.hazelcast.config.security.KerberosIdentityConfig;
 import com.hazelcast.config.security.LdapAuthenticationConfig;
 import com.hazelcast.config.security.RealmConfig;
+import com.hazelcast.config.security.SimpleAuthenticationConfig;
 import com.hazelcast.config.security.TlsAuthenticationConfig;
 import com.hazelcast.config.security.TokenIdentityConfig;
 import com.hazelcast.config.security.UsernamePasswordIdentityConfig;
@@ -300,6 +301,7 @@ public class ConfigXmlGenerator {
             tlsAuthenticationGenerator(gen, c.getTlsAuthenticationConfig());
             ldapAuthenticationGenerator(gen, c.getLdapAuthenticationConfig());
             kerberosAuthenticationGenerator(gen, c.getKerberosAuthenticationConfig());
+            simpleAuthenticationGenerator(gen, c.getSimpleAuthenticationConfig());
             gen.close();
         }
         if (c.isIdentityConfigured()) {
@@ -372,6 +374,23 @@ public class ConfigXmlGenerator {
                 .nodeIfContents("principal", c.getPrincipal());
         ldapAuthenticationGenerator(kerberosGen, c.getLdapAuthenticationConfig());
         kerberosGen.close();
+    }
+
+    private static void simpleAuthenticationGenerator(XmlGenerator gen, SimpleAuthenticationConfig c) {
+        if (c == null) {
+            return;
+        }
+        XmlGenerator simpleGen = gen.open("simple");
+        addClusterLoginElements(simpleGen, c).nodeIfContents("role-separator", c.getRoleSeparator());
+        for (String username : c.getUsernames()) {
+            simpleGen.open("user", "username", username, "password", c.getPassword(username));
+            for (String role : c.getRoles(username)) {
+                simpleGen.node("role", role);
+            }
+            // close <user> node
+            simpleGen.close();
+        }
+        simpleGen.close();
     }
 
     private static void kerberosIdentityGenerator(XmlGenerator gen, KerberosIdentityConfig c) {
@@ -1043,6 +1062,7 @@ public class ConfigXmlGenerator {
             gen.node("merge-policy", c.getMergePolicyConfig().getPolicy());
             appendEventJournalConfig(gen, c.getEventJournalConfig());
             appendHotRestartConfig(gen, c.getHotRestartConfig());
+            appendMerkleTreeConfig(gen, c.getMerkleTreeConfig());
 
             gen.node("disable-per-entry-invalidation-events", c.isDisablePerEntryInvalidationEvents())
                     .close();
@@ -1635,13 +1655,14 @@ public class ConfigXmlGenerator {
         JetConfig jetConfig = config.getJetConfig();
         InstanceConfig instanceConfig = jetConfig.getInstanceConfig();
         EdgeConfig edgeConfig = jetConfig.getDefaultEdgeConfig();
-        gen.open("jet")
+        gen.open("jet", "enabled", jetConfig.isEnabled(), "resource-upload-enabled", jetConfig.isResourceUploadEnabled())
                 .open("instance")
                     .node("cooperative-thread-count", instanceConfig.getCooperativeThreadCount())
                     .node("flow-control-period", instanceConfig.getFlowControlPeriodMs())
                     .node("backup-count", instanceConfig.getBackupCount())
                     .node("scale-up-delay-millis", instanceConfig.getScaleUpDelayMillis())
                     .node("lossless-restart-enabled", instanceConfig.isLosslessRestartEnabled())
+                    .node("max-processor-accumulated-records", instanceConfig.getMaxProcessorAccumulatedRecords())
                 .close()
                 .open("edge-defaults")
                     .node("queue-size", edgeConfig.getQueueSize())

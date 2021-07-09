@@ -21,29 +21,31 @@ import com.hazelcast.client.impl.clientside.HazelcastClientInstanceImpl;
 import com.hazelcast.client.impl.protocol.ClientMessage;
 import com.hazelcast.client.impl.protocol.codec.ClientGetDistributedObjectsCodec;
 import com.hazelcast.client.impl.spi.impl.ClientInvocation;
+import com.hazelcast.internal.serialization.Data;
 import com.hazelcast.internal.serialization.SerializationService;
 import com.hazelcast.jet.Job;
 import com.hazelcast.jet.config.JetConfig;
 import com.hazelcast.jet.config.JobConfig;
 import com.hazelcast.jet.impl.client.protocol.codec.JetExistsDistributedObjectCodec;
-import com.hazelcast.jet.impl.client.protocol.codec.JetGetJobIdsByNameCodec;
 import com.hazelcast.jet.impl.client.protocol.codec.JetGetJobIdsCodec;
 import com.hazelcast.jet.impl.client.protocol.codec.JetGetJobSummaryListCodec;
+import com.hazelcast.jet.impl.operation.GetJobIdsOperation.GetJobIdsResult;
 import com.hazelcast.jet.impl.util.ExceptionUtil;
 import com.hazelcast.logging.ILogger;
 
 import javax.annotation.Nonnull;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 import java.util.function.Function;
 
+import static com.hazelcast.jet.impl.operation.GetJobIdsOperation.ALL_JOBS;
 import static com.hazelcast.jet.impl.util.ExceptionUtil.rethrow;
-import static com.hazelcast.jet.impl.util.Util.toList;
 
 /**
  * Client-side {@code JetInstance} implementation
  */
-public class JetClientInstanceImpl extends AbstractJetInstance {
+public class JetClientInstanceImpl extends AbstractJetInstance<UUID> {
 
     private final HazelcastClientInstanceImpl client;
     private final SerializationService serializationService;
@@ -56,19 +58,24 @@ public class JetClientInstanceImpl extends AbstractJetInstance {
         ExceptionUtil.registerJetExceptions(hazelcastInstance.getClientExceptionFactory());
     }
 
-    @Nonnull
     @Override
-    public JetConfig getConfig() {
-        throw new UnsupportedOperationException("Jet Configuration is not available on the client");
+    public UUID getMasterId() {
+        return client.getClientClusterService().getMasterMember().getUuid();
     }
 
-    @Nonnull
     @Override
-    public List<Job> getJobs() {
-        return invokeRequestOnMasterAndDecodeResponse(JetGetJobIdsCodec.encodeRequest(), resp -> {
-            List<Long> jobs = JetGetJobIdsCodec.decodeResponse(resp);
-            return toList(jobs, jobId -> new ClientJobProxy(this, jobId));
-        });
+    public Map<UUID, GetJobIdsResult> getJobsInt(String onlyName, Long onlyJobId) {
+        return invokeRequestOnAnyMemberAndDecodeResponse(
+                JetGetJobIdsCodec.encodeRequest(onlyName, onlyJobId == null ? ALL_JOBS : onlyJobId),
+                resp -> {
+                    Data responseSerialized = JetGetJobIdsCodec.decodeResponse(resp).response;
+                    return serializationService.toObject(responseSerialized);
+                });
+    }
+
+    @Nonnull @Override
+    public JetConfig getConfig() {
+        throw new UnsupportedOperationException("Jet Configuration is not available on the client");
     }
 
     /**
@@ -101,19 +108,12 @@ public class JetClientInstanceImpl extends AbstractJetInstance {
     }
 
     @Override
-    public List<Long> getJobIdsByName(String name) {
-        return invokeRequestOnMasterAndDecodeResponse(JetGetJobIdsByNameCodec.encodeRequest(name),
-                response -> JetGetJobIdsByNameCodec.decodeResponse(response));
+    public Job newJobProxy(long jobId, UUID lightJobCoordinator) {
+        return new ClientJobProxy(this, jobId, lightJobCoordinator);
     }
 
-    @Override
-    public Job newJobProxy(long jobId, Object jobDefinition, JobConfig config) {
-        return new ClientJobProxy(this, jobId, jobDefinition, config);
-    }
-
-    @Override
-    public Job newJobProxy(long jobId) {
-        return new ClientJobProxy(this, jobId);
+    public Job newJobProxy(long jobId, boolean isLightJob, @Nonnull Object jobDefinition, @Nonnull JobConfig config) {
+        return new ClientJobProxy(this, jobId, isLightJob, jobDefinition, config);
     }
 
     @Override
@@ -123,8 +123,7 @@ public class JetClientInstanceImpl extends AbstractJetInstance {
 
     private <S> S invokeRequestOnMasterAndDecodeResponse(ClientMessage request,
                                                          Function<ClientMessage, Object> decoder) {
-        UUID masterUuid = client.getClientClusterService().getMasterMember().getUuid();
-        return invokeRequestAndDecodeResponse(masterUuid, request, decoder);
+        return invokeRequestAndDecodeResponse(getMasterId(), request, decoder);
     }
 
     private <S> S invokeRequestOnAnyMemberAndDecodeResponse(ClientMessage request,
@@ -142,5 +141,4 @@ public class JetClientInstanceImpl extends AbstractJetInstance {
             throw rethrow(t);
         }
     }
-
 }

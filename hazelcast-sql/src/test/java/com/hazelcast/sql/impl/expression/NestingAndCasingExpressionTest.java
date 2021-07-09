@@ -1,15 +1,15 @@
 /*
- * Copyright (c) 2008-2021, Hazelcast, Inc. All Rights Reserved.
+ * Copyright 2021 Hazelcast Inc.
  *
- * Licensed under the Apache License, Version 2.0 (the "License");
+ * Licensed under the Hazelcast Community License (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
  *
- * http://www.apache.org/licenses/LICENSE-2.0
+ * http://hazelcast.com/hazelcast-community-license
  *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * WITHOUT WARRANTIES OF ANY KIND, either express or implied.
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
@@ -18,21 +18,24 @@ package com.hazelcast.sql.impl.expression;
 
 import com.hazelcast.sql.SqlColumnType;
 import com.hazelcast.sql.impl.calcite.validate.HazelcastSqlOperatorTable;
-import com.hazelcast.test.HazelcastParallelClassRunner;
+import com.hazelcast.test.HazelcastSerialClassRunner;
 import com.hazelcast.test.annotation.ParallelJVMTest;
 import com.hazelcast.test.annotation.QuickTest;
 import org.apache.calcite.sql.SqlOperator;
+import org.junit.Before;
 import org.junit.Test;
 import org.junit.experimental.categories.Category;
 import org.junit.runner.RunWith;
 
 import java.lang.reflect.Field;
 import java.lang.reflect.Modifier;
+import java.time.LocalDateTime;
 import java.util.HashSet;
 import java.util.LinkedHashSet;
 import java.util.Set;
 import java.util.StringJoiner;
 
+import static com.hazelcast.internal.util.StringUtil.lowerCaseInternal;
 import static junit.framework.TestCase.assertFalse;
 import static junit.framework.TestCase.fail;
 
@@ -43,10 +46,10 @@ import static junit.framework.TestCase.fail;
  * <p>
  * Also ensures that function names are case-insensitive.
  */
-@RunWith(HazelcastParallelClassRunner.class)
+@RunWith(HazelcastSerialClassRunner.class)
 @Category({QuickTest.class, ParallelJVMTest.class})
 public class NestingAndCasingExpressionTest extends ExpressionTestSupport {
-    @Override
+    @Before
     public void before0() {
         put(1);
     }
@@ -112,33 +115,43 @@ public class NestingAndCasingExpressionTest extends ExpressionTestSupport {
     }
 
     @Test
+    public void test_IN() {
+        check(sql("(1 IN (1)) || (1 IN (1)) "));
+    }
+
+    @Test
+    public void test_NOT_IN() {
+        check(sql("(1 NOT IN (2)) || (1 NOT IN (2))"));
+    }
+
+    @Test
     public void test_EQUALS() {
-        check(sql("(1=?) || (1=?)"), 1, 1);
+        check(sql("(CAST(1 AS INT) = ?) || (1 = CAST(? AS TINYINT))"), 1, 1);
     }
 
     @Test
     public void test_NOT_EQUALS() {
-        check(sql("(1!=?) || (1!=?)"), 1, 1);
+        check(sql("(CAST(1 AS INT) != ?) || (1 != CAST(? AS TINYINT))"), 1, 1);
     }
 
     @Test
     public void test_GREATER_THAN() {
-        check(sql("(1>?) || (1>?)"), 1, 1);
+        check(sql("(CAST(1 AS INT) > ?) || (1 > CAST(? AS TINYINT))"), 1, 1);
     }
 
     @Test
     public void test_GREATER_THAN_OR_EQUAL() {
-        check(sql("(1>=?) || (1>=?)"), 1, 1);
+        check(sql("(CAST(1 AS INT) >= ?) || (1 >= CAST(? AS TINYINT))"), 1, 1);
     }
 
     @Test
     public void test_LESS_THAN() {
-        check(sql("(1<?) || (1<?)"), 1, 1);
+        check(sql("(CAST(1 AS INT) < ?) || (1 < CAST(? AS TINYINT))"), 1, 1);
     }
 
     @Test
     public void test_LESS_THAN_OR_EQUAL() {
-        check(sql("(1<=?) || (1<=?)"), 1, 1);
+        check(sql("(CAST(1 AS INT) <= ?) || (1 <= CAST(? AS TINYINT))"), 1, 1);
     }
 
     @Test
@@ -407,17 +420,78 @@ public class NestingAndCasingExpressionTest extends ExpressionTestSupport {
                 "xyz", "x", "X", "xyz", "y", "Y");
     }
 
+    @Test
     public void test_POSITION() {
         check(sql("POSITION(? IN ?) || POSITION(? IN ?)"),
                 "y", "xyz", "z", "xyz");
     }
 
+    @Test
+    public void test_BETWEEN_ASYMMETRIC() {
+        check(sqlWithWhere("BETWEEN ? AND ? "), SqlColumnType.INTEGER, 1, 1);
+    }
+
+    @Test
+    public void test_NOT_BETWEEN_ASYMMETRIC() {
+        check(sqlWithWhere("NOT BETWEEN ? AND ? "), SqlColumnType.INTEGER, 2, 2);
+    }
+
+    @Test
+    public void test_BETWEEN_SYMMETRIC() {
+        check(sqlWithWhere("BETWEEN SYMMETRIC ? AND ? "), SqlColumnType.INTEGER, 1, 1);
+    }
+
+    @Test
+    public void test_NOT_BETWEEN_SYMMETRIC() {
+        check(sqlWithWhere("NOT BETWEEN SYMMETRIC ? AND ? "), SqlColumnType.INTEGER, 2, 2);
+    }
+
+    @Test
+    public void test_CASE() {
+        check(sql("CASE WHEN ? THEN ? END || CASE WHEN ? THEN ? END"), true, "foo", true, "bar");
+    }
+
+    @Test
+    public void test_EXTRACT() {
+        check(sql("EXTRACT(MONTH FROM ?) || EXTRACT(MONTH FROM ?)"),
+                LocalDateTime.now(), LocalDateTime.now());
+    }
+
+    @Test
+    public void test_NULLIF() {
+        check(sql("NULLIF(1, ?) || NULLIF(1, ?)"), 1, 2);
+    }
+
+    @Test
+    public void test_COALESCE() {
+        check(sql("COALESCE('1', ?) || COALESCE('2', ?)"), "1", "2");
+    }
+
+    @Test
+    public void test_TO_TIMESTAMP_TZ() {
+        check(sql("TO_TIMESTAMP_TZ(?) || TO_TIMESTAMP_TZ(?)"), 1L, 1L);
+    }
+
+    public void test_TO_EPOCH_MILLIS() {
+        check(sql("TO_EPOCH_MILLIS(?) || TO_EPOCH_MILLIS(?)"), OFFSET_DATE_TIME_VAL, OFFSET_DATE_TIME_VAL);
+    }
+
     private void check(String sql, Object... params) {
         checkValue0(sql, SqlColumnType.VARCHAR, SKIP_VALUE_CHECK, params);
-        checkValue0(sql.toLowerCase(), SqlColumnType.VARCHAR, SKIP_VALUE_CHECK, params);
+        checkValue0(lowerCaseInternal(sql), SqlColumnType.VARCHAR, SKIP_VALUE_CHECK, params);
+    }
+
+    private void check(String sql, SqlColumnType type, Object... params) {
+        checkValue0(sql, type, SKIP_VALUE_CHECK, params);
+        checkValue0(lowerCaseInternal(sql), type, SKIP_VALUE_CHECK, params);
     }
 
     private String sql(String expression) {
         return "SELECT " + expression + " FROM map";
     }
+
+    private String sqlWithWhere(String expression) {
+        return "SELECT this FROM map WHERE this " + expression;
+    }
+
 }

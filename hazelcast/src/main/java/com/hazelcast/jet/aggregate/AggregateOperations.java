@@ -40,6 +40,10 @@ import com.hazelcast.jet.datamodel.Tuple2;
 import com.hazelcast.jet.datamodel.Tuple3;
 import com.hazelcast.jet.function.TriFunction;
 import com.hazelcast.jet.impl.aggregate.AggregateOpAggregator;
+import com.hazelcast.jet.pipeline.BatchStage;
+import com.hazelcast.jet.pipeline.BatchStageWithKey;
+import com.hazelcast.jet.pipeline.GeneralStage;
+import com.hazelcast.jet.pipeline.StageWithWindow;
 import com.hazelcast.map.IMap;
 
 import javax.annotation.Nonnull;
@@ -67,7 +71,7 @@ import static com.hazelcast.jet.datamodel.Tuple3.tuple3;
  * also create your own aggregate operation using the {@link
  * AggregateOperation#withCreate builder object}.
  *
- * @since 3.0
+ * @since Jet 3.0
  */
 public final class AggregateOperations {
 
@@ -644,7 +648,7 @@ public final class AggregateOperations {
      * @param <A> downstream operation's accumulator type
      * @param <R> downstream operation's result type
      *
-     * @since 3.1
+     * @since Jet 3.1
      */
     public static <T, A, R> AggregateOperation1<T, A, R> filtering(
             @Nonnull PredicateEx<? super T> filterFn,
@@ -698,7 +702,7 @@ public final class AggregateOperations {
      * @param <A> downstream operation's accumulator type
      * @param <R> downstream operation's result type
      *
-     * @since 3.1
+     * @since Jet 3.1
      */
     public static <T, U, A, R> AggregateOperation1<T, A, R> flatMapping(
             @Nonnull FunctionEx<? super T, ? extends Traverser<? extends U>> flatMapFn,

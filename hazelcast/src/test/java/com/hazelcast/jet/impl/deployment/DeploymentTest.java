@@ -17,8 +17,8 @@
 package com.hazelcast.jet.impl.deployment;
 
 import com.hazelcast.config.Config;
+import com.hazelcast.core.HazelcastInstance;
 import com.hazelcast.internal.util.FilteringClassLoader;
-import com.hazelcast.jet.JetInstance;
 import org.junit.BeforeClass;
 
 import static java.util.Collections.singletonList;
@@ -27,15 +27,16 @@ public class DeploymentTest extends AbstractDeploymentTest {
 
     @BeforeClass
     public static void beforeClass() {
-        Config config = new Config();
+        Config config = smallInstanceConfig();
+        config.getJetConfig().setResourceUploadEnabled(true);
         FilteringClassLoader filteringClassLoader = new FilteringClassLoader(singletonList("deployment"), null);
         config.setClassLoader(filteringClassLoader);
 
-        initialize(2, config);
+        initialize(MEMBER_COUNT, config);
     }
 
     @Override
-    protected JetInstance getJetInstance() {
+    protected HazelcastInstance getHazelcastInstance() {
         return instance();
     }
 }

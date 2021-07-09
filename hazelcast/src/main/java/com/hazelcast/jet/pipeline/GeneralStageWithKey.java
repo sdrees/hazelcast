@@ -23,6 +23,7 @@ import com.hazelcast.function.SupplierEx;
 import com.hazelcast.jet.Traverser;
 import com.hazelcast.jet.Traversers;
 import com.hazelcast.jet.aggregate.AggregateOperation1;
+import com.hazelcast.jet.config.InstanceConfig;
 import com.hazelcast.jet.core.Processor;
 import com.hazelcast.jet.core.ProcessorMetaSupplier;
 import com.hazelcast.jet.core.ProcessorSupplier;
@@ -49,7 +50,7 @@ import static com.hazelcast.jet.pipeline.GeneralStage.DEFAULT_PRESERVE_ORDER;
  * @param <T> type of the stream item
  * @param <K> type of the grouping key
  *
- * @since 3.0
+ * @since Jet 3.0
  */
 public interface GeneralStageWithKey<T, K> {
 
@@ -86,6 +87,10 @@ public interface GeneralStageWithKey<T, K> {
      * }</pre>
      * This code has the same result as {@link #rollingAggregate
      * latencies.groupingKey(Entry::getKey).rollingAggregate(summing())}.
+     * <p>
+     * This operation is subject to memory limits. See {@link
+     * InstanceConfig#setMaxProcessorAccumulatedRecords(long)} for more
+     * information.
      *
      * @param createFn function that returns the state object
      * @param mapFn    function that receives the state object and the input item and
@@ -124,6 +129,10 @@ public interface GeneralStageWithKey<T, K> {
      * <p>
      * The given functions must be stateless and {@linkplain
      * Processor#isCooperative() cooperative}.
+     * <p>
+     * This operation is subject to memory limits. See {@link
+     * InstanceConfig#setMaxProcessorAccumulatedRecords(long)} for more
+     * information.
      *
      * @param createFn function that returns the state object
      * @param filterFn predicate that receives the state object and the input item and
@@ -163,6 +172,10 @@ public interface GeneralStageWithKey<T, K> {
      * <p>
      * The given functions must be stateless and {@linkplain
      * Processor#isCooperative() cooperative}.
+     * <p>
+     * This operation is subject to memory limits. See {@link
+     * InstanceConfig#setMaxProcessorAccumulatedRecords(long)} for more
+     * information.
      *
      * @param createFn  function that returns the state object
      * @param flatMapFn function that receives the state object and the input item and
@@ -195,6 +208,10 @@ public interface GeneralStageWithKey<T, K> {
      * {@code {2, 9, 17, 12}}.
      * <p>
      * This stage is fault-tolerant and saves its state to the snapshot.
+     * <p>
+     * This operation is subject to memory limits. See {@link
+     * InstanceConfig#setMaxProcessorAccumulatedRecords(long)} for more
+     * information.
      *
      * @param aggrOp the aggregate operation to perform
      * @param <R> type of the aggregate operation result
@@ -383,7 +400,7 @@ public interface GeneralStageWithKey<T, K> {
      * @param <S> type of service object
      * @param <R> the future result type of the mapping function
      * @return the newly attached stage
-     * @since 4.0
+     * @since Jet 4.0
      *
      * @deprecated Jet now has first-class support for data rebalancing, see
      * {@link GeneralStage#rebalance()} and {@link GeneralStage#rebalance(FunctionEx)}.
@@ -438,7 +455,7 @@ public interface GeneralStageWithKey<T, K> {
      * @param <S> type of service object
      * @param <R> the future result type of the mapping function
      * @return the newly attached stage
-     * @since 4.0
+     * @since Jet 4.0
      *
      * @deprecated Jet now has first-class support for data rebalancing, see
      * {@link GeneralStage#rebalance()} and {@link GeneralStage#rebalance(FunctionEx)}.

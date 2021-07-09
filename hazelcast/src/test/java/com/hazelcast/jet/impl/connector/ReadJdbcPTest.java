@@ -50,8 +50,8 @@ public class ReadJdbcPTest extends SimpleTestInClusterSupport {
 
     @BeforeClass
     public static void setupClass() throws SQLException {
-        initialize(2, null);
         dbConnectionUrl = "jdbc:h2:mem:" + ReadJdbcPTest.class.getSimpleName() + ";DB_CLOSE_DELAY=-1";
+        initialize(2, null);
         // create and fill a table
         try (Connection conn = DriverManager.getConnection(dbConnectionUrl);
              Statement stmt = conn.createStatement()
@@ -85,7 +85,7 @@ public class ReadJdbcPTest extends SimpleTestInClusterSupport {
                 resultSet -> entry(resultSet.getInt(1), resultSet.getString(2))))
          .writeTo(assertAnyOrder(tableContents));
 
-        instance().newJob(p).join();
+        instance().getJet().newJob(p).join();
     }
 
     @Test
@@ -95,6 +95,6 @@ public class ReadJdbcPTest extends SimpleTestInClusterSupport {
                 resultSet -> entry(resultSet.getInt(1), resultSet.getString(2))))
          .writeTo(assertOrdered(tableContents));
 
-        instance().newJob(p).join();
+        instance().getJet().newJob(p).join();
     }
 }

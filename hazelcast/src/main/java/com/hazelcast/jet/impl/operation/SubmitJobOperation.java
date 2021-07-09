@@ -17,10 +17,11 @@
 package com.hazelcast.jet.impl.operation;
 
 import com.hazelcast.internal.nio.IOUtil;
+import com.hazelcast.internal.serialization.Data;
+import com.hazelcast.jet.config.JobConfig;
 import com.hazelcast.jet.impl.execution.init.JetInitDataSerializerHook;
 import com.hazelcast.nio.ObjectDataInput;
 import com.hazelcast.nio.ObjectDataOutput;
-import com.hazelcast.internal.serialization.Data;
 
 import java.io.IOException;
 import java.util.concurrent.CompletableFuture;
@@ -28,21 +29,28 @@ import java.util.concurrent.CompletableFuture;
 public class SubmitJobOperation extends AsyncJobOperation {
 
     // force serialization of fields to avoid sharing of the mutable instances if submitted to the master member
-    private Data dag;
-    private Data config;
+    private Data jobDefinition;
+    private Data serializedConfig;
+    private boolean isLightJob;
 
     public SubmitJobOperation() {
     }
 
-    public SubmitJobOperation(long jobId, Data dag, Data config) {
+    public SubmitJobOperation(long jobId, Data jobDefinition, Data config, boolean isLightJob) {
         super(jobId);
-        this.dag = dag;
-        this.config = config;
+        this.jobDefinition = jobDefinition;
+        this.serializedConfig = config;
+        this.isLightJob = isLightJob;
     }
 
     @Override
     public CompletableFuture<Void> doRun() {
-        return getJobCoordinationService().submitJob(jobId(), dag, config);
+        JobConfig jobConfig = getNodeEngine().getSerializationService().toObject(serializedConfig);
+        if (isLightJob) {
+            return getJobCoordinationService().submitLightJob(jobId(), jobDefinition, jobConfig);
+        } else {
+            return getJobCoordinationService().submitJob(jobId(), jobDefinition, jobConfig);
+        }
     }
 
     @Override
@@ -53,14 +61,16 @@ public class SubmitJobOperation extends AsyncJobOperation {
     @Override
     protected void writeInternal(ObjectDataOutput out) throws IOException {
         super.writeInternal(out);
-        IOUtil.writeData(out, dag);
-        IOUtil.writeData(out, config);
+        IOUtil.writeData(out, jobDefinition);
+        IOUtil.writeData(out, serializedConfig);
+        out.writeBoolean(isLightJob);
     }
 
     @Override
     protected void readInternal(ObjectDataInput in) throws IOException {
         super.readInternal(in);
-        dag = IOUtil.readData(in);
-        config = IOUtil.readData(in);
+        jobDefinition = IOUtil.readData(in);
+        serializedConfig = IOUtil.readData(in);
+        isLightJob = in.readBoolean();
     }
 }

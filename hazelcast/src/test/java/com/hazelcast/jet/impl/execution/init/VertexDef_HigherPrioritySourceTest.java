@@ -18,7 +18,6 @@ package com.hazelcast.jet.impl.execution.init;
 
 import com.hazelcast.internal.cluster.MemberInfo;
 import com.hazelcast.internal.cluster.impl.ClusterServiceImpl;
-import com.hazelcast.internal.cluster.impl.MembersView;
 import com.hazelcast.internal.serialization.InternalSerializationService;
 import com.hazelcast.jet.SimpleTestInClusterSupport;
 import com.hazelcast.jet.config.JobConfig;
@@ -39,6 +38,7 @@ import org.junit.experimental.categories.Category;
 
 import java.lang.reflect.Field;
 import java.util.Arrays;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
@@ -57,7 +57,7 @@ public class VertexDef_HigherPrioritySourceTest extends SimpleTestInClusterSuppo
     private static final ProcessorMetaSupplier MOCK_PMS =
             addresses -> address -> count -> nCopies(count, new DummyProcessor());
     private static NodeEngineImpl nodeEngineImpl;
-    private static MembersView membersView;
+    private static List<MemberInfo> membersView;
 
     private DAG dag = new DAG();
     private Vertex v1 = dag.newVertex("v1", MOCK_PMS);
@@ -71,7 +71,7 @@ public class VertexDef_HigherPrioritySourceTest extends SimpleTestInClusterSuppo
         initialize(1, null);
         nodeEngineImpl = getNodeEngineImpl(instance());
         ClusterServiceImpl clusterService = (ClusterServiceImpl) nodeEngineImpl.getClusterService();
-        membersView = clusterService.getMembershipManager().getMembersView();
+        membersView = clusterService.getMembershipManager().getMembersView().getMembers();
     }
 
     @Test
@@ -128,7 +128,7 @@ public class VertexDef_HigherPrioritySourceTest extends SimpleTestInClusterSuppo
 
     private void assertHigherPriorityVertices(Vertex... vertices) {
         Map<MemberInfo, ExecutionPlan> executionPlans =
-                createExecutionPlans(nodeEngineImpl, membersView, dag, 0, 0, new JobConfig(), 0);
+                createExecutionPlans(nodeEngineImpl, membersView, dag, 0, 0, new JobConfig(), 0, false);
         ExecutionPlan plan = executionPlans.values().iterator().next();
         SnapshotContext ssContext = new SnapshotContext(mock(ILogger.class), "job", 0, EXACTLY_ONCE);
         plan.initialize(nodeEngineImpl, 0, 0, ssContext, null,

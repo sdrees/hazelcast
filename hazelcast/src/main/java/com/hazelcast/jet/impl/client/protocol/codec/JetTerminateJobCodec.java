@@ -35,7 +35,7 @@ import static com.hazelcast.client.impl.protocol.codec.builtin.FixedSizeTypesCod
 
 /**
  */
-@Generated("b453c209f98485edf3e076644f65515a")
+@Generated("4626f71b31582e1d5b5c66d232b71189")
 public final class JetTerminateJobCodec {
     //hex: 0xFE0200
     public static final int REQUEST_MESSAGE_TYPE = 16646656;
@@ -43,7 +43,8 @@ public final class JetTerminateJobCodec {
     public static final int RESPONSE_MESSAGE_TYPE = 16646657;
     private static final int REQUEST_JOB_ID_FIELD_OFFSET = PARTITION_ID_FIELD_OFFSET + INT_SIZE_IN_BYTES;
     private static final int REQUEST_TERMINATE_MODE_FIELD_OFFSET = REQUEST_JOB_ID_FIELD_OFFSET + LONG_SIZE_IN_BYTES;
-    private static final int REQUEST_INITIAL_FRAME_SIZE = REQUEST_TERMINATE_MODE_FIELD_OFFSET + INT_SIZE_IN_BYTES;
+    private static final int REQUEST_LIGHT_JOB_COORDINATOR_FIELD_OFFSET = REQUEST_TERMINATE_MODE_FIELD_OFFSET + INT_SIZE_IN_BYTES;
+    private static final int REQUEST_INITIAL_FRAME_SIZE = REQUEST_LIGHT_JOB_COORDINATOR_FIELD_OFFSET + UUID_SIZE_IN_BYTES;
     private static final int RESPONSE_INITIAL_FRAME_SIZE = RESPONSE_BACKUP_ACKS_FIELD_OFFSET + BYTE_SIZE_IN_BYTES;
 
     private JetTerminateJobCodec() {
@@ -59,9 +60,19 @@ public final class JetTerminateJobCodec {
         /**
          */
         public int terminateMode;
+
+        /**
+         */
+        public @Nullable java.util.UUID lightJobCoordinator;
+
+        /**
+         * True if the lightJobCoordinator is received from the client, false otherwise.
+         * If this is false, lightJobCoordinator has the default value for its type.
+         */
+        public boolean isLightJobCoordinatorExists;
     }
 
-    public static ClientMessage encodeRequest(long jobId, int terminateMode) {
+    public static ClientMessage encodeRequest(long jobId, int terminateMode, @Nullable java.util.UUID lightJobCoordinator) {
         ClientMessage clientMessage = ClientMessage.createForEncode();
         clientMessage.setRetryable(false);
         clientMessage.setOperationName("Jet.TerminateJob");
@@ -70,6 +81,7 @@ public final class JetTerminateJobCodec {
         encodeInt(initialFrame.content, PARTITION_ID_FIELD_OFFSET, -1);
         encodeLong(initialFrame.content, REQUEST_JOB_ID_FIELD_OFFSET, jobId);
         encodeInt(initialFrame.content, REQUEST_TERMINATE_MODE_FIELD_OFFSET, terminateMode);
+        encodeUUID(initialFrame.content, REQUEST_LIGHT_JOB_COORDINATOR_FIELD_OFFSET, lightJobCoordinator);
         clientMessage.add(initialFrame);
         return clientMessage;
     }
@@ -80,6 +92,12 @@ public final class JetTerminateJobCodec {
         ClientMessage.Frame initialFrame = iterator.next();
         request.jobId = decodeLong(initialFrame.content, REQUEST_JOB_ID_FIELD_OFFSET);
         request.terminateMode = decodeInt(initialFrame.content, REQUEST_TERMINATE_MODE_FIELD_OFFSET);
+        if (initialFrame.content.length >= REQUEST_LIGHT_JOB_COORDINATOR_FIELD_OFFSET + UUID_SIZE_IN_BYTES) {
+            request.lightJobCoordinator = decodeUUID(initialFrame.content, REQUEST_LIGHT_JOB_COORDINATOR_FIELD_OFFSET);
+            request.isLightJobCoordinatorExists = true;
+        } else {
+            request.isLightJobCoordinatorExists = false;
+        }
         return request;
     }
 

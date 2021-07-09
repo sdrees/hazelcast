@@ -16,7 +16,7 @@
 
 package com.hazelcast.jet.impl.operation;
 
-import com.hazelcast.jet.impl.JetService;
+import com.hazelcast.jet.impl.JetServiceBackend;
 import com.hazelcast.jet.impl.execution.ExecutionContext;
 import com.hazelcast.jet.impl.execution.init.JetInitDataSerializerHook;
 import com.hazelcast.nio.ObjectDataInput;
@@ -27,15 +27,20 @@ import java.io.IOException;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
 
+import static com.hazelcast.jet.Util.idToString;
 import static com.hazelcast.jet.impl.util.LoggingUtil.logFine;
 import static java.util.Objects.requireNonNull;
+import static java.util.concurrent.CompletableFuture.completedFuture;
 
 public class SnapshotPhase1Operation extends AsyncJobOperation {
 
     /** If set to true, responses to SnapshotOperation will be postponed until set back to false. */
     // for test
     public static volatile boolean postponeResponses;
+
     private static final int RETRY_MS = 100;
+    private static final CompletableFuture<SnapshotPhase1Result> EMPTY_RESULT =
+            completedFuture(new SnapshotPhase1Result(0, 0, 0, null));
 
     private long executionId;
     private long snapshotId;
@@ -56,10 +61,12 @@ public class SnapshotPhase1Operation extends AsyncJobOperation {
 
     @Override
     protected CompletableFuture<SnapshotPhase1Result> doRun() {
-        JetService service = getService();
+        JetServiceBackend service = getService();
         ExecutionContext ctx = service.getJobExecutionService().assertExecutionContext(
                 getCallerAddress(), jobId(), executionId, getClass().getSimpleName()
         );
+        assert !ctx.isLightJob() : "snapshot phase 1 started on a light job: " + idToString(executionId);
+
         CompletableFuture<SnapshotPhase1Result> future =
             ctx.beginSnapshotPhase1(snapshotId, mapName, flags)
                 .exceptionally(exc -> new SnapshotPhase1Result(0, 0, 0, exc))
